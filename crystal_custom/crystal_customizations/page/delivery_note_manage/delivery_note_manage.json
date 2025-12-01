@@ -1,0 +1,26 @@
+{
+ "content": null,
+ "creation": "2025-11-27 14:36:42.553689",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2025-11-27 15:07:02.301199",
+ "modified_by": "Administrator",
+ "module": "Crystal Customizations",
+ "name": "delivery-note-manage",
+ "owner": "Administrator",
+ "page_name": "delivery-note-manage",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Customer"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 1,
+ "title": "Delivery Note Manager"
+}

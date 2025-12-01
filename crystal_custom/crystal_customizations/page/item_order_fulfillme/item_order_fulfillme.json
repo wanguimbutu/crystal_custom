@@ -1,0 +1,19 @@
+{
+ "content": null,
+ "creation": "2025-12-01 08:54:30.766884",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2025-12-01 08:54:30.766884",
+ "modified_by": "Administrator",
+ "module": "Crystal Customizations",
+ "name": "item-order-fulfillme",
+ "owner": "Administrator",
+ "page_name": "item-order-fulfillme",
+ "roles": [],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 1,
+ "title": "Item Order Fulfillment"
+}

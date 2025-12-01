@@ -1,0 +1,26 @@
+{
+ "content": null,
+ "creation": "2025-11-26 10:58:00.614483",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2025-11-26 10:59:52.459159",
+ "modified_by": "Administrator",
+ "module": "Crystal Customizations",
+ "name": "sales-order-manager",
+ "owner": "Administrator",
+ "page_name": "sales-order-manager",
+ "roles": [
+  {
+   "role": "Sales Manager"
+  },
+  {
+   "role": "Sales User"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 1,
+ "title": "Sales Order Manager"
+}

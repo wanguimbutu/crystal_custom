@@ -1,0 +1,23 @@
+{
+ "content": null,
+ "creation": "2025-11-26 16:39:06.732733",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2025-11-26 16:39:06.732733",
+ "modified_by": "Administrator",
+ "module": "Crystal Customizations",
+ "name": "customer-order-confi",
+ "owner": "Administrator",
+ "page_name": "customer-order-confi",
+ "roles": [
+  {
+   "role": "Customer"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 1,
+ "title": "Customer Order Confirmation"
+}
