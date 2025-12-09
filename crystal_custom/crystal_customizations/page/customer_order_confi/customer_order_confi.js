@@ -6,12 +6,14 @@ frappe.pages['customer-order-confi'].on_page_load = function(wrapper) {
 	});
 	new OrderConfirmationManager(page);
 }
+
 class OrderConfirmationManager {
     constructor(page) {
         this.page = page;
         this.filters = {};
         this.orders = [];
         this.called_orders = new Set();
+        this.not_picked_orders = new Set();
         this.setup_page();
         this.load_data();
     }
@@ -33,6 +35,15 @@ class OrderConfirmationManager {
             change: () => this.apply_filters()
         });
 
+        this.page.add_field({
+            label: 'Status',
+            fieldtype: 'Select',
+            fieldname: 'status_filter',
+            options: '\nAll\nPending Call\nCalled\nNot Picked',
+            default: 'All',
+            change: () => this.apply_filters()
+        });
+
         this.page.set_primary_action('Submit All Called Orders', () => {
             this.submit_all_called_orders();
         }, 'octicon octicon-check');
@@ -49,7 +60,9 @@ class OrderConfirmationManager {
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Sales Order',
-                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total', 'custom_delivery_region', 'custom_phone_number', 'owner', 'workflow_state'],
+                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total', 
+                         'custom_delivery_region', 'custom_phone_number', 'owner', 'workflow_state',
+                         'custom_call_not_picked', 'custom_call_notes'],
                 filters: {
                     docstatus: 0,
                     workflow_state: 'Pending Customer Order Reconfirmation'
@@ -58,8 +71,15 @@ class OrderConfirmationManager {
             },
             callback: (r) => {
                 if (r.message) {
-                    console.log('Fetched orders for confirmation:', r.message);
                     this.orders = r.message;
+                    
+                    // Restore state for orders that were marked as not picked
+                    this.orders.forEach(order => {
+                        if (order.custom_call_not_picked === 1) {
+                            this.not_picked_orders.add(order.name);
+                        }
+                    });
+                    
                     this.render_orders();
                 }
             }
@@ -69,7 +89,8 @@ class OrderConfirmationManager {
     apply_filters() {
         this.filters = {
             customer: this.page.fields_dict.customer.get_value(),
-            delivery_region: this.page.fields_dict.delivery_region.get_value()
+            delivery_region: this.page.fields_dict.delivery_region.get_value(),
+            status: this.page.fields_dict.status_filter.get_value()
         };
         this.render_orders();
     }
@@ -81,6 +102,20 @@ class OrderConfirmationManager {
             }
             if (this.filters.delivery_region && order.custom_delivery_region !== this.filters.delivery_region) {
                 return false;
+            }
+            if (this.filters.status && this.filters.status !== 'All') {
+                const is_called = this.called_orders.has(order.name);
+                const is_not_picked = this.not_picked_orders.has(order.name);
+                
+                if (this.filters.status === 'Pending Call' && (is_called || is_not_picked)) {
+                    return false;
+                }
+                if (this.filters.status === 'Called' && !is_called) {
+                    return false;
+                }
+                if (this.filters.status === 'Not Picked' && !is_not_picked) {
+                    return false;
+                }
             }
             return true;
         });
@@ -103,19 +138,23 @@ class OrderConfirmationManager {
 
         const total_value = filtered_orders.reduce((sum, o) => sum + o.grand_total, 0);
         const called_count = filtered_orders.filter(o => this.called_orders.has(o.name)).length;
+        const not_picked_count = filtered_orders.filter(o => this.not_picked_orders.has(o.name)).length;
+        const pending_count = filtered_orders.filter(o => 
+            !this.called_orders.has(o.name) && !this.not_picked_orders.has(o.name)
+        ).length;
         
         let html = `
             <div class="confirmation-orders-table">
                 <div class="summary-card">
                     <div class="summary-item">
-                        <div class="summary-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                        <div class="summary-icon" style="background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"></path>
                             </svg>
                         </div>
                         <div class="summary-content">
                             <div class="summary-label">Pending Calls</div>
-                            <div class="summary-value">${filtered_orders.length}</div>
+                            <div class="summary-value">${pending_count}</div>
                         </div>
                     </div>
                     <div class="summary-item">
@@ -128,6 +167,19 @@ class OrderConfirmationManager {
                         <div class="summary-content">
                             <div class="summary-label">Called</div>
                             <div class="summary-value">${called_count}</div>
+                        </div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="summary-icon" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
+                                <line x1="12" y1="9" x2="12" y2="13"></line>
+                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            </svg>
+                        </div>
+                        <div class="summary-content">
+                            <div class="summary-label">Not Picked</div>
+                            <div class="summary-value">${not_picked_count}</div>
                         </div>
                     </div>
                     <div class="summary-item">
@@ -148,15 +200,15 @@ class OrderConfirmationManager {
                     <table class="table table-bordered modern-table">
                         <thead>
                             <tr>
-                                <th width="5%"></th>
-                                <th width="12%">Sales Order</th>
-                                <th width="15%">Customer</th>
-                                <th width="12%">Phone Number</th>
-                                <th width="10%">Order Amount</th>
-                                <th width="10%">Date</th>
-                                <th width="12%">Region</th>
-                                <th width="12%">Action</th>
-                                <th width="12%">Status</th>
+                                <th width="4%"></th>
+                                <th width="11%">Sales Order</th>
+                                <th width="13%">Customer</th>
+                                <th width="11%">Phone Number</th>
+                                <th width="9%">Amount</th>
+                                <th width="8%">Date</th>
+                                <th width="10%">Region</th>
+                                <th width="20%">Action</th>
+                                <th width="10%">Status</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -164,9 +216,11 @@ class OrderConfirmationManager {
 
         filtered_orders.forEach(order => {
             const is_called = this.called_orders.has(order.name);
+            const is_not_picked = this.not_picked_orders.has(order.name);
             
             html += `
-                <tr class="order-row ${is_called ? 'order-called' : ''}" data-order="${order.name}">
+                <tr class="order-row ${is_called ? 'order-called' : ''} ${is_not_picked ? 'order-not-picked' : ''}" 
+                    data-order="${order.name}">
                     <td>
                         <span class="toggle-details" style="cursor:pointer; font-size: 16px;">▶</span>
                     </td>
@@ -186,22 +240,31 @@ class OrderConfirmationManager {
                     <td>${frappe.datetime.str_to_user(order.transaction_date)}</td>
                     <td><span class="region-tag">${order.custom_delivery_region || '-'}</span></td>
                     <td>
-                        <button class="btn btn-sm ${is_called ? 'btn-success' : 'btn-primary'} btn-mark-called" 
-                                data-order="${order.name}"
-                                ${is_called ? 'disabled' : ''}>
-                            ${is_called ? '✓ Called' : 'Mark as Called'}
-                        </button>
+                        <div class="action-buttons">
+                            <button class="btn btn-sm ${is_called ? 'btn-success' : 'btn-primary'} btn-mark-called" 
+                                    data-order="${order.name}"
+                                    ${is_called ? 'disabled' : ''}>
+                                ${is_called ? '✓ Called' : 'Mark Called'}
+                            </button>
+                            <button class="btn btn-sm ${is_not_picked ? 'btn-danger' : 'btn-warning'} btn-not-picked" 
+                                    data-order="${order.name}"
+                                    ${is_called ? 'disabled' : ''}>
+                                ${is_not_picked ? '✓ Not Picked' : 'Not Picked'}
+                            </button>
+                        </div>
                     </td>
                     <td>
                         ${is_called ? 
                             '<span class="status-badge status-called">Ready to Submit</span>' : 
+                            is_not_picked ?
+                            '<span class="status-badge status-not-picked">Call Not Picked</span>' :
                             '<span class="status-badge status-pending">Pending Call</span>'}
                     </td>
                 </tr>
                 <tr class="order-details-row" data-order="${order.name}" style="display:none;">
                     <td colspan="9">
                         <div class="order-details-container" style="padding: 15px; background: #f8f9fa;">
-                            <div class="loading">Loading items...</div>
+                            <div class="loading">Loading details...</div>
                         </div>
                     </td>
                 </tr>
@@ -221,7 +284,7 @@ class OrderConfirmationManager {
                 
                 .summary-card {
                     display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
                     gap: 20px;
                     margin-bottom: 30px;
                 }
@@ -314,9 +377,29 @@ class OrderConfirmationManager {
                     border-left-color: #43e97b;
                 }
                 
+                .order-row.order-not-picked {
+                    background-color: #fef2f2;
+                }
+                
+                .order-row.order-not-picked:hover {
+                    background-color: #fee2e2 !important;
+                    border-left-color: #ef4444;
+                }
+                
                 .order-row td {
                     padding: 14px 12px !important;
                     vertical-align: middle !important;
+                }
+                
+                .action-buttons {
+                    display: flex;
+                    gap: 5px;
+                    flex-wrap: wrap;
+                }
+                
+                .action-buttons .btn {
+                    font-size: 11px;
+                    padding: 4px 10px;
                 }
                 
                 .order-link, .customer-link {
@@ -359,7 +442,7 @@ class OrderConfirmationManager {
                     display: inline-block;
                     padding: 6px 12px;
                     border-radius: 20px;
-                    font-size: 12px;
+                    font-size: 11px;
                     font-weight: 600;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
@@ -375,6 +458,11 @@ class OrderConfirmationManager {
                     color: white;
                 }
                 
+                .status-not-picked {
+                    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                    color: white;
+                }
+                
                 .region-tag {
                     display: inline-block;
                     padding: 4px 10px;
@@ -385,12 +473,13 @@ class OrderConfirmationManager {
                     font-weight: 500;
                 }
                 
-                .btn-mark-called {
+                .btn-mark-called, .btn-not-picked {
                     transition: all 0.2s;
                     font-weight: 600;
                 }
                 
-                .btn-mark-called:not(:disabled):hover {
+                .btn-mark-called:not(:disabled):hover,
+                .btn-not-picked:not(:disabled):hover {
                     transform: translateY(-1px);
                     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
                 }
@@ -430,6 +519,29 @@ class OrderConfirmationManager {
                 .item-details strong {
                     color: #374151;
                 }
+                
+                .notes-section {
+                    margin-top: 15px;
+                    padding-top: 15px;
+                    border-top: 2px solid #e5e7eb;
+                }
+                
+                .notes-section h4 {
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #111827;
+                    margin-bottom: 10px;
+                }
+                
+                .notes-display {
+                    background: white;
+                    padding: 10px;
+                    border-radius: 6px;
+                    border: 1px solid #e5e7eb;
+                    color: #6b7280;
+                    font-size: 13px;
+                    font-style: italic;
+                }
             </style>
         `;
 
@@ -457,9 +569,16 @@ class OrderConfirmationManager {
             }
         });
 
+        // Mark as called
         this.container.find('.btn-mark-called').off('click').on('click', function() {
             const order_name = $(this).data('order');
             self.mark_as_called(order_name, $(this));
+        });
+
+        // Mark as not picked
+        this.container.find('.btn-not-picked').off('click').on('click', function() {
+            const order_name = $(this).data('order');
+            self.mark_as_not_picked(order_name, $(this));
         });
     }
 
@@ -474,13 +593,13 @@ class OrderConfirmationManager {
             },
             callback: (r) => {
                 if (r.message) {
-                    this.render_order_items($container, order_name, r.message.items);
+                    this.render_order_items($container, order_name, r.message.items, r.message.custom_call_notes);
                 }
             }
         });
     }
 
-    render_order_items($container, order_name, items) {
+    render_order_items($container, order_name, items, call_notes) {
         let html = '<div class="items-list" style="max-width: 100%;">';
         
         items.forEach((item, idx) => {
@@ -499,20 +618,67 @@ class OrderConfirmationManager {
         });
         
         html += '</div>';
+        
+        // Add notes section if order has notes
+        if (call_notes) {
+            html += `
+                <div class="notes-section">
+                    <h4>📝 Call Notes</h4>
+                    <div class="notes-display">${call_notes}</div>
+                </div>
+            `;
+        }
+        
         $container.html(html);
     }
 
     mark_as_called(order_name, $btn) {
+        // If order was previously marked as not picked, clear that status
+        const was_not_picked = this.not_picked_orders.has(order_name);
+        
+        if (was_not_picked) {
+            // Clear the not picked status in database
+            frappe.call({
+                method: 'frappe.client.set_value',
+                args: {
+                    doctype: 'Sales Order',
+                    name: order_name,
+                    fieldname: {
+                        custom_call_not_picked: 0,
+                        custom_call_notes: ''
+                    }
+                },
+                callback: (r) => {
+                    if (r.message) {
+                        this.not_picked_orders.delete(order_name);
+                        this.complete_call_marking(order_name, $btn);
+                    }
+                }
+            });
+        } else {
+            this.complete_call_marking(order_name, $btn);
+        }
+    }
+
+    complete_call_marking(order_name, $btn) {
         this.called_orders.add(order_name);
         
         $btn.removeClass('btn-primary').addClass('btn-success')
             .text('✓ Called')
             .prop('disabled', true);
         
+        // Disable "Not Picked" button
+        $btn.closest('.action-buttons').find('.btn-not-picked')
+            .removeClass('btn-danger')
+            .addClass('btn-warning')
+            .text('Not Picked')
+            .prop('disabled', true);
+        
         $(`.order-row[data-order="${order_name}"]`)
+            .removeClass('order-not-picked')
             .addClass('order-called')
             .find('.status-badge')
-            .removeClass('status-pending')
+            .removeClass('status-pending status-not-picked')
             .addClass('status-called')
             .text('Ready to Submit');
         
@@ -520,6 +686,59 @@ class OrderConfirmationManager {
             message: __('Order marked as called'),
             indicator: 'green'
         });
+    }
+
+    mark_as_not_picked(order_name, $btn) {
+        frappe.prompt([
+            {
+                label: 'Notes',
+                fieldname: 'call_notes',
+                fieldtype: 'Small Text',
+                description: 'Optional: Add notes about why the call was not picked'
+            }
+        ],
+        (values) => {
+            this.not_picked_orders.add(order_name);
+            
+            // Update the order in database
+            frappe.call({
+                method: 'frappe.client.set_value',
+                args: {
+                    doctype: 'Sales Order',
+                    name: order_name,
+                    fieldname: {
+                        custom_call_not_picked: 1,
+                        custom_call_notes: values.call_notes || ''
+                    }
+                },
+                callback: (r) => {
+                    if (r.message) {
+                        $btn.removeClass('btn-warning').addClass('btn-danger')
+                            .text('✓ Not Picked')
+                            .prop('disabled', true);
+                        
+                        // Disable "Mark Called" button
+                        $btn.closest('.action-buttons').find('.btn-mark-called').prop('disabled', true);
+                        
+                        $(`.order-row[data-order="${order_name}"]`)
+                            .removeClass('order-called')
+                            .addClass('order-not-picked')
+                            .find('.status-badge')
+                            .removeClass('status-pending status-called')
+                            .addClass('status-not-picked')
+                            .text('Call Not Picked');
+                        
+                        frappe.show_alert({
+                            message: __('Order marked as not picked'),
+                            indicator: 'orange'
+                        });
+                    }
+                }
+            });
+        },
+        __('Call Not Picked - Add Notes'),
+        __('Save')
+        );
     }
 
     submit_all_called_orders() {
@@ -565,6 +784,7 @@ class OrderConfirmationManager {
 
             const order_name = order_list[processed];
             
+            // Use frappe.xcall to properly submit the document
             frappe.call({
                 method: 'frappe.client.get',
                 args: {
@@ -572,66 +792,78 @@ class OrderConfirmationManager {
                     name: order_name
                 },
                 callback: (r) => {
-                    if (r.message) {
-                        const doc = r.message;
-                        // Update workflow state --- IGNORE ---
-                        doc.workflow_state = 'Order Confirmed';
-                        
-                        frappe.call({
-                            method: 'frappe.client.save',
-                            args: {
-                                doc: doc
-                            },
-                            callback: (r2) => {
-                                if (r2.message) {
-                                    
-                                    frappe.call({
-                                        method: 'frappe.client.submit',
-                                        args: {
-                                            doc: r2.message
-                                        },
-                                        callback: (r3) => {
-                                            if (r3.message) {
-                                                frappe.show_alert({
-                                                    message: __('Confirmed & Submitted {0}', [order_name]),
-                                                    indicator: 'green'
-                                                });
-                                                processed++;
-                                            } else {
-                                                errors.push(order_name);
-                                                processed++;
-                                            }
-                                            process_next();
-                                        },
-                                        error: (err) => {
-                                            console.error('Submit error:', err);
-                                            errors.push(order_name + ' (submit failed)');
-                                            processed++;
-                                            process_next();
-                                        }
-                                    });
-                                } else {
-                                    errors.push(order_name + ' (save failed)');
-                                    processed++;
-                                    process_next();
-                                }
-                            },
-                            error: (err) => {
-                                console.error('Save error:', err);
+                    if (!r.message) {
+                        console.error('Failed to get order:', order_name);
+                        errors.push(order_name + ' (failed to load)');
+                        processed++;
+                        process_next();
+                        return;
+                    }
+
+                    const doc = r.message;
+                    console.log('Processing order:', order_name, 'Current docstatus:', doc.docstatus);
+                    
+                    // Update workflow state
+                    doc.workflow_state = 'Order Confirmed';
+                    
+                    // Save first
+                    frappe.call({
+                        method: 'frappe.client.save',
+                        args: {
+                            doc: doc
+                        },
+                        callback: (r2) => {
+                            if (!r2.message) {
+                                console.error('Save failed for:', order_name);
                                 errors.push(order_name + ' (save failed)');
                                 processed++;
                                 process_next();
+                                return;
                             }
-                        });
-                    } else {
-                        errors.push(order_name + ' (get failed)');
-                        processed++;
-                        process_next();
-                    }
+
+                            console.log('Saved order:', order_name, 'Now submitting...');
+                            
+                            // Now submit using the saved document
+                            frappe.call({
+                                method: 'frappe.client.submit',
+                                args: {
+                                    doc: r2.message
+                                },
+                                callback: (r3) => {
+                                    if (r3.message) {
+                                        console.log('Successfully submitted:', order_name);
+                                        frappe.show_alert({
+                                            message: __('✓ Confirmed & Submitted {0}', [order_name]),
+                                            indicator: 'green'
+                                        });
+                                    } else {
+                                        console.error('Submit returned no message for:', order_name);
+                                        errors.push(order_name + ' (submit returned empty)');
+                                    }
+                                    processed++;
+                                    process_next();
+                                },
+                                error: (err) => {
+                                    console.error('Submit error for', order_name, ':', err);
+                                    const error_msg = err.exc || err.message || err._server_messages || 'Unknown error';
+                                    errors.push(order_name + ' (submit failed: ' + error_msg + ')');
+                                    processed++;
+                                    process_next();
+                                }
+                            });
+                        },
+                        error: (err) => {
+                            console.error('Save error for', order_name, ':', err);
+                            const error_msg = err.exc || err.message || err._server_messages || 'Unknown error';
+                            errors.push(order_name + ' (save failed: ' + error_msg + ')');
+                            processed++;
+                            process_next();
+                        }
+                    });
                 },
                 error: (err) => {
-                    console.error('Get error:', err);
-                    errors.push(order_name + ' (get failed)');
+                    console.error('Get error for', order_name, ':', err);
+                    errors.push(order_name + ' (failed to load)');
                     processed++;
                     process_next();
                 }
@@ -639,7 +871,7 @@ class OrderConfirmationManager {
         };
 
         frappe.show_alert({
-            message: __('Confirming and submitting orders...'),
+            message: __('Confirming and submitting {0} orders...', [order_list.length]),
             indicator: 'blue'
         });
 

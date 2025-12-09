@@ -7,43 +7,28 @@ frappe.pages['sales-order-manager'].on_page_load = function(wrapper) {
 
 	new DraftSalesOrdersManager(page);
 }
-
 class DraftSalesOrdersManager {
     constructor(page) {
         this.page = page;
         this.filters = {};
         this.orders = [];
         this.modified_orders = new Set();
+        this.selected_orders = new Set();
+        this.held_orders = new Set();
         this.setup_page();
         this.load_data();
     }
 
     setup_page() {
-        this.page.add_field({
-            label: 'Delivery Region',
-            fieldtype: 'Link',
-            fieldname: 'delivery_region',
-            options: 'Delivery Region',
-            change: () => this.apply_filters()
-        });
+        this.page.add_field({ label: 'Delivery Region', fieldtype: 'Link', fieldname: 'delivery_region', options: 'Delivery Region', change: () => this.apply_filters() });
+        this.page.add_field({ label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person', options: 'Sales Person', change: () => this.apply_filters() });
 
-        this.page.add_field({
-            label: 'Sales Person',
-            fieldtype: 'Link',
-            fieldname: 'sales_person',
-            options: 'Sales Person',
-            change: () => this.apply_filters()
-        });
+        this.page.set_primary_action('Submit Selected to Finance', () => this.submit_selected_orders(), 'octicon octicon-check');
 
-        this.page.set_primary_action('Submit All to Finance', () => {
-            this.submit_all_orders();
-        }, 'octicon octicon-check');
+        this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
+        this.page.add_button('View Truck Assignment', () => frappe.set_route('sales-order-truck-as'), 'octicon octicon-package');
 
-        this.page.add_button('Refresh', () => {
-            this.load_data();
-        }, 'octicon octicon-sync');
-
-        this.container = $('<div class="draft-orders-container"></div>').appendTo(this.page.main);
+        this.container = $('<div class="draft-orders-container enhanced-ui"></div>').appendTo(this.page.main);
     }
 
     load_data() {
@@ -51,33 +36,15 @@ class DraftSalesOrdersManager {
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Sales Order',
-                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total', 'custom_delivery_region', 'owner', 'workflow_state'],
-                filters: {
-                    docstatus: 0 
-                },
+                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total', 'custom_delivery_region', 'owner', 'workflow_state', 'custom_on_hold'],
+                filters: { docstatus: 0 },
                 limit_page_length: 500
             },
             callback: (r) => {
                 if (r.message) {
-                    console.log('Fetched orders:', r.message);
-                    // Show orders in "Proceed To Order" state (before finance approval)
-                    this.orders = r.message.filter(order => {
-                        console.log(`Order ${order.name}: workflow_state = "${order.workflow_state}"`);
-                        return !order.workflow_state || 
-                               order.workflow_state === '' || 
-                               order.workflow_state === null ||
-                               order.workflow_state === 'Proceed To Order';
-                    });
-                    console.log('Filtered orders (Proceed To Order state):', this.orders);
+                    this.orders = r.message.filter(order => !order.workflow_state || ['','Proceed To Order',null].includes(order.workflow_state));
                     this.render_orders();
-                } else {
-                    console.log('No orders returned');
-                    frappe.msgprint(__('No draft sales orders found'));
                 }
-            },
-            error: (r) => {
-                console.error('Error fetching orders:', r);
-                frappe.msgprint(__('Error fetching sales orders. Check console for details.'));
             }
         });
     }
@@ -92,47 +59,47 @@ class DraftSalesOrdersManager {
 
     get_filtered_orders() {
         return this.orders.filter(order => {
-            if (this.filters.delivery_region && order.custom_delivery_region !== this.filters.delivery_region) {
-                return false;
-            }
-            if (this.filters.sales_person && order.owner !== this.filters.sales_person) {
-                return false;
-            }
+            if (this.filters.delivery_region && order.custom_delivery_region !== this.filters.delivery_region) return false;
+            if (this.filters.sales_person && order.owner !== this.filters.sales_person) return false;
             return true;
         });
     }
 
     render_orders() {
         const filtered_orders = this.get_filtered_orders();
-        
+
         if (filtered_orders.length === 0) {
             this.container.html(`
-                <div class="alert alert-info" style="margin-top: 20px;">
+                <div class="alert alert-info ui-box">
                     <strong>No orders found</strong><br>
-                    ${this.orders.length > 0 ? 
-                        'No orders match your filters. Try adjusting or clearing the filters.' : 
-                        'No draft sales orders without workflow state found.'}
+                    ${this.orders.length > 0 ? 'Try adjusting your filters.' : 'No draft sales orders available.'}
                 </div>
             `);
             return;
         }
-        
+
         let html = `
-            <div class="orders-table">
-                <div style="margin-bottom: 10px;">
+            <div class="orders-table ui-box">
+                <div class="table-header-bar">
                     <strong>Showing ${filtered_orders.length} of ${this.orders.length} orders</strong>
+                    <span class="selected-count">(${this.selected_orders.size} selected)</span>
+                    <label class="select-all-wrapper">
+                        <input type="checkbox" class="select-all-checkbox"> Select All
+                    </label>
                 </div>
-                <table class="table table-bordered">
+                <table class="table table-hover enhanced-table">
                     <thead>
                         <tr>
-                            <th width="5%"></th>
-                            <th width="15%">Sales Order</th>
-                            <th width="20%">Customer</th>
-                            <th width="12%">Date</th>
-                            <th width="15%">Region</th>
-                            <th width="15%">Sales Person</th>
-                            <th width="10%">Total</th>
-                            <th width="8%">Status</th>
+                            <th></th>
+                            <th></th>
+                            <th>Sales Order</th>
+                            <th>Customer</th>
+                            <th>Date</th>
+                            <th>Region</th>
+                            <th>Sales Person</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -140,24 +107,33 @@ class DraftSalesOrdersManager {
 
         filtered_orders.forEach(order => {
             const modified = this.modified_orders.has(order.name);
+            const selected = this.selected_orders.has(order.name);
+            const onHold = order.custom_on_hold === 1;
+
             html += `
-                <tr class="order-row ${modified ? 'modified' : ''}" data-order="${order.name}">
-                    <td>
-                        <span class="toggle-details" style="cursor:pointer; font-size: 16px;">▶</span>
-                    </td>
-                    <td><a href="/app/sales-order/${order.name}" target="_blank">${order.name}</a></td>
+                <tr class="order-row ${modified ? 'row-modified' : ''} ${onHold ? 'row-hold' : ''}" data-order="${order.name}">
+                    <td><input type="checkbox" class="order-checkbox" data-order="${order.name}" ${selected ? 'checked' : ''} ${onHold ? 'disabled' : ''}></td>
+                    <td><span class="toggle-details">▶</span></td>
+                    <td><a href="/app/sales-order/${order.name}" class="order-link" target="_blank">${order.name}</a></td>
                     <td>${order.customer_name || order.customer}</td>
                     <td>${frappe.datetime.str_to_user(order.transaction_date)}</td>
-                    <td>${order.custom_delivery_region || ''}</td>
+                    <td><span class="badge badge-region">${order.custom_delivery_region || ''}</span></td>
                     <td>${order.owner}</td>
-                    <td>${format_currency(order.grand_total)}</td>
-                    <td>${modified ? '<span class="text-warning">Modified</span>' : '<span class="text-muted">Draft</span>'}</td>
+                    <td><span class="badge badge-total">${format_currency(order.grand_total)}</span></td>
+                    <td>
+                        ${onHold ? '<span class="badge badge-hold">ON HOLD</span>' :
+                          modified ? '<span class="badge badge-modified">Modified</span>' :
+                          '<span class="badge badge-draft">Draft</span>'}
+                    </td>
+                    <td>
+                        <button class="btn btn-xs btn-action ${onHold ? 'btn-release' : 'btn-hold'}" data-order="${order.name}">
+                            ${onHold ? 'Release' : 'Hold'}
+                        </button>
+                    </td>
                 </tr>
                 <tr class="order-details-row" data-order="${order.name}" style="display:none;">
-                    <td colspan="8">
-                        <div class="order-details-container" style="padding: 15px; background: #f8f9fa;">
-                            <div class="loading">Loading items...</div>
-                        </div>
+                    <td colspan="10">
+                        <div class="order-details-container">Loading items...</div>
                     </td>
                 </tr>
             `;
@@ -167,14 +143,56 @@ class DraftSalesOrdersManager {
                     </tbody>
                 </table>
             </div>
+
             <style>
-                .orders-table { margin-top: 20px; }
-                .order-row.modified { background-color: #fff3cd; }
-                .item-row { margin-bottom: 10px; padding: 10px; border: 1px solid #dee2e6; border-radius: 4px; }
-                .item-header { font-weight: 600; margin-bottom: 8px; }
-                .item-details { display: flex; gap: 15px; align-items: center; }
-                .weight-input { width: 100px; }
-                .btn-confirm-weight { margin-left: 10px; }
+                .enhanced-ui .ui-box {
+                    background: #ffffff;
+                    border-radius: 12px;
+                    padding: 18px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                    margin-top: 20px;
+                }
+
+                .enhanced-table thead th {
+                    background: #f5f7ff;
+                    color: #334;
+                    border-bottom: 2px solid #d0d7ff;
+                }
+
+                .enhanced-table tbody tr:hover {
+                    background: #f0f4ff !important;
+                }
+
+                .badge {
+                    padding: 4px 8px;
+                    border-radius: 8px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    display: inline-block;
+                }
+
+                .badge-region { background: #e6f7ff; color: #0366d6; }
+                .badge-total { background: #fff4e6; color: #b36b00; }
+                .badge-modified { background: #fff3cd; color: #8a6d3b; }
+                .badge-hold { background: #f8d7da; color: #842029; }
+                .badge-draft { background: #e2e3e5; color: #41464b; }
+
+                .row-modified { background: #fff8e6 !important; }
+                .row-hold { background: #fdecea !important; }
+
+                .order-link { font-weight: bold; color: #0057b7; }
+                .order-link:hover { text-decoration: underline; }
+
+                .toggle-details { cursor: pointer; font-size: 16px; }
+
+                .btn-action {
+                    border-radius: 6px;
+                    font-size: 11px;
+                    padding: 5px 8px;
+                }
+                .btn-hold { background: #ffcc80; }
+                .btn-release { background: #b2fab4; }
+
             </style>
         `;
 
@@ -185,6 +203,7 @@ class DraftSalesOrdersManager {
     attach_events() {
         const self = this;
         
+        // Toggle details
         this.container.find('.toggle-details').off('click').on('click', function(e) {
             e.stopPropagation();
             const $icon = $(this);
@@ -198,6 +217,77 @@ class DraftSalesOrdersManager {
                 $details_row.show();
                 $icon.text('▼');
                 self.load_order_items(order_name);
+            }
+        });
+
+        // Select all checkbox
+        this.container.find('.select-all-checkbox').off('change').on('change', function() {
+            const checked = $(this).is(':checked');
+            self.container.find('.order-checkbox:not(:disabled)').each(function() {
+                $(this).prop('checked', checked);
+                const order_name = $(this).data('order');
+                if (checked) {
+                    self.selected_orders.add(order_name);
+                } else {
+                    self.selected_orders.delete(order_name);
+                }
+            });
+            self.render_orders();
+        });
+
+        // Individual order checkbox
+        this.container.find('.order-checkbox').off('change').on('change', function() {
+            const order_name = $(this).data('order');
+            if ($(this).is(':checked')) {
+                self.selected_orders.add(order_name);
+            } else {
+                self.selected_orders.delete(order_name);
+            }
+            self.render_orders();
+        });
+
+        // Hold/Unhold button
+        this.container.find('.btn-toggle-hold').off('click').on('click', function() {
+            const order_name = $(this).data('order');
+            const order = self.orders.find(o => o.name === order_name);
+            const currentHoldStatus = order.custom_on_hold === 1;
+            
+            self.toggle_hold_status(order_name, !currentHoldStatus);
+        });
+    }
+
+    toggle_hold_status(order_name, hold_status) {
+        frappe.call({
+            method: 'frappe.client.set_value',
+            args: {
+                doctype: 'Sales Order',
+                name: order_name,
+                fieldname: 'custom_on_hold',
+                value: hold_status ? 1 : 0
+            },
+            callback: (r) => {
+                if (r.message) {
+                    frappe.show_alert({
+                        message: __(hold_status ? 'Order put on hold' : 'Hold released'),
+                        indicator: hold_status ? 'orange' : 'green'
+                    });
+                    
+                    // Update local data
+                    const order = this.orders.find(o => o.name === order_name);
+                    if (order) {
+                        order.custom_on_hold = hold_status ? 1 : 0;
+                    }
+                    
+                    // Remove from selected if putting on hold
+                    if (hold_status) {
+                        this.selected_orders.delete(order_name);
+                    }
+                    
+                    this.render_orders();
+                }
+            },
+            error: (r) => {
+                frappe.msgprint(__('Error updating hold status'));
             }
         });
     }
@@ -256,7 +346,6 @@ class DraftSalesOrdersManager {
     attach_item_events() {
         const self = this;
         
-        // Update total weight on input change
         this.container.find('.weight-input').off('input').on('input', function() {
             const $input = $(this);
             const $row = $input.closest('.item-row');
@@ -265,7 +354,6 @@ class DraftSalesOrdersManager {
             $row.find('.total-weight').text((weight * qty).toFixed(2));
         });
 
-        // Confirm weight change
         this.container.find('.btn-confirm-weight').off('click').on('click', function() {
             const $btn = $(this);
             const order_name = $btn.data('order');
@@ -306,37 +394,32 @@ class DraftSalesOrdersManager {
                                     $btn.removeClass('btn-primary').addClass('btn-success').text('✓ Saved');
                                     
                                     $(`.order-row[data-order="${order_name}"]`).addClass('modified')
-                                        .find('td:last').html('<span class="text-warning">Modified</span>');
+                                        .find('td:nth-child(9)').html('<span class="text-warning">Modified</span>');
                                     
                                     setTimeout(() => {
                                         $btn.removeClass('btn-success').addClass('btn-primary').text('Confirm Weight');
                                     }, 2000);
                                 }
-                            },
-                            error: (r) => {
-                                frappe.msgprint(__('Error updating weight: {0}', [r.message || 'Unknown error']));
                             }
                         });
-                    } else {
-                        frappe.msgprint(__('Could not find item with idx {0}', [idx]));
                     }
                 }
             }
         });
     }
 
-    submit_all_orders() {
-        const modified_list = Array.from(this.modified_orders);
+    submit_selected_orders() {
+        const selected_list = Array.from(this.selected_orders);
         
-        if (modified_list.length === 0) {
-            frappe.msgprint(__('No orders have been modified'));
+        if (selected_list.length === 0) {
+            frappe.msgprint(__('No orders selected'));
             return;
         }
 
         frappe.confirm(
-            __('Submit {0} modified order(s) to Pending Finance Approval?', [modified_list.length]),
+            __('Submit {0} selected order(s) to Pending Finance Approval?', [selected_list.length]),
             () => {
-                this.process_submissions(modified_list);
+                this.process_submissions(selected_list);
             }
         );
     }
@@ -350,7 +433,7 @@ class DraftSalesOrdersManager {
                 if (errors.length > 0) {
                     frappe.msgprint({
                         title: __('Submission Complete with Errors'),
-                        message: __('Successfully moved {0} orders to finance. {1} failed:<br>{2}', 
+                        message: __('Successfully moved {0} orders. {1} failed:<br>{2}', 
                             [order_list.length - errors.length, errors.length, errors.join('<br>')]),
                         indicator: 'orange'
                     });
@@ -361,6 +444,7 @@ class DraftSalesOrdersManager {
                         indicator: 'green'
                     });
                 }
+                this.selected_orders.clear();
                 this.modified_orders.clear();
                 this.load_data();
                 return;
