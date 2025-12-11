@@ -1,22 +1,34 @@
 frappe.pages['sales-order-manager'].on_page_load = function(wrapper) {
+	console.log('=== SALES ORDER MANAGER PAGE LOADING ===');
+	console.log('Wrapper:', wrapper);
+	
 	var page = frappe.ui.make_app_page({
 		parent: wrapper,
 		title: 'Sales Order Manager',
 		single_column: true
 	});
+	
+	console.log('Page created:', page);
 
 	new DraftSalesOrdersManager(page);
 }
 
 class DraftSalesOrdersManager {
     constructor(page) {
+        console.log('=== DraftSalesOrdersManager Constructor ===');
+        console.log('Page object:', page);
+        
         this.page = page;
         this.filters = {};
         this.orders = [];
         this.modified_orders = new Set();
         this.selected_orders = new Set();
         this.held_orders = new Set();
+        
+        console.log('Calling setup_page...');
         this.setup_page();
+        
+        console.log('Calling load_data...');
         this.load_data();
     }
 
