@@ -65,34 +65,79 @@ class DraftSalesOrdersManager {
     }
 
     load_data() {
-        frappe.call({
-            method: 'frappe.client.get_list',
-            args: {
-                doctype: 'Sales Order',
-                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total', 
-                         'custom_delivery_region', 'owner', 'workflow_state', 'custom_on_hold'],
-                filters: {
-                    docstatus: 0 
+        console.log('=== LOAD_DATA START ===');
+        
+        try {
+            console.log('Making frappe.call...');
+            
+            frappe.call({
+                method: 'frappe.client.get_list',
+                args: {
+                    doctype: 'Sales Order',
+                    fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total', 'custom_delivery_region', 'owner', 'workflow_state'],
+                    filters: {
+                        docstatus: 0 
+                    },
+                    limit_page_length: 500
                 },
-                limit_page_length: 500
-            },
-            callback: (r) => {
-                if (r.message) {
-                    this.orders = r.message.filter(order => {
-                        return !order.workflow_state || 
-                               order.workflow_state === '' || 
-                               order.workflow_state === null ||
-                               order.workflow_state === 'Proceed To Order';
-                    });
-                    this.render_orders();
-                } else {
-                    frappe.msgprint(__('No draft sales orders found'));
+                callback: (r) => {
+                    console.log('=== CALLBACK RECEIVED ===');
+                    console.log('Response:', r);
+                    
+                    if (r.message) {
+                        console.log('All fetched orders:', r.message);
+                        console.log('Total draft orders found:', r.message.length);
+                        
+                        // Log workflow states
+                        const workflow_states = {};
+                        r.message.forEach(order => {
+                            const state = order.workflow_state || 'null/empty';
+                            workflow_states[state] = (workflow_states[state] || 0) + 1;
+                        });
+                        console.log('Workflow state distribution:', workflow_states);
+                        
+                        // Filter orders
+                        this.orders = r.message.filter(order => {
+                            const isMatch = !order.workflow_state || 
+                                order.workflow_state === '' || 
+                                order.workflow_state === null ||
+                                order.workflow_state === 'Proceed To Order';
+                            
+                            if (!isMatch) {
+                                console.log(`Filtered out ${order.name}: workflow_state = "${order.workflow_state}"`);
+                            }
+                            return isMatch;
+                        });
+                        
+                        console.log('Filtered orders (should show):', this.orders.length);
+                        console.log('Orders to display:', this.orders);
+                        
+                        if (this.orders.length === 0) {
+                            console.warn('⚠️ No orders match the filter criteria!');
+                            console.warn('Check if your workflow states match "Proceed To Order" or are empty/null');
+                        }
+                        
+                        console.log('Calling render_orders...');
+                        this.render_orders();
+                    } else {
+                        console.error('❌ No orders returned from server');
+                        frappe.msgprint(__('No draft sales orders found'));
+                    }
+                },
+                error: (r) => {
+                    console.error('❌ Error fetching orders:', r);
+                    console.error('Error details:', r);
+                    frappe.msgprint(__('Error fetching sales orders. Check console for details.'));
                 }
-            },
-            error: (r) => {
-                frappe.msgprint(__('Error fetching sales orders. Check console for details.'));
-            }
-        });
+            });
+            
+            console.log('frappe.call initiated successfully');
+        } catch (error) {
+            console.error('❌ Exception in load_data:', error);
+            console.error('Stack:', error.stack);
+        }
+        
+        console.log('=== LOAD_DATA END ===');
     }
 
     apply_filters() {
