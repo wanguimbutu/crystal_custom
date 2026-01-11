@@ -140,7 +140,7 @@ class DraftSalesOrdersManager {
         console.log('=== LOAD_DATA END ===');
     }
 
-    apply_filters() {
+    apply_filters() {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
         this.filters = {
             delivery_region: this.page.fields_dict.delivery_region.get_value(),
             sales_person: this.page.fields_dict.sales_person.get_value()
