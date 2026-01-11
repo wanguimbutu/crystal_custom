@@ -38,7 +38,8 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 	
 	def run(self, args):
 		# Call parent run method to handle all initialization
-		columns, data = super().run(args)
+		# The parent sets self.columns and self.data
+		super().run(args)
 		
 		# Now add our PDC columns to the existing columns
 		# Find the position after "Outstanding Amount" column
