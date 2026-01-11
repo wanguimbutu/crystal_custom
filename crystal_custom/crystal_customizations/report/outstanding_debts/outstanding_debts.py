@@ -1,19 +1,18 @@
 # Copyright (c) 2026, wangui and contributors
 # For license information, please see license.txt
-# Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors and contributors
-# For license information, please see license.txt
-
 
 import frappe
-from frappe import _, scrub
+from frappe import _
 from frappe.utils import cint, flt
 
-from erpnext.accounts.party import get_partywise_advanced_payment_amount
 from erpnext.accounts.report.accounts_receivable.accounts_receivable import ReceivablePayableReport
-from erpnext.accounts.utils import get_currency_precision, get_party_types_from_account_type
+from erpnext.accounts.utils import get_currency_precision
 
 
 def execute(filters=None):
+	filters = frappe._dict(filters or {})
+	_set_ageing_ranges(filters)
+
 	args = {
 		"account_type": "Receivable",
 		"naming_by": ["Selling Settings", "cust_master_name"],
@@ -22,116 +21,116 @@ def execute(filters=None):
 	return CustomAgingWithPDC(filters).run(args)
 
 
-class CustomAgingWithPDC(ReceivablePayableReport):
-	def __init__(self, filters=None):
-		# Parse range filters BEFORE calling parent __init__
-		if filters and filters.get("range"):
-			ranges = filters.get("range").replace(",", " ").split()
-			if len(ranges) >= 1:
-				filters["range1"] = ranges[0]
-			if len(ranges) >= 2:
-				filters["range2"] = ranges[1]
-			if len(ranges) >= 3:
-				filters["range3"] = ranges[2]
-			if len(ranges) >= 4:
-				filters["range4"] = ranges[3]
-		
-		# Now call parent __init__
-		super().__init__(filters)
-	
-	def run(self, args):
-		self.account_type = args.get("account_type")
-		self.party_type = get_party_types_from_account_type(self.account_type)
-		self.party_naming_by = frappe.db.get_value(args.get("naming_by")[0], None, args.get("naming_by")[1])
-		self.get_columns()
-		self.get_data(args)
-		return self.columns, self.data
+def _set_ageing_ranges(filters):
+	"""Convert custom 'range' input ('30, 60, 90, 120') to range1..range4 expected by ERPNext."""
+	# If already provided (e.g. you updated JS to send range1..range4), don't override
+	if filters.get("range1"):
+		return
 
-	def get_columns(self):
-		# Call parent's get_columns first
-		super().get_columns()
-		
-		# Now add our PDC columns after Outstanding Amount
+	raw = filters.get("range") or "30, 60, 90, 120"
+
+	if isinstance(raw, str):
+		parts = [p.strip() for p in raw.replace(",", " ").split() if p.strip()]
+	else:
+		parts = [str(x).strip() for x in (raw or []) if str(x).strip()]
+
+	defaults = ["30", "60", "90", "120"]
+	while len(parts) < 4:
+		parts.append(defaults[len(parts)])
+
+	filters["range1"] = cint(parts[0])
+	filters["range2"] = cint(parts[1])
+	filters["range3"] = cint(parts[2])
+	filters["range4"] = cint(parts[3])
+
+
+class CustomAgingWithPDC(ReceivablePayableReport):
+	def run(self, args):
+		# Let ERPNext build everything (columns/data/possibly chart/message)
+		result = super().run(args)
+
+		# Parent may return:
+		# - (columns, data)
+		# - (columns, data, chart/message/extra)
+		columns = result[0]
+		data = result[1]
+		extra = result[2] if len(result) > 2 else None
+
+		# Insert our columns after Outstanding
 		outstanding_idx = None
-		for i, col in enumerate(self.columns):
-			if col.get("fieldname") == "outstanding":
+		for i, col in enumerate(columns):
+			# columns are dicts
+			if (col or {}).get("fieldname") == "outstanding":
 				outstanding_idx = i
 				break
-		
+
 		if outstanding_idx is not None:
-			# Insert PDC column after Outstanding
 			pdc_col = {
 				"label": _("PDC (Post-Dated Checks)"),
 				"fieldname": "pdc",
 				"fieldtype": "Currency",
 				"options": "currency",
-				"width": 120
+				"width": 120,
 			}
-			self.columns.insert(outstanding_idx + 1, pdc_col)
-			
-			# Insert Net Outstanding column after PDC
 			net_outstanding_col = {
 				"label": _("Net Outstanding"),
 				"fieldname": "net_outstanding",
 				"fieldtype": "Currency",
 				"options": "currency",
-				"width": 120
+				"width": 120,
 			}
-			self.columns.insert(outstanding_idx + 2, net_outstanding_col)
-	
-	def get_data(self, args):
-		# Call parent's get_data first
-		super().get_data(args)
-		
-		# Get PDC amounts
+
+			# Prevent duplicate insert if report reruns without full reload
+			fieldnames = [(c or {}).get("fieldname") for c in columns]
+			if "pdc" not in fieldnames:
+				columns.insert(outstanding_idx + 1, pdc_col)
+			# recompute in case list changed
+			fieldnames = [(c or {}).get("fieldname") for c in columns]
+			if "net_outstanding" not in fieldnames:
+				columns.insert(outstanding_idx + 2, net_outstanding_col)
+
+		# Compute PDC amounts once
 		pdc_amounts = get_party_pdc_amounts(self.filters.company)
-		
+		precision = get_currency_precision() or 2
+
 		# Add PDC and Net Outstanding to each row
-		for row in self.data:
-			if isinstance(row, dict):
-				row["pdc"] = pdc_amounts.get(row.get("party"), 0.0)
-				row["net_outstanding"] = flt(row.get("outstanding", 0.0)) - flt(row["pdc"])
+		for row in data or []:
+			# rows are usually frappe._dict, but handle plain dict too
+			party = row.get("party") if hasattr(row, "get") else None
+			pdc = flt(pdc_amounts.get(party, 0.0), precision)
+			outstanding = flt(row.get("outstanding", 0.0), precision)
 
+			row["pdc"] = pdc
+			row["net_outstanding"] = flt(outstanding - pdc, precision)
 
-def get_gl_balance(report_date, company):
-	return frappe._dict(
-		frappe.db.get_all(
-			"GL Entry",
-			fields=["party", "sum(debit -  credit)"],
-			filters={"posting_date": ("<=", report_date), "is_cancelled": 0, "company": company},
-			group_by="party",
-			as_list=1,
-		)
-	)
+		# Return same shape as parent returned
+		if extra is not None:
+			return columns, data, extra
+		return columns, data
 
 
 def get_party_pdc_amounts(company):
 	"""
-	Fetch all draft Payment Entry records of type 'Receive' 
-	and sum them by party (Customer)
+	Fetch all draft Payment Entry records of type 'Receive'
+	and sum them by party (Customer).
 	"""
 	pdc_data = frappe.db.sql(
 		"""
-		SELECT 
+		SELECT
 			party,
 			SUM(paid_amount) as pdc_amount
-		FROM 
+		FROM
 			`tabPayment Entry`
-		WHERE 
+		WHERE
 			docstatus = 0
 			AND payment_type = 'Receive'
 			AND company = %s
 			AND party_type = 'Customer'
-		GROUP BY 
+		GROUP BY
 			party
 		""",
 		(company,),
-		as_dict=1
+		as_dict=1,
 	)
-	
-	# Convert to dictionary for easy lookup
-	pdc_dict = {}
-	for row in pdc_data:
-		pdc_dict[row.party] = flt(row.pdc_amount)
-	
-	return pdc_dict
+
+	return {row.party: flt(row.pdc_amount) for row in (pdc_data or [])}
