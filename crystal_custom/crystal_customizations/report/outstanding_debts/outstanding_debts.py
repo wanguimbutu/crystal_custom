@@ -1,7 +1,6 @@
 # Copyright (c) 2026, wangui and contributors
 # For license information, please see license.txt
 
-
 import frappe
 from frappe import _, scrub
 from frappe.utils import cint, flt
@@ -22,6 +21,18 @@ def execute(filters=None):
 
 class CustomAgingWithPDC(ReceivablePayableReport):
 	def run(self, args):
+		# Parse range filters before calling parent
+		if self.filters.get("range"):
+			ranges = self.filters.get("range").replace(",", " ").split()
+			if len(ranges) >= 1:
+				self.filters.range1 = ranges[0]
+			if len(ranges) >= 2:
+				self.filters.range2 = ranges[1]
+			if len(ranges) >= 3:
+				self.filters.range3 = ranges[2]
+			if len(ranges) >= 4:
+				self.filters.range4 = ranges[3]
+		
 		# Call parent run method to handle all initialization
 		columns, data = super().run(args)
 		
