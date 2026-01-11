@@ -1,5 +1,8 @@
 # Copyright (c) 2026, wangui and contributors
 # For license information, please see license.txt
+# Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors and contributors
+# For license information, please see license.txt
+
 
 import frappe
 from frappe import _, scrub
@@ -37,12 +40,18 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 		super().__init__(filters)
 	
 	def run(self, args):
-		# Call parent run method to handle all initialization
-		# The parent sets self.columns and self.data
-		super().run(args)
+		self.account_type = args.get("account_type")
+		self.party_type = get_party_types_from_account_type(self.account_type)
+		self.party_naming_by = frappe.db.get_value(args.get("naming_by")[0], None, args.get("naming_by")[1])
+		self.get_columns()
+		self.get_data(args)
+		return self.columns, self.data
+
+	def get_columns(self):
+		# Call parent's get_columns first
+		super().get_columns()
 		
-		# Now add our PDC columns to the existing columns
-		# Find the position after "Outstanding Amount" column
+		# Now add our PDC columns after Outstanding Amount
 		outstanding_idx = None
 		for i, col in enumerate(self.columns):
 			if col.get("fieldname") == "outstanding":
@@ -69,6 +78,10 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 				"width": 120
 			}
 			self.columns.insert(outstanding_idx + 2, net_outstanding_col)
+	
+	def get_data(self, args):
+		# Call parent's get_data first
+		super().get_data(args)
 		
 		# Get PDC amounts
 		pdc_amounts = get_party_pdc_amounts(self.filters.company)
@@ -78,8 +91,6 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 			if isinstance(row, dict):
 				row["pdc"] = pdc_amounts.get(row.get("party"), 0.0)
 				row["net_outstanding"] = flt(row.get("outstanding", 0.0)) - flt(row["pdc"])
-		
-		return self.columns, self.data
 
 
 def get_gl_balance(report_date, company):
