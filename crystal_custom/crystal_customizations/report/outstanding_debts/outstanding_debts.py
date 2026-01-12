@@ -34,7 +34,7 @@ def _set_ageing_ranges(filters):
 	else:
 		parts = [str(x).strip() for x in (raw or []) if str(x).strip()]
 
-	defaults = ["30", "60", "90", "120"]
+	defaults = ["30", "60", "60", "120"]
 	while len(parts) < 4:
 		parts.append(defaults[len(parts)])
 
@@ -46,8 +46,21 @@ def _set_ageing_ranges(filters):
 
 class CustomAgingWithPDC(ReceivablePayableReport):
 	def run(self, args):
+		# KEY FIX: Force the report to show customer summary, not invoice details
+		# This ensures we get one row per customer with combined invoice totals
+		self.filters.based_on_payment_terms = 0  # Disable payment terms breakdown
+		self.filters.show_future_payments = 0    # Disable future payments breakdown
+		
+		# Set group by party to get customer-level summary
+		original_group_by = self.filters.get("group_by_party")
+		self.filters.group_by_party = 1
+		
 		# Let ERPNext build everything (columns/data/possibly chart/message)
 		result = super().run(args)
+
+		# Restore original setting if needed
+		if original_group_by is not None:
+			self.filters.group_by_party = original_group_by
 
 		# Parent may return:
 		# - (columns, data)
@@ -89,12 +102,16 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 			if "net_outstanding" not in fieldnames:
 				columns.insert(outstanding_idx + 2, net_outstanding_col)
 
-		# Compute PDC amounts once
+		# Compute PDC amounts once - now grouped by customer
 		pdc_amounts = get_party_pdc_amounts(self.filters.company)
 		precision = get_currency_precision() or 2
 
 		# Add PDC and Net Outstanding to each row
 		for row in data or []:
+			# Skip total/subtotal rows that don't have a party
+			if not row.get("party"):
+				continue
+				
 			# rows are usually frappe._dict, but handle plain dict too
 			party = row.get("party") if hasattr(row, "get") else None
 			pdc = flt(pdc_amounts.get(party, 0.0), precision)
@@ -113,6 +130,9 @@ def get_party_pdc_amounts(company):
 	"""
 	Fetch all draft Payment Entry records of type 'Receive'
 	and sum them by party (Customer).
+	
+	This now correctly groups by customer, matching the customer-level
+	summary rows in the accounts receivable report.
 	"""
 	pdc_data = frappe.db.sql(
 		"""
