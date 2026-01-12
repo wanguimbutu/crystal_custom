@@ -34,7 +34,7 @@ def _set_ageing_ranges(filters):
 	else:
 		parts = [str(x).strip() for x in (raw or []) if str(x).strip()]
 
-	defaults = ["30", "60", "60", "120"]
+	defaults = ["30", "60", "90", "120"]
 	while len(parts) < 4:
 		parts.append(defaults[len(parts)])
 
@@ -46,21 +46,12 @@ def _set_ageing_ranges(filters):
 
 class CustomAgingWithPDC(ReceivablePayableReport):
 	def run(self, args):
-		# KEY FIX: Force the report to show customer summary, not invoice details
-		# This ensures we get one row per customer with combined invoice totals
-		self.filters.based_on_payment_terms = 0  # Disable payment terms breakdown
-		self.filters.show_future_payments = 0    # Disable future payments breakdown
-		
-		# Set group by party to get customer-level summary
-		original_group_by = self.filters.get("group_by_party")
-		self.filters.group_by_party = 1
+		# Force summary mode settings
+		self.filters.based_on_payment_terms = 0
+		self.filters.show_future_payments = 0
 		
 		# Let ERPNext build everything (columns/data/possibly chart/message)
 		result = super().run(args)
-
-		# Restore original setting if needed
-		if original_group_by is not None:
-			self.filters.group_by_party = original_group_by
 
 		# Parent may return:
 		# - (columns, data)
@@ -68,6 +59,9 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 		columns = result[0]
 		data = result[1]
 		extra = result[2] if len(result) > 2 else None
+
+		# Aggregate data by party if needed
+		data = self.aggregate_by_party(data)
 
 		# Insert our columns after Outstanding
 		outstanding_idx = None
@@ -102,7 +96,7 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 			if "net_outstanding" not in fieldnames:
 				columns.insert(outstanding_idx + 2, net_outstanding_col)
 
-		# Compute PDC amounts once - now grouped by customer
+		# Compute PDC amounts once - grouped by customer
 		pdc_amounts = get_party_pdc_amounts(self.filters.company)
 		precision = get_currency_precision() or 2
 
@@ -125,13 +119,68 @@ class CustomAgingWithPDC(ReceivablePayableReport):
 			return columns, data, extra
 		return columns, data
 
+	def aggregate_by_party(self, data):
+		"""
+		Manually aggregate invoice-level data to customer-level summary.
+		If data is already aggregated (no voucher_no), return as-is.
+		"""
+		if not data:
+			return data
+			
+		# Check if already aggregated - summary rows don't have voucher_no
+		first_row = data[0] if data else {}
+		if not first_row.get("voucher_no") and not first_row.get("invoice"):
+			# Already aggregated
+			return data
+		
+		party_map = {}
+		
+		for row in data:
+			party = row.get("party")
+			if not party:
+				continue
+			
+			# Initialize party entry if not exists
+			if party not in party_map:
+				party_map[party] = frappe._dict({
+					"party": party,
+					"party_name": row.get("party_name"),
+					"customer_group": row.get("customer_group"),
+					"territory": row.get("territory"),
+					"payment_terms": row.get("payment_terms"),
+					"currency": row.get("currency"),
+					"credit_limit": row.get("credit_limit"),
+					"invoiced": 0,
+					"paid": 0,
+					"credit_note": 0,
+					"outstanding": 0,
+					"range1": 0,
+					"range2": 0,
+					"range3": 0,
+					"range4": 0,
+					"range5": 0,
+				})
+			
+			# Aggregate numeric amounts
+			for field in ["invoiced", "paid", "credit_note", "outstanding", 
+			              "range1", "range2", "range3", "range4", "range5"]:
+				party_map[party][field] += flt(row.get(field, 0))
+		
+		# Convert back to list
+		aggregated_data = list(party_map.values())
+		
+		# Sort by party name
+		aggregated_data.sort(key=lambda x: x.get("party_name") or x.get("party") or "")
+		
+		return aggregated_data
+
 
 def get_party_pdc_amounts(company):
 	"""
 	Fetch all draft Payment Entry records of type 'Receive'
 	and sum them by party (Customer).
 	
-	This now correctly groups by customer, matching the customer-level
+	This correctly groups by customer, matching the customer-level
 	summary rows in the accounts receivable report.
 	"""
 	pdc_data = frappe.db.sql(
