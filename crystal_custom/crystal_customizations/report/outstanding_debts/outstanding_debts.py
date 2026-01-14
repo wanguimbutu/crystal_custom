@@ -1,6 +1,6 @@
 # Copyright (c) 2025, Crystal Customizations
 # License: MIT
-# Outstanding Debts Report with Month-Wise Breakdown (Corrected Calculation)
+# Outstanding Debts Report with Month-Wise Breakdown (Using Original Calculation)
 
 import frappe
 from frappe import _
@@ -50,7 +50,7 @@ def get_columns(filters):
     to_date = getdate(filters.get("to_date") or frappe.utils.today())
     customer_filter = filters.get("customer")
     
-    # Get all unique month-years from invoices that still have outstanding
+    # Get all unique month-years from invoices that have outstanding
     customer_condition = " AND si.customer = %(customer)s" if customer_filter else ""
     
     month_years = frappe.db.sql("""
@@ -89,6 +89,7 @@ def get_columns(filters):
             AND jea.party IS NOT NULL
             AND je.company = %(company)s
             AND je.posting_date <= %(to_date)s
+            AND (jea.reference_type IS NULL OR jea.reference_type != 'Sales Invoice')
             {party_condition}
         ORDER BY 
             month_year ASC
@@ -132,7 +133,7 @@ def get_columns(filters):
             "width": 120
         })
     
-    # Summary columns
+    # Summary columns (same as original)
     columns.extend([
         {
             "fieldname": "outstanding_amount",
@@ -163,7 +164,7 @@ def get_columns(filters):
     return columns
 
 def get_data(filters):
-    """Get customer outstanding data with month-wise breakdown"""
+    """Get customer outstanding data - EXACT SAME LOGIC AS ORIGINAL"""
     
     # Get filters with defaults
     if not filters:
@@ -189,7 +190,7 @@ def get_data(filters):
         "customer": customer_filter
     }
     
-    # 1. SALES INVOICES - Get invoices with month-year breakdown
+    # 1. SALES INVOICES - EXACT SAME QUERY AS ORIGINAL, just add posting_date for month tracking
     invoices = frappe.db.sql("""
         SELECT 
             si.customer,
@@ -234,39 +235,32 @@ def get_data(filters):
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": inv.customer_name,
-                "months": {},
+                "months": {},  # NEW: track month breakdown
                 "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
             }
         
-        # Calculate outstanding as of to_date (SAME AS ORIGINAL)
+        # Calculate outstanding as of to_date - EXACT SAME AS ORIGINAL
         outstanding = flt(inv.grand_total) - flt(inv.paid_amount) - flt(inv.journal_adjusted)
         
-        # Only add to month breakdown if there is still outstanding
-        if outstanding != 0:
-            # Initialize month if not exists
-            if month_year not in customer_data[customer]["months"]:
-                customer_data[customer]["months"][month_year] = 0
-        
         if inv.is_return:
-            # Credit notes with outstanding balance
+            # Credit notes with outstanding balance - EXACT SAME AS ORIGINAL
             if outstanding < 0:  # Credit notes are negative
                 customer_data[customer]["credit_note_amount"] += abs(outstanding)
-                # Add to month breakdown for credit notes
-                if month_year not in customer_data[customer]["months"]:
-                    customer_data[customer]["months"][month_year] = 0
-                customer_data[customer]["months"][month_year] -= abs(outstanding)
         else:
-            # Regular invoices
+            # Regular invoices - EXACT SAME AS ORIGINAL
             if outstanding > 0:
                 customer_data[customer]["outstanding_amount"] += outstanding
+                # NEW: Also track which month this outstanding is from
+                if month_year not in customer_data[customer]["months"]:
+                    customer_data[customer]["months"][month_year] = 0
                 customer_data[customer]["months"][month_year] += outstanding
             elif outstanding < 0:
-                # Overpayment
+                # Overpayment - EXACT SAME AS ORIGINAL
                 customer_data[customer]["advance_amount"] += abs(outstanding)
     
-    # 2. JOURNAL ENTRIES - Posted up to to_date with month breakdown
+    # 2. JOURNAL ENTRIES - EXACT SAME AS ORIGINAL, just add month tracking
     journal_entries = frappe.db.sql("""
         SELECT 
             jea.party as customer,
@@ -299,25 +293,24 @@ def get_data(filters):
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": customer_name,
-                "months": {},
+                "months": {},  # NEW: track month breakdown
                 "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
             }
         
-        # Initialize month if not exists
-        if month_year not in customer_data[customer]["months"]:
-            customer_data[customer]["months"][month_year] = 0
-        
         net_amount = flt(row.net_amount)
+        # EXACT SAME LOGIC AS ORIGINAL
         if net_amount > 0:
-            customer_data[customer]["months"][month_year] += net_amount
             customer_data[customer]["outstanding_amount"] += net_amount
+            # NEW: Also track which month this is from
+            if month_year not in customer_data[customer]["months"]:
+                customer_data[customer]["months"][month_year] = 0
+            customer_data[customer]["months"][month_year] += net_amount
         else:
             customer_data[customer]["advance_amount"] += abs(net_amount)
-            # Don't add negative JE amounts to month breakdown, keep advances separate
     
-    # 3. UNALLOCATED PAYMENT ENTRIES - Posted up to to_date (SAME AS ORIGINAL)
+    # 3. UNALLOCATED PAYMENT ENTRIES - EXACT SAME AS ORIGINAL
     unallocated_payments = frappe.db.sql("""
         SELECT 
             pe.party as customer,
@@ -347,29 +340,28 @@ def get_data(filters):
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": customer_name,
-                "months": {},
+                "months": {},  # NEW: track month breakdown
                 "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
             }
         
-        # Unallocated amount
+        # Unallocated amount - EXACT SAME AS ORIGINAL
         unallocated = flt(payment.paid_amount) - flt(payment.allocated_amount)
         
         if unallocated > 0:
             customer_data[customer]["advance_amount"] += unallocated
     
-    # Prepare final data
+    # Prepare final data - EXACT SAME AS ORIGINAL
     data = []
     for customer, values in customer_data.items():
-        # Calculate total outstanding EXACTLY as original (Outstanding - Advance - Credit Note)
         total_outstanding = (
             flt(values["outstanding_amount"]) 
             - flt(values["advance_amount"]) 
             - flt(values["credit_note_amount"])
         )
         
-        # Include all customers with any balance
+        # Include all customers with any balance - EXACT SAME AS ORIGINAL
         if (values["outstanding_amount"] != 0 or 
             values["advance_amount"] != 0 or 
             values["credit_note_amount"] != 0):
@@ -383,18 +375,14 @@ def get_data(filters):
                 "total_outstanding": flt(total_outstanding, 2)
             }
             
-            # Add month-wise data (only positive outstanding amounts)
+            # NEW: Add month-wise data
             for month_year, amount in values["months"].items():
                 field_name = f"month_{month_year.replace('-', '_')}"
-                # Only show positive amounts in month columns (actual outstanding)
-                if amount > 0:
-                    row_data[field_name] = flt(amount, 2)
-                else:
-                    row_data[field_name] = 0
+                row_data[field_name] = flt(amount, 2)
             
             data.append(row_data)
     
-    # Sort by total outstanding (descending)
+    # Sort by total outstanding (descending) - EXACT SAME AS ORIGINAL
     data.sort(key=lambda x: x["total_outstanding"], reverse=True)
     
     return data
