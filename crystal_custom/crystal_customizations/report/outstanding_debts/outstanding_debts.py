@@ -173,7 +173,6 @@ def get_data(filters):
     journal_entries = frappe.db.sql("""
         SELECT 
             jea.party as customer,
-            jea.party_name as customer_name,
             SUM(jea.debit - jea.credit) as net_amount
         FROM 
             `tabJournal Entry Account` jea
@@ -197,7 +196,7 @@ def get_data(filters):
         customer = row.customer
         
         if customer not in customer_data:
-            customer_name = row.customer_name or frappe.db.get_value("Customer", customer, "customer_name")
+            customer_name = frappe.db.get_value("Customer", customer, "customer_name")
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": customer_name,
