@@ -1,12 +1,11 @@
 # Copyright (c) 2025, Crystal Customizations
 # License: MIT
-# Outstanding Debts Report with Dynamic Month-Year Breakdown
+# Outstanding Debts Report with Month-Wise Breakdown (Corrected Calculation)
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate, formatdate
+from frappe.utils import flt, getdate
 from collections import OrderedDict
-from datetime import datetime
 
 def execute(filters=None):
     if not filters:
@@ -51,7 +50,7 @@ def get_columns(filters):
     to_date = getdate(filters.get("to_date") or frappe.utils.today())
     customer_filter = filters.get("customer")
     
-    # Get all unique month-years from invoices
+    # Get all unique month-years from invoices that still have outstanding
     customer_condition = " AND si.customer = %(customer)s" if customer_filter else ""
     
     month_years = frappe.db.sql("""
@@ -136,8 +135,8 @@ def get_columns(filters):
     # Summary columns
     columns.extend([
         {
-            "fieldname": "total_outstanding",
-            "label": _("Total Outstanding"),
+            "fieldname": "outstanding_amount",
+            "label": _("Outstanding Amount"),
             "fieldtype": "Currency",
             "width": 150
         },
@@ -154,8 +153,8 @@ def get_columns(filters):
             "width": 150
         },
         {
-            "fieldname": "net_outstanding",
-            "label": _("Net Outstanding"),
+            "fieldname": "total_outstanding",
+            "label": _("Total Outstanding"),
             "fieldtype": "Currency",
             "width": 150
         }
@@ -236,27 +235,33 @@ def get_data(filters):
                 "customer": customer,
                 "customer_name": inv.customer_name,
                 "months": {},
-                "total_outstanding": 0,
+                "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
             }
         
-        # Initialize month if not exists
-        if month_year not in customer_data[customer]["months"]:
-            customer_data[customer]["months"][month_year] = 0
-        
-        # Calculate outstanding as of to_date
+        # Calculate outstanding as of to_date (SAME AS ORIGINAL)
         outstanding = flt(inv.grand_total) - flt(inv.paid_amount) - flt(inv.journal_adjusted)
+        
+        # Only add to month breakdown if there is still outstanding
+        if outstanding != 0:
+            # Initialize month if not exists
+            if month_year not in customer_data[customer]["months"]:
+                customer_data[customer]["months"][month_year] = 0
         
         if inv.is_return:
             # Credit notes with outstanding balance
             if outstanding < 0:  # Credit notes are negative
                 customer_data[customer]["credit_note_amount"] += abs(outstanding)
+                # Add to month breakdown for credit notes
+                if month_year not in customer_data[customer]["months"]:
+                    customer_data[customer]["months"][month_year] = 0
+                customer_data[customer]["months"][month_year] -= abs(outstanding)
         else:
             # Regular invoices
             if outstanding > 0:
+                customer_data[customer]["outstanding_amount"] += outstanding
                 customer_data[customer]["months"][month_year] += outstanding
-                customer_data[customer]["total_outstanding"] += outstanding
             elif outstanding < 0:
                 # Overpayment
                 customer_data[customer]["advance_amount"] += abs(outstanding)
@@ -295,7 +300,7 @@ def get_data(filters):
                 "customer": customer,
                 "customer_name": customer_name,
                 "months": {},
-                "total_outstanding": 0,
+                "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
             }
@@ -307,11 +312,12 @@ def get_data(filters):
         net_amount = flt(row.net_amount)
         if net_amount > 0:
             customer_data[customer]["months"][month_year] += net_amount
-            customer_data[customer]["total_outstanding"] += net_amount
+            customer_data[customer]["outstanding_amount"] += net_amount
         else:
             customer_data[customer]["advance_amount"] += abs(net_amount)
+            # Don't add negative JE amounts to month breakdown, keep advances separate
     
-    # 3. UNALLOCATED PAYMENT ENTRIES - Posted up to to_date
+    # 3. UNALLOCATED PAYMENT ENTRIES - Posted up to to_date (SAME AS ORIGINAL)
     unallocated_payments = frappe.db.sql("""
         SELECT 
             pe.party as customer,
@@ -342,7 +348,7 @@ def get_data(filters):
                 "customer": customer,
                 "customer_name": customer_name,
                 "months": {},
-                "total_outstanding": 0,
+                "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
             }
@@ -356,34 +362,39 @@ def get_data(filters):
     # Prepare final data
     data = []
     for customer, values in customer_data.items():
-        net_outstanding = (
-            flt(values["total_outstanding"]) 
+        # Calculate total outstanding EXACTLY as original (Outstanding - Advance - Credit Note)
+        total_outstanding = (
+            flt(values["outstanding_amount"]) 
             - flt(values["advance_amount"]) 
             - flt(values["credit_note_amount"])
         )
         
         # Include all customers with any balance
-        if (values["total_outstanding"] != 0 or 
+        if (values["outstanding_amount"] != 0 or 
             values["advance_amount"] != 0 or 
             values["credit_note_amount"] != 0):
             
             row_data = {
                 "customer": values["customer"],
                 "customer_name": values["customer_name"],
-                "total_outstanding": flt(values["total_outstanding"], 2),
+                "outstanding_amount": flt(values["outstanding_amount"], 2),
                 "advance_amount": flt(values["advance_amount"], 2),
                 "credit_note_amount": flt(values["credit_note_amount"], 2),
-                "net_outstanding": flt(net_outstanding, 2)
+                "total_outstanding": flt(total_outstanding, 2)
             }
             
-            # Add month-wise data
+            # Add month-wise data (only positive outstanding amounts)
             for month_year, amount in values["months"].items():
                 field_name = f"month_{month_year.replace('-', '_')}"
-                row_data[field_name] = flt(amount, 2)
+                # Only show positive amounts in month columns (actual outstanding)
+                if amount > 0:
+                    row_data[field_name] = flt(amount, 2)
+                else:
+                    row_data[field_name] = 0
             
             data.append(row_data)
     
-    # Sort by net outstanding (descending)
-    data.sort(key=lambda x: x["net_outstanding"], reverse=True)
+    # Sort by total outstanding (descending)
+    data.sort(key=lambda x: x["total_outstanding"], reverse=True)
     
     return data
