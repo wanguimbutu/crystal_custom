@@ -1,205 +1,282 @@
-# Copyright (c) 2026, wangui and contributors
-# For license information, please see license.txt
+# Copyright (c) 2025, Crystal Customizations
+# License: MIT
+# Outstanding Debts Report with As On Date filter
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt
-
-from erpnext.accounts.report.accounts_receivable.accounts_receivable import ReceivablePayableReport
-from erpnext.accounts.utils import get_currency_precision
-
+from frappe.utils import flt, getdate
 
 def execute(filters=None):
-	filters = frappe._dict(filters or {})
-	_set_ageing_ranges(filters)
+    columns = get_columns()
+    data = get_data(filters)
+    return columns, data
 
-	args = {
-		"account_type": "Receivable",
-		"naming_by": ["Selling Settings", "cust_master_name"],
-	}
+def get_filters():
+    """Define report filters"""
+    return [
+        {
+            "fieldname": "company",
+            "label": _("Company"),
+            "fieldtype": "Link",
+            "options": "Company",
+            "default": frappe.defaults.get_user_default("Company"),
+            "reqd": 1
+        },
+        {
+            "fieldname": "to_date",
+            "label": _("As On Date"),
+            "fieldtype": "Date",
+            "default": frappe.utils.today(),
+            "reqd": 1
+        },
+        {
+            "fieldname": "customer",
+            "label": _("Customer"),
+            "fieldtype": "Link",
+            "options": "Customer"
+        }
+    ]
 
-	return CustomAgingWithPDC(filters).run(args)
+def get_columns():
+    """Define report columns"""
+    return [
+        {
+            "fieldname": "customer",
+            "label": _("Customer"),
+            "fieldtype": "Link",
+            "options": "Customer",
+            "width": 200
+        },
+        {
+            "fieldname": "customer_name",
+            "label": _("Customer Name"),
+            "fieldtype": "Data",
+            "width": 180
+        },
+        {
+            "fieldname": "outstanding_amount",
+            "label": _("Outstanding Amount"),
+            "fieldtype": "Currency",
+            "width": 150
+        },
+        {
+            "fieldname": "advance_amount",
+            "label": _("Advance Amount"),
+            "fieldtype": "Currency",
+            "width": 150
+        },
+        {
+            "fieldname": "credit_note_amount",
+            "label": _("Credit Note Amount"),
+            "fieldtype": "Currency",
+            "width": 150
+        },
+        {
+            "fieldname": "total_outstanding",
+            "label": _("Total Outstanding"),
+            "fieldtype": "Currency",
+            "width": 150
+        }
+    ]
 
-
-def _set_ageing_ranges(filters):
-	"""Convert custom 'range' input ('30, 60, 90, 120') to range1..range4 expected by ERPNext."""
-	# If already provided (e.g. you updated JS to send range1..range4), don't override
-	if filters.get("range1"):
-		return
-
-	raw = filters.get("range") or "30, 60, 90, 120"
-
-	if isinstance(raw, str):
-		parts = [p.strip() for p in raw.replace(",", " ").split() if p.strip()]
-	else:
-		parts = [str(x).strip() for x in (raw or []) if str(x).strip()]
-
-	defaults = ["30", "60", "90", "120"]
-	while len(parts) < 4:
-		parts.append(defaults[len(parts)])
-
-	filters["range1"] = cint(parts[0])
-	filters["range2"] = cint(parts[1])
-	filters["range3"] = cint(parts[2])
-	filters["range4"] = cint(parts[3])
-
-
-class CustomAgingWithPDC(ReceivablePayableReport):
-	def run(self, args):
-		# Force summary mode settings
-		self.filters.based_on_payment_terms = 0
-		self.filters.show_future_payments = 0
-		
-		# Let ERPNext build everything (columns/data/possibly chart/message)
-		result = super().run(args)
-
-		# Parent may return:
-		# - (columns, data)
-		# - (columns, data, chart/message/extra)
-		columns = result[0]
-		data = result[1]
-		extra = result[2] if len(result) > 2 else None
-
-		# Aggregate data by party if needed
-		data = self.aggregate_by_party(data)
-
-		# Insert our columns after Outstanding
-		outstanding_idx = None
-		for i, col in enumerate(columns):
-			# columns are dicts
-			if (col or {}).get("fieldname") == "outstanding":
-				outstanding_idx = i
-				break
-
-		if outstanding_idx is not None:
-			pdc_col = {
-				"label": _("PDC (Post-Dated Checks)"),
-				"fieldname": "pdc",
-				"fieldtype": "Currency",
-				"options": "currency",
-				"width": 120,
-			}
-			net_outstanding_col = {
-				"label": _("Net Outstanding"),
-				"fieldname": "net_outstanding",
-				"fieldtype": "Currency",
-				"options": "currency",
-				"width": 120,
-			}
-
-			# Prevent duplicate insert if report reruns without full reload
-			fieldnames = [(c or {}).get("fieldname") for c in columns]
-			if "pdc" not in fieldnames:
-				columns.insert(outstanding_idx + 1, pdc_col)
-			# recompute in case list changed
-			fieldnames = [(c or {}).get("fieldname") for c in columns]
-			if "net_outstanding" not in fieldnames:
-				columns.insert(outstanding_idx + 2, net_outstanding_col)
-
-		# Compute PDC amounts once - grouped by customer
-		pdc_amounts = get_party_pdc_amounts(self.filters.company)
-		precision = get_currency_precision() or 2
-
-		# Add PDC and Net Outstanding to each row
-		for row in data or []:
-			# Skip total/subtotal rows that don't have a party
-			if not row.get("party"):
-				continue
-				
-			# rows are usually frappe._dict, but handle plain dict too
-			party = row.get("party") if hasattr(row, "get") else None
-			pdc = flt(pdc_amounts.get(party, 0.0), precision)
-			outstanding = flt(row.get("outstanding", 0.0), precision)
-
-			row["pdc"] = pdc
-			row["net_outstanding"] = flt(outstanding - pdc, precision)
-
-		# Return same shape as parent returned
-		if extra is not None:
-			return columns, data, extra
-		return columns, data
-
-	def aggregate_by_party(self, data):
-		"""
-		Manually aggregate invoice-level data to customer-level summary.
-		If data is already aggregated (no voucher_no), return as-is.
-		"""
-		if not data:
-			return data
-			
-		# Check if already aggregated - summary rows don't have voucher_no
-		first_row = data[0] if data else {}
-		if not first_row.get("voucher_no") and not first_row.get("invoice"):
-			# Already aggregated
-			return data
-		
-		party_map = {}
-		
-		for row in data:
-			party = row.get("party")
-			if not party:
-				continue
-			
-			# Initialize party entry if not exists
-			if party not in party_map:
-				party_map[party] = frappe._dict({
-					"party": party,
-					"party_name": row.get("party_name"),
-					"customer_group": row.get("customer_group"),
-					"territory": row.get("territory"),
-					"payment_terms": row.get("payment_terms"),
-					"currency": row.get("currency"),
-					"credit_limit": row.get("credit_limit"),
-					"invoiced": 0,
-					"paid": 0,
-					"credit_note": 0,
-					"outstanding": 0,
-					"range1": 0,
-					"range2": 0,
-					"range3": 0,
-					"range4": 0,
-					"range5": 0,
-				})
-			
-			# Aggregate numeric amounts
-			for field in ["invoiced", "paid", "credit_note", "outstanding", 
-			              "range1", "range2", "range3", "range4", "range5"]:
-				party_map[party][field] += flt(row.get(field, 0))
-		
-		# Convert back to list
-		aggregated_data = list(party_map.values())
-		
-		# Sort by party name
-		aggregated_data.sort(key=lambda x: x.get("party_name") or x.get("party") or "")
-		
-		return aggregated_data
-
-
-def get_party_pdc_amounts(company):
-	"""
-	Fetch all draft Payment Entry records of type 'Receive'
-	and sum them by party (Customer).
-	
-	This correctly groups by customer, matching the customer-level
-	summary rows in the accounts receivable report.
-	"""
-	pdc_data = frappe.db.sql(
-		"""
-		SELECT
-			party,
-			SUM(paid_amount) as pdc_amount
-		FROM
-			`tabPayment Entry`
-		WHERE
-			docstatus = 0
-			AND payment_type = 'Receive'
-			AND company = %s
-			AND party_type = 'Customer'
-		GROUP BY
-			party
-		""",
-		(company,),
-		as_dict=1,
-	)
-
-	return {row.party: flt(row.pdc_amount) for row in (pdc_data or [])}
+def get_data(filters):
+    """Get customer outstanding data as of a specific date"""
+    
+    # Get filters with defaults
+    if not filters:
+        filters = {}
+    
+    company = filters.get("company") or frappe.defaults.get_user_default("Company")
+    to_date = getdate(filters.get("to_date") or frappe.utils.today())
+    customer_filter = filters.get("customer")
+    
+    if not company:
+        frappe.throw(_("Please select a Company"))
+    
+    # Initialize data dictionary
+    customer_data = {}
+    
+    # Build customer condition
+    customer_condition = " AND customer = %(customer)s" if customer_filter else ""
+    party_condition = " AND party = %(customer)s" if customer_filter else ""
+    
+    conditions = {
+        "company": company,
+        "to_date": to_date,
+        "customer": customer_filter
+    }
+    
+    # 1. SALES INVOICES - Get invoices posted up to to_date
+    # Calculate outstanding by subtracting payments made up to to_date
+    invoices = frappe.db.sql("""
+        SELECT 
+            si.customer,
+            si.customer_name,
+            si.name as invoice_name,
+            si.grand_total,
+            si.is_return,
+            COALESCE((
+                SELECT SUM(per.allocated_amount)
+                FROM `tabPayment Entry Reference` per
+                INNER JOIN `tabPayment Entry` pe ON per.parent = pe.name
+                WHERE per.reference_doctype = 'Sales Invoice'
+                    AND per.reference_name = si.name
+                    AND pe.docstatus = 1
+                    AND pe.posting_date <= %(to_date)s
+            ), 0) as paid_amount,
+            COALESCE((
+                SELECT SUM(jea.credit - jea.debit)
+                FROM `tabJournal Entry Account` jea
+                INNER JOIN `tabJournal Entry` je ON jea.parent = je.name
+                WHERE jea.reference_type = 'Sales Invoice'
+                    AND jea.reference_name = si.name
+                    AND je.docstatus = 1
+                    AND je.posting_date <= %(to_date)s
+            ), 0) as journal_adjusted
+        FROM 
+            `tabSales Invoice` si
+        WHERE 
+            si.docstatus = 1
+            AND si.company = %(company)s
+            AND si.posting_date <= %(to_date)s
+            {customer_condition}
+    """.format(customer_condition=customer_condition), conditions, as_dict=1)
+    
+    for inv in invoices:
+        customer = inv.customer
+        
+        if customer not in customer_data:
+            customer_data[customer] = {
+                "customer": customer,
+                "customer_name": inv.customer_name,
+                "outstanding_amount": 0,
+                "advance_amount": 0,
+                "credit_note_amount": 0
+            }
+        
+        # Calculate outstanding as of to_date
+        outstanding = flt(inv.grand_total) - flt(inv.paid_amount) - flt(inv.journal_adjusted)
+        
+        if inv.is_return:
+            # Credit notes with outstanding balance
+            if outstanding < 0:  # Credit notes are negative
+                customer_data[customer]["credit_note_amount"] += abs(outstanding)
+        else:
+            # Regular invoices
+            if outstanding > 0:
+                customer_data[customer]["outstanding_amount"] += outstanding
+            elif outstanding < 0:
+                # Overpayment
+                customer_data[customer]["advance_amount"] += abs(outstanding)
+    
+    # 2. JOURNAL ENTRIES - Posted up to to_date (excluding those already linked to invoices)
+    journal_entries = frappe.db.sql("""
+        SELECT 
+            jea.party as customer,
+            jea.party_name as customer_name,
+            SUM(jea.debit - jea.credit) as net_amount
+        FROM 
+            `tabJournal Entry Account` jea
+        INNER JOIN 
+            `tabJournal Entry` je ON jea.parent = je.name
+        WHERE 
+            je.docstatus = 1
+            AND jea.party_type = 'Customer'
+            AND jea.party IS NOT NULL
+            AND je.company = %(company)s
+            AND je.posting_date <= %(to_date)s
+            AND (jea.reference_type IS NULL OR jea.reference_type != 'Sales Invoice')
+            {party_condition}
+        GROUP BY 
+            jea.party
+        HAVING 
+            net_amount != 0
+    """.format(party_condition=party_condition), conditions, as_dict=1)
+    
+    for row in journal_entries:
+        customer = row.customer
+        
+        if customer not in customer_data:
+            customer_name = row.customer_name or frappe.db.get_value("Customer", customer, "customer_name")
+            customer_data[customer] = {
+                "customer": customer,
+                "customer_name": customer_name,
+                "outstanding_amount": 0,
+                "advance_amount": 0,
+                "credit_note_amount": 0
+            }
+        
+        net_amount = flt(row.net_amount)
+        if net_amount > 0:
+            customer_data[customer]["outstanding_amount"] += net_amount
+        else:
+            customer_data[customer]["advance_amount"] += abs(net_amount)
+    
+    # 3. UNALLOCATED PAYMENT ENTRIES - Posted up to to_date
+    unallocated_payments = frappe.db.sql("""
+        SELECT 
+            pe.party as customer,
+            pe.name as payment_entry,
+            pe.paid_amount,
+            COALESCE((
+                SELECT SUM(per.allocated_amount)
+                FROM `tabPayment Entry Reference` per
+                WHERE per.parent = pe.name
+            ), 0) as allocated_amount
+        FROM 
+            `tabPayment Entry` pe
+        WHERE 
+            pe.docstatus = 1
+            AND pe.party_type = 'Customer'
+            AND pe.payment_type = 'Receive'
+            AND pe.company = %(company)s
+            AND pe.posting_date <= %(to_date)s
+            {party_condition}
+    """.format(party_condition=party_condition), conditions, as_dict=1)
+    
+    for payment in unallocated_payments:
+        customer = payment.customer
+        
+        if customer not in customer_data:
+            customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+            customer_data[customer] = {
+                "customer": customer,
+                "customer_name": customer_name,
+                "outstanding_amount": 0,
+                "advance_amount": 0,
+                "credit_note_amount": 0
+            }
+        
+        # Unallocated amount
+        unallocated = flt(payment.paid_amount) - flt(payment.allocated_amount)
+        
+        if unallocated > 0:
+            customer_data[customer]["advance_amount"] += unallocated
+    
+    # Prepare final data
+    data = []
+    for customer, values in customer_data.items():
+        total_outstanding = (
+            flt(values["outstanding_amount"]) 
+            - flt(values["advance_amount"]) 
+            - flt(values["credit_note_amount"])
+        )
+        
+        # Include all customers with any balance
+        if (values["outstanding_amount"] != 0 or 
+            values["advance_amount"] != 0 or 
+            values["credit_note_amount"] != 0):
+            
+            data.append({
+                "customer": values["customer"],
+                "customer_name": values["customer_name"],
+                "outstanding_amount": flt(values["outstanding_amount"], 2),
+                "advance_amount": flt(values["advance_amount"], 2),
+                "credit_note_amount": flt(values["credit_note_amount"], 2),
+                "total_outstanding": flt(total_outstanding, 2)
+            })
+    
+    # Sort by total outstanding (descending)
+    data.sort(key=lambda x: x["total_outstanding"], reverse=True)
+    
+    return data
