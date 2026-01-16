@@ -1,6 +1,6 @@
 # Copyright (c) 2025, Crystal Customizations
 # License: MIT
-# Outstanding Debts Report with Month-Wise Breakdown and Sales Person
+# Outstanding Debts Report with Month-Wise Breakdown, Sales Person, and PDC
 
 import frappe
 from frappe import _
@@ -127,6 +127,12 @@ def get_columns(filters):
             "label": _("Sales Person"),
             "fieldtype": "Data",
             "width": 150
+        },
+        {
+            "fieldname": "pdc_amount",
+            "label": _("PDC Amount"),
+            "fieldtype": "Currency",
+            "width": 150
         }
     ]
     
@@ -184,10 +190,29 @@ def get_customer_sales_person(customer):
     if sales_team:
         return sales_team[0].sales_person
     
-    # Fallback to custom field if you have one
-    # return frappe.db.get_value("Customer", customer, "custom_sales_person") or ""
-    
     return ""
+
+def get_customer_pdc_amount(customer, company, to_date):
+    """Get total PDC (draft payment entries) amount for a customer"""
+    pdc_payments = frappe.db.sql("""
+        SELECT 
+            SUM(pe.paid_amount) as total_pdc
+        FROM 
+            `tabPayment Entry` pe
+        WHERE 
+            pe.docstatus = 0
+            AND pe.party_type = 'Customer'
+            AND pe.party = %(customer)s
+            AND pe.payment_type = 'Receive'
+            AND pe.company = %(company)s
+            AND pe.reference_date <= %(to_date)s
+    """, {
+        "customer": customer,
+        "company": company,
+        "to_date": to_date
+    }, as_dict=1)
+    
+    return flt(pdc_payments[0].total_pdc) if pdc_payments and pdc_payments[0].total_pdc else 0
 
 def get_data(filters):
     """Get customer outstanding data - EXACT SAME LOGIC AS ORIGINAL"""
@@ -258,13 +283,15 @@ def get_data(filters):
         month_year = inv.month_year
         
         if customer not in customer_data:
-            # Get sales person for this customer
+            # Get sales person and PDC for this customer
             sales_person = get_customer_sales_person(customer)
+            pdc_amount = get_customer_pdc_amount(customer, company, to_date)
             
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": inv.customer_name,
                 "sales_person": sales_person,
+                "pdc_amount": pdc_amount,
                 "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
@@ -321,11 +348,13 @@ def get_data(filters):
         if customer not in customer_data:
             customer_name = frappe.db.get_value("Customer", customer, "customer_name")
             sales_person = get_customer_sales_person(customer)
+            pdc_amount = get_customer_pdc_amount(customer, company, to_date)
             
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": customer_name,
                 "sales_person": sales_person,
+                "pdc_amount": pdc_amount,
                 "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
@@ -371,11 +400,13 @@ def get_data(filters):
         if customer not in customer_data:
             customer_name = frappe.db.get_value("Customer", customer, "customer_name")
             sales_person = get_customer_sales_person(customer)
+            pdc_amount = get_customer_pdc_amount(customer, company, to_date)
             
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": customer_name,
                 "sales_person": sales_person,
+                "pdc_amount": pdc_amount,
                 "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
@@ -406,6 +437,7 @@ def get_data(filters):
                 "customer": values["customer"],
                 "customer_name": values["customer_name"],
                 "sales_person": values["sales_person"],
+                "pdc_amount": flt(values["pdc_amount"], 2),
                 "outstanding_amount": flt(values["outstanding_amount"], 2),
                 "advance_amount": flt(values["advance_amount"], 2),
                 "credit_note_amount": flt(values["credit_note_amount"], 2),
