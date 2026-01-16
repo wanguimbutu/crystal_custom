@@ -1,6 +1,6 @@
 # Copyright (c) 2025, Crystal Customizations
 # License: MIT
-# Outstanding Debts Report with Month-Wise Breakdown (Using Original Calculation)
+# Outstanding Debts Report with Month-Wise Breakdown and Sales Person
 
 import frappe
 from frappe import _
@@ -121,6 +121,12 @@ def get_columns(filters):
             "label": _("Customer Name"),
             "fieldtype": "Data",
             "width": 180
+        },
+        {
+            "fieldname": "sales_person",
+            "label": _("Sales Person"),
+            "fieldtype": "Data",
+            "width": 150
         }
     ]
     
@@ -162,6 +168,26 @@ def get_columns(filters):
     ])
     
     return columns
+
+def get_customer_sales_person(customer):
+    """Get primary sales person for a customer"""
+    # Try to get from Sales Team child table (most common)
+    sales_team = frappe.db.sql("""
+        SELECT st.sales_person
+        FROM `tabSales Team` st
+        WHERE st.parent = %(customer)s
+            AND st.parenttype = 'Customer'
+        ORDER BY st.allocated_percentage DESC
+        LIMIT 1
+    """, {"customer": customer}, as_dict=1)
+    
+    if sales_team:
+        return sales_team[0].sales_person
+    
+    # Fallback to custom field if you have one
+    # return frappe.db.get_value("Customer", customer, "custom_sales_person") or ""
+    
+    return ""
 
 def get_data(filters):
     """Get customer outstanding data - EXACT SAME LOGIC AS ORIGINAL"""
@@ -232,10 +258,14 @@ def get_data(filters):
         month_year = inv.month_year
         
         if customer not in customer_data:
+            # Get sales person for this customer
+            sales_person = get_customer_sales_person(customer)
+            
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": inv.customer_name,
-                "months": {},  # NEW: track month breakdown
+                "sales_person": sales_person,
+                "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
@@ -252,7 +282,7 @@ def get_data(filters):
             # Regular invoices - EXACT SAME AS ORIGINAL
             if outstanding > 0:
                 customer_data[customer]["outstanding_amount"] += outstanding
-                # NEW: Also track which month this outstanding is from
+                # Also track which month this outstanding is from
                 if month_year not in customer_data[customer]["months"]:
                     customer_data[customer]["months"][month_year] = 0
                 customer_data[customer]["months"][month_year] += outstanding
@@ -290,10 +320,13 @@ def get_data(filters):
         
         if customer not in customer_data:
             customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+            sales_person = get_customer_sales_person(customer)
+            
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": customer_name,
-                "months": {},  # NEW: track month breakdown
+                "sales_person": sales_person,
+                "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
@@ -303,7 +336,7 @@ def get_data(filters):
         # EXACT SAME LOGIC AS ORIGINAL
         if net_amount > 0:
             customer_data[customer]["outstanding_amount"] += net_amount
-            # NEW: Also track which month this is from
+            # Also track which month this is from
             if month_year not in customer_data[customer]["months"]:
                 customer_data[customer]["months"][month_year] = 0
             customer_data[customer]["months"][month_year] += net_amount
@@ -337,10 +370,13 @@ def get_data(filters):
         
         if customer not in customer_data:
             customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+            sales_person = get_customer_sales_person(customer)
+            
             customer_data[customer] = {
                 "customer": customer,
                 "customer_name": customer_name,
-                "months": {},  # NEW: track month breakdown
+                "sales_person": sales_person,
+                "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
                 "credit_note_amount": 0
@@ -369,13 +405,14 @@ def get_data(filters):
             row_data = {
                 "customer": values["customer"],
                 "customer_name": values["customer_name"],
+                "sales_person": values["sales_person"],
                 "outstanding_amount": flt(values["outstanding_amount"], 2),
                 "advance_amount": flt(values["advance_amount"], 2),
                 "credit_note_amount": flt(values["credit_note_amount"], 2),
                 "total_outstanding": flt(total_outstanding, 2)
             }
             
-            # NEW: Add month-wise data
+            # Add month-wise data
             for month_year, amount in values["months"].items():
                 field_name = f"month_{month_year.replace('-', '_')}"
                 row_data[field_name] = flt(amount, 2)
