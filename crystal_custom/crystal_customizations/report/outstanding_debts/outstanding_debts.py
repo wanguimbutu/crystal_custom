@@ -205,11 +205,9 @@ def get_customer_pdc_amount(customer, company, to_date):
             AND pe.party = %(customer)s
             AND pe.payment_type = 'Receive'
             AND pe.company = %(company)s
-            AND pe.reference_date <= %(to_date)s
     """, {
         "customer": customer,
-        "company": company,
-        "to_date": to_date
+        "company": company
     }, as_dict=1)
     
     return flt(pdc_payments[0].total_pdc) if pdc_payments and pdc_payments[0].total_pdc else 0
@@ -451,7 +449,7 @@ def get_data(filters):
             
             data.append(row_data)
     
-    # Sort by total outstanding (descending) - EXACT SAME AS ORIGINAL
+    
     data.sort(key=lambda x: x["total_outstanding"], reverse=True)
     
     return data
