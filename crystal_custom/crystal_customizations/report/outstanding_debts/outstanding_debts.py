@@ -170,6 +170,12 @@ def get_columns(filters):
             "label": _("Total Outstanding"),
             "fieldtype": "Currency",
             "width": 150
+        },
+        {
+            "fieldname": "net_outstanding",
+            "label": _("Net Outstanding"),
+            "fieldtype": "Currency",
+            "width": 150
         }
     ])
     
@@ -426,6 +432,9 @@ def get_data(filters):
             - flt(values["credit_note_amount"])
         )
         
+        # Calculate net outstanding (total outstanding - PDC)
+        net_outstanding = total_outstanding - flt(values["pdc_amount"])
+        
         # Include all customers with any balance - EXACT SAME AS ORIGINAL
         if (values["outstanding_amount"] != 0 or 
             values["advance_amount"] != 0 or 
@@ -439,7 +448,8 @@ def get_data(filters):
                 "outstanding_amount": flt(values["outstanding_amount"], 2),
                 "advance_amount": flt(values["advance_amount"], 2),
                 "credit_note_amount": flt(values["credit_note_amount"], 2),
-                "total_outstanding": flt(total_outstanding, 2)
+                "total_outstanding": flt(total_outstanding, 2),
+                "net_outstanding": flt(net_outstanding, 2)
             }
             
             # Add month-wise data
@@ -449,7 +459,7 @@ def get_data(filters):
             
             data.append(row_data)
     
-    
+    # Sort by total outstanding (descending) - EXACT SAME AS ORIGINAL
     data.sort(key=lambda x: x["total_outstanding"], reverse=True)
     
     return data
