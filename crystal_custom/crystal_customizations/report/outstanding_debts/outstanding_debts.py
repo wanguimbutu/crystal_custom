@@ -1,6 +1,6 @@
 # Copyright (c) 2025, Crystal Customizations
 # License: MIT
-# Outstanding Debts Report with Month-Wise Breakdown, Sales Person, and PDC
+# Outstanding Debts Report with SQL-level Sales Person Filtering
 
 import frappe
 from frappe import _
@@ -14,40 +14,7 @@ def execute(filters=None):
     columns = get_columns(filters)
     data = get_data(filters)
     
-    # Return columns, data, and optionally: message, chart, report_summary, skip_total_row
     return columns, data
-
-def get_filters():
-    """Define report filters - this will be called by ERPNext to show filter UI"""
-    return [
-        {
-            "fieldname": "company",
-            "label": _("Company"),
-            "fieldtype": "Link",
-            "options": "Company",
-            "default": frappe.defaults.get_user_default("Company"),
-            "reqd": 1
-        },
-        {
-            "fieldname": "from_date",
-            "label": _("From Date"),
-            "fieldtype": "Date",
-            "reqd": 0
-        },
-        {
-            "fieldname": "to_date",
-            "label": _("As On Date"),
-            "fieldtype": "Date",
-            "default": frappe.utils.today(),
-            "reqd": 1
-        },
-        {
-            "fieldname": "sales_person",
-            "label": _("Sales Person"),
-            "fieldtype": "Link",
-            "options": "Sales Person"
-        }
-    ]
 
 def get_columns(filters):
     """Define report columns dynamically based on months with data"""
@@ -58,6 +25,17 @@ def get_columns(filters):
     to_date = getdate(filters.get("to_date") or frappe.utils.today())
     sales_person_filter = filters.get("sales_person")
     
+    # Build sales person filter condition for invoices
+    sales_person_join = ""
+    sales_person_condition = ""
+    if sales_person_filter:
+        sales_person_join = """
+            INNER JOIN `tabSales Team` st_filter 
+                ON st_filter.parent = si.customer 
+                AND st_filter.parenttype = 'Customer'
+        """
+        sales_person_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
+    
     # Get all unique month-years from invoices that have outstanding
     from_date_condition = " AND si.posting_date >= %(from_date)s" if from_date else ""
     
@@ -67,20 +45,37 @@ def get_columns(filters):
             DATE_FORMAT(si.posting_date, '%%b %%Y') as display_month
         FROM 
             `tabSales Invoice` si
+            {sales_person_join}
         WHERE 
             si.docstatus = 1
             AND si.company = %(company)s
             AND si.posting_date <= %(to_date)s
             {from_date_condition}
+            {sales_person_condition}
         ORDER BY 
             month_year ASC
-    """.format(from_date_condition=from_date_condition), {
+    """.format(
+        sales_person_join=sales_person_join,
+        from_date_condition=from_date_condition,
+        sales_person_condition=sales_person_condition
+    ), {
         "company": company,
         "from_date": from_date,
-        "to_date": to_date
+        "to_date": to_date,
+        "sales_person_filter": sales_person_filter
     }, as_dict=1)
     
     # Also get month-years from journal entries
+    je_sales_person_join = ""
+    je_sales_person_condition = ""
+    if sales_person_filter:
+        je_sales_person_join = """
+            INNER JOIN `tabSales Team` st_filter 
+                ON st_filter.parent = jea.party 
+                AND st_filter.parenttype = 'Customer'
+        """
+        je_sales_person_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
+    
     from_date_je_condition = " AND je.posting_date >= %(from_date)s" if from_date else ""
     
     je_month_years = frappe.db.sql("""
@@ -91,6 +86,7 @@ def get_columns(filters):
             `tabJournal Entry Account` jea
         INNER JOIN 
             `tabJournal Entry` je ON jea.parent = je.name
+            {je_sales_person_join}
         WHERE 
             je.docstatus = 1
             AND jea.party_type = 'Customer'
@@ -99,12 +95,18 @@ def get_columns(filters):
             AND je.posting_date <= %(to_date)s
             {from_date_je_condition}
             AND (jea.reference_type IS NULL OR jea.reference_type != 'Sales Invoice')
+            {je_sales_person_condition}
         ORDER BY 
             month_year ASC
-    """.format(from_date_je_condition=from_date_je_condition), {
+    """.format(
+        je_sales_person_join=je_sales_person_join,
+        from_date_je_condition=from_date_je_condition,
+        je_sales_person_condition=je_sales_person_condition
+    ), {
         "company": company,
         "from_date": from_date,
-        "to_date": to_date
+        "to_date": to_date,
+        "sales_person_filter": sales_person_filter
     }, as_dict=1)
     
     # Combine and deduplicate month-years
@@ -191,7 +193,6 @@ def get_columns(filters):
 
 def get_customer_sales_person(customer):
     """Get primary sales person for a customer"""
-    # Method 1: Try to get from Sales Team child table (most common)
     sales_team = frappe.db.sql("""
         SELECT st.sales_person
         FROM `tabSales Team` st
@@ -204,22 +205,9 @@ def get_customer_sales_person(customer):
     if sales_team and sales_team[0].sales_person:
         return sales_team[0].sales_person
     
-    # Method 2: Check if there's a custom field for sales person
-    # Uncomment this if you have a custom field
-    # custom_sales_person = frappe.db.get_value("Customer", customer, "custom_sales_person")
-    # if custom_sales_person:
-    #     return custom_sales_person
-    
-    # Method 3: Get from territory sales person (if applicable)
-    territory = frappe.db.get_value("Customer", customer, "territory")
-    if territory:
-        territory_sp = frappe.db.get_value("Territory", territory, "custom_sales_person")
-        if territory_sp:
-            return territory_sp
-    
     return ""
 
-def get_customer_pdc_amount(customer, company, to_date):
+def get_customer_pdc_amount(customer, company):
     """Get total PDC (draft payment entries) amount for a customer"""
     pdc_payments = frappe.db.sql("""
         SELECT 
@@ -240,7 +228,7 @@ def get_customer_pdc_amount(customer, company, to_date):
     return flt(pdc_payments[0].total_pdc) if pdc_payments and pdc_payments[0].total_pdc else 0
 
 def get_data(filters):
-    """Get customer outstanding data - EXACT SAME LOGIC AS ORIGINAL"""
+    """Get customer outstanding data with SQL-level sales person filtering"""
     
     # Get filters with defaults
     if not filters:
@@ -262,13 +250,25 @@ def get_data(filters):
     from_date_je_condition = " AND je.posting_date >= %(from_date)s" if from_date else ""
     from_date_pe_condition = " AND pe.posting_date >= %(from_date)s" if from_date else ""
     
+    # Build sales person filter
+    sales_person_join = ""
+    sales_person_condition = ""
+    if sales_person_filter:
+        sales_person_join = """
+            INNER JOIN `tabSales Team` st_filter 
+                ON st_filter.parent = si.customer 
+                AND st_filter.parenttype = 'Customer'
+        """
+        sales_person_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
+    
     conditions = {
         "company": company,
         "from_date": from_date,
-        "to_date": to_date
+        "to_date": to_date,
+        "sales_person_filter": sales_person_filter
     }
     
-    # 1. SALES INVOICES - EXACT SAME QUERY AS ORIGINAL, just add posting_date for month tracking
+    # 1. SALES INVOICES with sales person filter in SQL
     invoices = frappe.db.sql("""
         SELECT 
             si.customer,
@@ -298,21 +298,26 @@ def get_data(filters):
             ), 0) as journal_adjusted
         FROM 
             `tabSales Invoice` si
+            {sales_person_join}
         WHERE 
             si.docstatus = 1
             AND si.company = %(company)s
             AND si.posting_date <= %(to_date)s
             {from_date_condition}
-    """.format(from_date_condition=from_date_condition), conditions, as_dict=1)
+            {sales_person_condition}
+    """.format(
+        sales_person_join=sales_person_join,
+        from_date_condition=from_date_condition,
+        sales_person_condition=sales_person_condition
+    ), conditions, as_dict=1)
     
     for inv in invoices:
         customer = inv.customer
         month_year = inv.month_year
         
         if customer not in customer_data:
-            # Get sales person and PDC for this customer
             sales_person = get_customer_sales_person(customer)
-            pdc_amount = get_customer_pdc_amount(customer, company, to_date)
+            pdc_amount = get_customer_pdc_amount(customer, company)
             
             customer_data[customer] = {
                 "customer": customer,
@@ -325,26 +330,32 @@ def get_data(filters):
                 "credit_note_amount": 0
             }
         
-        # Calculate outstanding as of to_date - EXACT SAME AS ORIGINAL
+        # Calculate outstanding as of to_date
         outstanding = flt(inv.grand_total) - flt(inv.paid_amount) - flt(inv.journal_adjusted)
         
         if inv.is_return:
-            # Credit notes with outstanding balance - EXACT SAME AS ORIGINAL
-            if outstanding < 0:  # Credit notes are negative
+            if outstanding < 0:
                 customer_data[customer]["credit_note_amount"] += abs(outstanding)
         else:
-            # Regular invoices - EXACT SAME AS ORIGINAL
             if outstanding > 0:
                 customer_data[customer]["outstanding_amount"] += outstanding
-                # Also track which month this outstanding is from
                 if month_year not in customer_data[customer]["months"]:
                     customer_data[customer]["months"][month_year] = 0
                 customer_data[customer]["months"][month_year] += outstanding
             elif outstanding < 0:
-                # Overpayment - EXACT SAME AS ORIGINAL
                 customer_data[customer]["advance_amount"] += abs(outstanding)
     
-    # 2. JOURNAL ENTRIES - EXACT SAME AS ORIGINAL, just add month tracking
+    # 2. JOURNAL ENTRIES with sales person filter in SQL
+    je_sales_person_join = ""
+    je_sales_person_condition = ""
+    if sales_person_filter:
+        je_sales_person_join = """
+            INNER JOIN `tabSales Team` st_filter 
+                ON st_filter.parent = jea.party 
+                AND st_filter.parenttype = 'Customer'
+        """
+        je_sales_person_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
+    
     journal_entries = frappe.db.sql("""
         SELECT 
             jea.party as customer,
@@ -354,6 +365,7 @@ def get_data(filters):
             `tabJournal Entry Account` jea
         INNER JOIN 
             `tabJournal Entry` je ON jea.parent = je.name
+            {je_sales_person_join}
         WHERE 
             je.docstatus = 1
             AND jea.party_type = 'Customer'
@@ -362,11 +374,16 @@ def get_data(filters):
             AND je.posting_date <= %(to_date)s
             {from_date_je_condition}
             AND (jea.reference_type IS NULL OR jea.reference_type != 'Sales Invoice')
+            {je_sales_person_condition}
         GROUP BY 
             jea.party, month_year
         HAVING 
             net_amount != 0
-    """.format(from_date_je_condition=from_date_je_condition), conditions, as_dict=1)
+    """.format(
+        je_sales_person_join=je_sales_person_join,
+        from_date_je_condition=from_date_je_condition,
+        je_sales_person_condition=je_sales_person_condition
+    ), conditions, as_dict=1)
     
     for row in journal_entries:
         customer = row.customer
@@ -375,7 +392,7 @@ def get_data(filters):
         if customer not in customer_data:
             customer_name = frappe.db.get_value("Customer", customer, "customer_name")
             sales_person = get_customer_sales_person(customer)
-            pdc_amount = get_customer_pdc_amount(customer, company, to_date)
+            pdc_amount = get_customer_pdc_amount(customer, company)
             
             customer_data[customer] = {
                 "customer": customer,
@@ -389,17 +406,25 @@ def get_data(filters):
             }
         
         net_amount = flt(row.net_amount)
-        # EXACT SAME LOGIC AS ORIGINAL
         if net_amount > 0:
             customer_data[customer]["outstanding_amount"] += net_amount
-            # Also track which month this is from
             if month_year not in customer_data[customer]["months"]:
                 customer_data[customer]["months"][month_year] = 0
             customer_data[customer]["months"][month_year] += net_amount
         else:
             customer_data[customer]["advance_amount"] += abs(net_amount)
     
-    # 3. UNALLOCATED PAYMENT ENTRIES - EXACT SAME AS ORIGINAL
+    # 3. UNALLOCATED PAYMENT ENTRIES with sales person filter in SQL
+    pe_sales_person_join = ""
+    pe_sales_person_condition = ""
+    if sales_person_filter:
+        pe_sales_person_join = """
+            INNER JOIN `tabSales Team` st_filter 
+                ON st_filter.parent = pe.party 
+                AND st_filter.parenttype = 'Customer'
+        """
+        pe_sales_person_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
+    
     unallocated_payments = frappe.db.sql("""
         SELECT 
             pe.party as customer,
@@ -412,6 +437,7 @@ def get_data(filters):
             ), 0) as allocated_amount
         FROM 
             `tabPayment Entry` pe
+            {pe_sales_person_join}
         WHERE 
             pe.docstatus = 1
             AND pe.party_type = 'Customer'
@@ -419,7 +445,12 @@ def get_data(filters):
             AND pe.company = %(company)s
             AND pe.posting_date <= %(to_date)s
             {from_date_pe_condition}
-    """.format(from_date_pe_condition=from_date_pe_condition), conditions, as_dict=1)
+            {pe_sales_person_condition}
+    """.format(
+        pe_sales_person_join=pe_sales_person_join,
+        from_date_pe_condition=from_date_pe_condition,
+        pe_sales_person_condition=pe_sales_person_condition
+    ), conditions, as_dict=1)
     
     for payment in unallocated_payments:
         customer = payment.customer
@@ -427,7 +458,7 @@ def get_data(filters):
         if customer not in customer_data:
             customer_name = frappe.db.get_value("Customer", customer, "customer_name")
             sales_person = get_customer_sales_person(customer)
-            pdc_amount = get_customer_pdc_amount(customer, company, to_date)
+            pdc_amount = get_customer_pdc_amount(customer, company)
             
             customer_data[customer] = {
                 "customer": customer,
@@ -440,22 +471,14 @@ def get_data(filters):
                 "credit_note_amount": 0
             }
         
-        # Unallocated amount - EXACT SAME AS ORIGINAL
         unallocated = flt(payment.paid_amount) - flt(payment.allocated_amount)
         
         if unallocated > 0:
             customer_data[customer]["advance_amount"] += unallocated
     
-    # Prepare final data - EXACT SAME AS ORIGINAL
+    # Prepare final data
     data = []
     for customer, values in customer_data.items():
-        # Apply sales person filter if specified
-        if sales_person_filter:
-            customer_sp = values.get("sales_person", "")
-            # Skip if sales person doesn't match (handle empty strings and None)
-            if not customer_sp or customer_sp != sales_person_filter:
-                continue
-        
         total_outstanding = (
             flt(values["outstanding_amount"]) 
             - flt(values["advance_amount"]) 
@@ -465,7 +488,7 @@ def get_data(filters):
         # Calculate net outstanding (total outstanding - PDC)
         net_outstanding = total_outstanding - flt(values["pdc_amount"])
         
-        # Include all customers with any balance - EXACT SAME AS ORIGINAL
+        # Include all customers with any balance
         if (values["outstanding_amount"] != 0 or 
             values["advance_amount"] != 0 or 
             values["credit_note_amount"] != 0):
@@ -489,7 +512,7 @@ def get_data(filters):
             
             data.append(row_data)
     
-    # Sort by total outstanding (descending) - EXACT SAME AS ORIGINAL
+    # Sort by total outstanding (descending)
     data.sort(key=lambda x: x["total_outstanding"], reverse=True)
     
     return data
