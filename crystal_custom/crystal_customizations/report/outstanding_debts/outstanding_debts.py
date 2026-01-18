@@ -14,10 +14,11 @@ def execute(filters=None):
     columns = get_columns(filters)
     data = get_data(filters)
     
+    # Return columns, data, and optionally: message, chart, report_summary, skip_total_row
     return columns, data
 
 def get_filters():
-    """Define report filters"""
+    """Define report filters - this will be called by ERPNext to show filter UI"""
     return [
         {
             "fieldname": "company",
@@ -28,6 +29,12 @@ def get_filters():
             "reqd": 1
         },
         {
+            "fieldname": "from_date",
+            "label": _("From Date"),
+            "fieldtype": "Date",
+            "reqd": 0
+        },
+        {
             "fieldname": "to_date",
             "label": _("As On Date"),
             "fieldtype": "Date",
@@ -35,10 +42,10 @@ def get_filters():
             "reqd": 1
         },
         {
-            "fieldname": "customer",
-            "label": _("Customer"),
+            "fieldname": "sales_person",
+            "label": _("Sales Person"),
             "fieldtype": "Link",
-            "options": "Customer"
+            "options": "Sales Person"
         }
     ]
 
@@ -47,11 +54,12 @@ def get_columns(filters):
     
     # Get filters with defaults
     company = filters.get("company") or frappe.defaults.get_user_default("Company")
+    from_date = filters.get("from_date")
     to_date = getdate(filters.get("to_date") or frappe.utils.today())
-    customer_filter = filters.get("customer")
+    sales_person_filter = filters.get("sales_person")
     
     # Get all unique month-years from invoices that have outstanding
-    customer_condition = " AND si.customer = %(customer)s" if customer_filter else ""
+    from_date_condition = " AND si.posting_date >= %(from_date)s" if from_date else ""
     
     month_years = frappe.db.sql("""
         SELECT DISTINCT 
@@ -63,17 +71,17 @@ def get_columns(filters):
             si.docstatus = 1
             AND si.company = %(company)s
             AND si.posting_date <= %(to_date)s
-            {customer_condition}
+            {from_date_condition}
         ORDER BY 
             month_year ASC
-    """.format(customer_condition=customer_condition), {
+    """.format(from_date_condition=from_date_condition), {
         "company": company,
-        "to_date": to_date,
-        "customer": customer_filter
+        "from_date": from_date,
+        "to_date": to_date
     }, as_dict=1)
     
     # Also get month-years from journal entries
-    party_condition = " AND jea.party = %(customer)s" if customer_filter else ""
+    from_date_je_condition = " AND je.posting_date >= %(from_date)s" if from_date else ""
     
     je_month_years = frappe.db.sql("""
         SELECT DISTINCT 
@@ -89,14 +97,14 @@ def get_columns(filters):
             AND jea.party IS NOT NULL
             AND je.company = %(company)s
             AND je.posting_date <= %(to_date)s
+            {from_date_je_condition}
             AND (jea.reference_type IS NULL OR jea.reference_type != 'Sales Invoice')
-            {party_condition}
         ORDER BY 
             month_year ASC
-    """.format(party_condition=party_condition), {
+    """.format(from_date_je_condition=from_date_je_condition), {
         "company": company,
-        "to_date": to_date,
-        "customer": customer_filter
+        "from_date": from_date,
+        "to_date": to_date
     }, as_dict=1)
     
     # Combine and deduplicate month-years
@@ -226,8 +234,9 @@ def get_data(filters):
         filters = {}
     
     company = filters.get("company") or frappe.defaults.get_user_default("Company")
+    from_date = filters.get("from_date")
     to_date = getdate(filters.get("to_date") or frappe.utils.today())
-    customer_filter = filters.get("customer")
+    sales_person_filter = filters.get("sales_person")
     
     if not company:
         frappe.throw(_("Please select a Company"))
@@ -235,14 +244,15 @@ def get_data(filters):
     # Initialize data dictionary
     customer_data = {}
     
-    # Build customer condition
-    customer_condition = " AND customer = %(customer)s" if customer_filter else ""
-    party_condition = " AND party = %(customer)s" if customer_filter else ""
+    # Build filter conditions
+    from_date_condition = " AND si.posting_date >= %(from_date)s" if from_date else ""
+    from_date_je_condition = " AND je.posting_date >= %(from_date)s" if from_date else ""
+    from_date_pe_condition = " AND pe.posting_date >= %(from_date)s" if from_date else ""
     
     conditions = {
         "company": company,
-        "to_date": to_date,
-        "customer": customer_filter
+        "from_date": from_date,
+        "to_date": to_date
     }
     
     # 1. SALES INVOICES - EXACT SAME QUERY AS ORIGINAL, just add posting_date for month tracking
@@ -279,8 +289,8 @@ def get_data(filters):
             si.docstatus = 1
             AND si.company = %(company)s
             AND si.posting_date <= %(to_date)s
-            {customer_condition}
-    """.format(customer_condition=customer_condition), conditions, as_dict=1)
+            {from_date_condition}
+    """.format(from_date_condition=from_date_condition), conditions, as_dict=1)
     
     for inv in invoices:
         customer = inv.customer
@@ -337,13 +347,13 @@ def get_data(filters):
             AND jea.party IS NOT NULL
             AND je.company = %(company)s
             AND je.posting_date <= %(to_date)s
+            {from_date_je_condition}
             AND (jea.reference_type IS NULL OR jea.reference_type != 'Sales Invoice')
-            {party_condition}
         GROUP BY 
             jea.party, month_year
         HAVING 
             net_amount != 0
-    """.format(party_condition=party_condition), conditions, as_dict=1)
+    """.format(from_date_je_condition=from_date_je_condition), conditions, as_dict=1)
     
     for row in journal_entries:
         customer = row.customer
@@ -395,8 +405,8 @@ def get_data(filters):
             AND pe.payment_type = 'Receive'
             AND pe.company = %(company)s
             AND pe.posting_date <= %(to_date)s
-            {party_condition}
-    """.format(party_condition=party_condition), conditions, as_dict=1)
+            {from_date_pe_condition}
+    """.format(from_date_pe_condition=from_date_pe_condition), conditions, as_dict=1)
     
     for payment in unallocated_payments:
         customer = payment.customer
@@ -426,6 +436,10 @@ def get_data(filters):
     # Prepare final data - EXACT SAME AS ORIGINAL
     data = []
     for customer, values in customer_data.items():
+        # Apply sales person filter if specified
+        if sales_person_filter and values["sales_person"] != sales_person_filter:
+            continue
+        
         total_outstanding = (
             flt(values["outstanding_amount"]) 
             - flt(values["advance_amount"]) 
