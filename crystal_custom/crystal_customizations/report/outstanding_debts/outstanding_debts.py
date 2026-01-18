@@ -191,7 +191,7 @@ def get_columns(filters):
 
 def get_customer_sales_person(customer):
     """Get primary sales person for a customer"""
-    # Try to get from Sales Team child table (most common)
+    # Method 1: Try to get from Sales Team child table (most common)
     sales_team = frappe.db.sql("""
         SELECT st.sales_person
         FROM `tabSales Team` st
@@ -201,8 +201,21 @@ def get_customer_sales_person(customer):
         LIMIT 1
     """, {"customer": customer}, as_dict=1)
     
-    if sales_team:
+    if sales_team and sales_team[0].sales_person:
         return sales_team[0].sales_person
+    
+    # Method 2: Check if there's a custom field for sales person
+    # Uncomment this if you have a custom field
+    # custom_sales_person = frappe.db.get_value("Customer", customer, "custom_sales_person")
+    # if custom_sales_person:
+    #     return custom_sales_person
+    
+    # Method 3: Get from territory sales person (if applicable)
+    territory = frappe.db.get_value("Customer", customer, "territory")
+    if territory:
+        territory_sp = frappe.db.get_value("Territory", territory, "custom_sales_person")
+        if territory_sp:
+            return territory_sp
     
     return ""
 
@@ -437,8 +450,11 @@ def get_data(filters):
     data = []
     for customer, values in customer_data.items():
         # Apply sales person filter if specified
-        if sales_person_filter and values["sales_person"] != sales_person_filter:
-            continue
+        if sales_person_filter:
+            customer_sp = values.get("sales_person", "")
+            # Skip if sales person doesn't match (handle empty strings and None)
+            if not customer_sp or customer_sp != sales_person_filter:
+                continue
         
         total_outstanding = (
             flt(values["outstanding_amount"]) 
