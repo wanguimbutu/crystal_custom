@@ -186,6 +186,12 @@ def get_columns(filters):
             "label": _("Net Outstanding"),
             "fieldtype": "Currency",
             "width": 150
+        },
+        {
+            "fieldname": "overdue_amount",
+            "label": _("Overdue Amount"),
+            "fieldtype": "Currency",
+            "width": 150
         }
     ])
     
@@ -275,6 +281,7 @@ def get_data(filters):
             si.customer_name,
             si.name as invoice_name,
             si.posting_date,
+            si.due_date,
             DATE_FORMAT(si.posting_date, '%%Y-%%m') as month_year,
             si.grand_total,
             si.is_return,
@@ -327,7 +334,8 @@ def get_data(filters):
                 "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
-                "credit_note_amount": 0
+                "credit_note_amount": 0,
+                "overdue_amount": 0
             }
         
         # Calculate outstanding as of to_date
@@ -342,6 +350,11 @@ def get_data(filters):
                 if month_year not in customer_data[customer]["months"]:
                     customer_data[customer]["months"][month_year] = 0
                 customer_data[customer]["months"][month_year] += outstanding
+                
+                # Check if overdue (due_date is before to_date)
+                if inv.due_date and getdate(inv.due_date) < to_date:
+                    customer_data[customer]["overdue_amount"] += outstanding
+                    
             elif outstanding < 0:
                 customer_data[customer]["advance_amount"] += abs(outstanding)
     
@@ -402,7 +415,8 @@ def get_data(filters):
                 "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
-                "credit_note_amount": 0
+                "credit_note_amount": 0,
+                "overdue_amount": 0
             }
         
         net_amount = flt(row.net_amount)
@@ -468,7 +482,8 @@ def get_data(filters):
                 "months": {},
                 "outstanding_amount": 0,
                 "advance_amount": 0,
-                "credit_note_amount": 0
+                "credit_note_amount": 0,
+                "overdue_amount": 0
             }
         
         unallocated = flt(payment.paid_amount) - flt(payment.allocated_amount)
@@ -502,7 +517,8 @@ def get_data(filters):
                 "advance_amount": flt(values["advance_amount"], 2),
                 "credit_note_amount": flt(values["credit_note_amount"], 2),
                 "total_outstanding": flt(total_outstanding, 2),
-                "net_outstanding": flt(net_outstanding, 2)
+                "net_outstanding": flt(net_outstanding, 2),
+                "overdue_amount": flt(values["overdue_amount"], 2)
             }
             
             # Add month-wise data
