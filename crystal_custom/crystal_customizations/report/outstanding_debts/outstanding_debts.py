@@ -120,6 +120,12 @@ def get_columns(filters):
     # Base columns
     columns = [
         {
+            "fieldname": "sales_person",
+            "label": _("Sales Person"),
+            "fieldtype": "Data",
+            "width": 150
+        },
+        {
             "fieldname": "customer",
             "label": _("Customer"),
             "fieldtype": "Link",
@@ -131,18 +137,6 @@ def get_columns(filters):
             "label": _("Customer Name"),
             "fieldtype": "Data",
             "width": 180
-        },
-        {
-            "fieldname": "sales_person",
-            "label": _("Sales Person"),
-            "fieldtype": "Data",
-            "width": 150
-        },
-        {
-            "fieldname": "pdc_amount",
-            "label": _("PDC Amount"),
-            "fieldtype": "Currency",
-            "width": 150
         }
     ]
     
@@ -155,7 +149,7 @@ def get_columns(filters):
             "width": 120
         })
     
-    # Summary columns (same as original)
+    # Summary columns in requested order
     columns.extend([
         {
             "fieldname": "outstanding_amount",
@@ -176,14 +170,14 @@ def get_columns(filters):
             "width": 150
         },
         {
-            "fieldname": "total_outstanding",
-            "label": _("Total Outstanding"),
+            "fieldname": "pdc_amount",
+            "label": _("PDC Amount"),
             "fieldtype": "Currency",
             "width": 150
         },
         {
-            "fieldname": "net_outstanding",
-            "label": _("Net Outstanding"),
+            "fieldname": "total_outstanding",
+            "label": _("Total Outstanding"),
             "fieldtype": "Currency",
             "width": 150
         },
@@ -215,9 +209,11 @@ def get_customer_sales_person(customer):
 
 def get_customer_pdc_amount(customer, company):
     """Get total PDC (draft payment entries) amount for a customer"""
+    # Get all draft payment entries for this customer
     pdc_payments = frappe.db.sql("""
         SELECT 
-            SUM(pe.paid_amount) as total_pdc
+            SUM(pe.paid_amount) as total_pdc,
+            COUNT(pe.name) as pdc_count
         FROM 
             `tabPayment Entry` pe
         WHERE 
@@ -231,7 +227,10 @@ def get_customer_pdc_amount(customer, company):
         "company": company
     }, as_dict=1)
     
-    return flt(pdc_payments[0].total_pdc) if pdc_payments and pdc_payments[0].total_pdc else 0
+    if pdc_payments and pdc_payments[0].total_pdc:
+        return flt(pdc_payments[0].total_pdc)
+    
+    return 0
 
 def get_data(filters):
     """Get customer outstanding data with SQL-level sales person filtering"""
@@ -500,24 +499,20 @@ def get_data(filters):
             - flt(values["credit_note_amount"])
         )
         
-        # Calculate net outstanding (total outstanding - PDC)
-        net_outstanding = total_outstanding - flt(values["pdc_amount"])
-        
         # Include all customers with any balance
         if (values["outstanding_amount"] != 0 or 
             values["advance_amount"] != 0 or 
             values["credit_note_amount"] != 0):
             
             row_data = {
+                "sales_person": values["sales_person"],
                 "customer": values["customer"],
                 "customer_name": values["customer_name"],
-                "sales_person": values["sales_person"],
-                "pdc_amount": flt(values["pdc_amount"], 2),
                 "outstanding_amount": flt(values["outstanding_amount"], 2),
                 "advance_amount": flt(values["advance_amount"], 2),
                 "credit_note_amount": flt(values["credit_note_amount"], 2),
+                "pdc_amount": flt(values["pdc_amount"], 2),
                 "total_outstanding": flt(total_outstanding, 2),
-                "net_outstanding": flt(net_outstanding, 2),
                 "overdue_amount": flt(values["overdue_amount"], 2)
             }
             
