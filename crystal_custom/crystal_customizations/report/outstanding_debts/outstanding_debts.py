@@ -256,7 +256,7 @@ def get_data(filters):
         sales_person_condition=sales_person_condition
     ), conditions, as_dict=1)
     
-    # Get month-wise breakdown from INVOICES (shows when debt was created)
+    # Get month-wise breakdown from INVOICES - calculate actual outstanding correctly
     invoice_from_date_condition = " AND si.posting_date >= %(from_date)s" if from_date else ""
     sales_person_invoice_join = ""
     sales_person_invoice_condition = ""
@@ -268,18 +268,38 @@ def get_data(filters):
         """
         sales_person_invoice_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
     
+    # Calculate ACTUAL outstanding per invoice (not the stale outstanding_amount field)
     invoice_outstanding = frappe.db.sql("""
         SELECT 
             si.customer,
+            si.name as invoice_name,
             DATE_FORMAT(si.posting_date, '%%Y-%%m') as month_year,
-            si.outstanding_amount
+            si.grand_total,
+            COALESCE((
+                SELECT SUM(per.allocated_amount)
+                FROM `tabPayment Entry Reference` per
+                INNER JOIN `tabPayment Entry` pe ON per.parent = pe.name
+                WHERE per.reference_doctype = 'Sales Invoice'
+                    AND per.reference_name = si.name
+                    AND pe.docstatus = 1
+                    AND pe.posting_date <= %(to_date)s
+            ), 0) as paid_amount,
+            COALESCE((
+                SELECT SUM(jea.credit - jea.debit)
+                FROM `tabJournal Entry Account` jea
+                INNER JOIN `tabJournal Entry` je ON jea.parent = je.name
+                WHERE jea.reference_type = 'Sales Invoice'
+                    AND jea.reference_name = si.name
+                    AND je.docstatus = 1
+                    AND je.posting_date <= %(to_date)s
+            ), 0) as je_adjusted,
+            si.is_return
         FROM 
             `tabSales Invoice` si
             {sales_person_invoice_join}
         WHERE 
             si.docstatus = 1
             AND si.company = %(company)s
-            AND si.outstanding_amount > 0
             AND si.posting_date <= %(to_date)s
             {invoice_from_date_condition}
             {sales_person_invoice_condition}
@@ -312,16 +332,20 @@ def get_data(filters):
             "total_outstanding": total_outstanding
         }
     
-    # Then, add month breakdown from invoices
+    # Then, add month breakdown from invoices - calculate actual outstanding
     for inv in invoice_outstanding:
         customer = inv.customer
         month_year = inv.month_year
-        outstanding = flt(inv.outstanding_amount)
         
-        if customer in customer_data:
-            if month_year not in customer_data[customer]["months"]:
-                customer_data[customer]["months"][month_year] = 0
-            customer_data[customer]["months"][month_year] += outstanding
+        # Calculate actual outstanding for this invoice
+        actual_outstanding = flt(inv.grand_total) - flt(inv.paid_amount) - flt(inv.je_adjusted)
+        
+        # Only include if there's actual outstanding
+        if actual_outstanding > 0 and not inv.is_return:
+            if customer in customer_data:
+                if month_year not in customer_data[customer]["months"]:
+                    customer_data[customer]["months"][month_year] = 0
+                customer_data[customer]["months"][month_year] += actual_outstanding
     
     # Prepare final data
     data = []
