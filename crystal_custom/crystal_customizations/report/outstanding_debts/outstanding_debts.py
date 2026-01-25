@@ -31,28 +31,27 @@ def get_columns(filters):
     if sales_person_filter:
         sales_person_join = """
             INNER JOIN `tabSales Team` st_filter 
-                ON st_filter.parent = gl.party 
+                ON st_filter.parent = si.customer 
                 AND st_filter.parenttype = 'Customer'
         """
         sales_person_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
     
-    # Get unique month-years from GL entries
-    from_date_condition = " AND gl.posting_date >= %(from_date)s" if from_date else ""
+    # Get unique month-years from INVOICES with outstanding (shows when debt was created)
+    from_date_condition = " AND si.posting_date >= %(from_date)s" if from_date else ""
     
     month_years = frappe.db.sql("""
         SELECT DISTINCT 
-            DATE_FORMAT(gl.posting_date, '%%Y-%%m') as month_year,
-            DATE_FORMAT(gl.posting_date, '%%b %%Y') as display_month
+            DATE_FORMAT(si.posting_date, '%%Y-%%m') as month_year,
+            DATE_FORMAT(si.posting_date, '%%b %%Y') as display_month
         FROM 
-            `tabGL Entry` gl
+            `tabSales Invoice` si
             {sales_person_join}
         WHERE 
-            gl.party_type = 'Customer'
-            AND gl.party IS NOT NULL
-            AND gl.company = %(company)s
-            AND gl.posting_date <= %(to_date)s
+            si.docstatus = 1
+            AND si.company = %(company)s
+            AND si.outstanding_amount > 0
+            AND si.posting_date <= %(to_date)s
             {from_date_condition}
-            AND gl.is_cancelled = 0
             {sales_person_condition}
         ORDER BY 
             month_year ASC
@@ -196,7 +195,7 @@ def get_customer_overdue(customer, company, to_date):
     return flt(overdue[0].overdue) if overdue and overdue[0].overdue else 0
 
 def get_data(filters):
-    """Get customer outstanding data FROM GL ENTRIES (100% accurate)"""
+    """Get customer outstanding data FROM GL + Invoice Details for month breakdown"""
     
     # Get filters with defaults
     if not filters:
@@ -231,12 +230,11 @@ def get_data(filters):
         "sales_person_filter": sales_person_filter
     }
     
-    # Get outstanding from GL - This is the SOURCE OF TRUTH
-    gl_data = frappe.db.sql("""
+    # Get total outstanding from GL - This is the SOURCE OF TRUTH for amounts
+    gl_totals = frappe.db.sql("""
         SELECT 
             gl.party as customer,
-            DATE_FORMAT(gl.posting_date, '%%Y-%%m') as month_year,
-            SUM(gl.debit - gl.credit) as net_amount
+            SUM(gl.debit - gl.credit) as total_outstanding
         FROM 
             `tabGL Entry` gl
             {sales_person_join}
@@ -249,46 +247,81 @@ def get_data(filters):
             AND gl.is_cancelled = 0
             {sales_person_condition}
         GROUP BY 
-            gl.party, month_year
+            gl.party
         HAVING 
-            net_amount != 0
+            total_outstanding != 0
     """.format(
         sales_person_join=sales_person_join,
         from_date_condition=from_date_condition,
         sales_person_condition=sales_person_condition
     ), conditions, as_dict=1)
     
-    # Process GL data
+    # Get month-wise breakdown from INVOICES (shows when debt was created)
+    invoice_from_date_condition = " AND si.posting_date >= %(from_date)s" if from_date else ""
+    sales_person_invoice_join = ""
+    sales_person_invoice_condition = ""
+    if sales_person_filter:
+        sales_person_invoice_join = """
+            INNER JOIN `tabSales Team` st_filter 
+                ON st_filter.parent = si.customer 
+                AND st_filter.parenttype = 'Customer'
+        """
+        sales_person_invoice_condition = " AND st_filter.sales_person = %(sales_person_filter)s"
+    
+    invoice_outstanding = frappe.db.sql("""
+        SELECT 
+            si.customer,
+            DATE_FORMAT(si.posting_date, '%%Y-%%m') as month_year,
+            si.outstanding_amount
+        FROM 
+            `tabSales Invoice` si
+            {sales_person_invoice_join}
+        WHERE 
+            si.docstatus = 1
+            AND si.company = %(company)s
+            AND si.outstanding_amount > 0
+            AND si.posting_date <= %(to_date)s
+            {invoice_from_date_condition}
+            {sales_person_invoice_condition}
+    """.format(
+        sales_person_invoice_join=sales_person_invoice_join,
+        invoice_from_date_condition=invoice_from_date_condition,
+        sales_person_invoice_condition=sales_person_invoice_condition
+    ), conditions, as_dict=1)
+    
+    # Process data
     customer_data = {}
     
-    for row in gl_data:
+    # First, populate with GL totals (source of truth)
+    for row in gl_totals:
         customer = row.customer
-        month_year = row.month_year
-        net_amount = flt(row.net_amount)
+        total_outstanding = flt(row.total_outstanding)
         
-        if customer not in customer_data:
-            customer_name = frappe.db.get_value("Customer", customer, "customer_name")
-            sales_person = get_customer_sales_person(customer)
-            pdc_amount = get_customer_pdc_amount(customer, company, to_date)
-            overdue_amount = get_customer_overdue(customer, company, to_date)
-            
-            customer_data[customer] = {
-                "customer": customer,
-                "customer_name": customer_name,
-                "sales_person": sales_person,
-                "pdc_amount": pdc_amount,
-                "overdue_amount": overdue_amount,
-                "months": {},
-                "total_outstanding": 0
-            }
+        customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+        sales_person = get_customer_sales_person(customer)
+        pdc_amount = get_customer_pdc_amount(customer, company, to_date)
+        overdue_amount = get_customer_overdue(customer, company, to_date)
         
-        # Add to month bucket
-        if month_year not in customer_data[customer]["months"]:
-            customer_data[customer]["months"][month_year] = 0
-        customer_data[customer]["months"][month_year] += net_amount
+        customer_data[customer] = {
+            "customer": customer,
+            "customer_name": customer_name,
+            "sales_person": sales_person,
+            "pdc_amount": pdc_amount,
+            "overdue_amount": overdue_amount,
+            "months": {},
+            "total_outstanding": total_outstanding
+        }
+    
+    # Then, add month breakdown from invoices
+    for inv in invoice_outstanding:
+        customer = inv.customer
+        month_year = inv.month_year
+        outstanding = flt(inv.outstanding_amount)
         
-        # Add to total
-        customer_data[customer]["total_outstanding"] += net_amount
+        if customer in customer_data:
+            if month_year not in customer_data[customer]["months"]:
+                customer_data[customer]["months"][month_year] = 0
+            customer_data[customer]["months"][month_year] += outstanding
     
     # Prepare final data
     data = []
@@ -316,7 +349,7 @@ def get_data(filters):
                 "overdue_amount": flt(values["overdue_amount"], 2)
             }
             
-            # Add month-wise data
+            # Add month-wise data (from invoice dates)
             for month_year, amount in values["months"].items():
                 field_name = f"month_{month_year.replace('-', '_')}"
                 row_data[field_name] = flt(amount, 2)
