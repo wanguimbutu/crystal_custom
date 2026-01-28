@@ -104,6 +104,24 @@ def get_columns(filters):
     # Summary columns
     columns.extend([
         {
+            "fieldname": "outstanding_amount",
+            "label": _("Outstanding Amount"),
+            "fieldtype": "Currency",
+            "width": 150
+        },
+        {
+            "fieldname": "advance_amount",
+            "label": _("Advance Amount"),
+            "fieldtype": "Currency",
+            "width": 150
+        },
+        {
+            "fieldname": "credit_note_amount",
+            "label": _("Credit Note Amount"),
+            "fieldtype": "Currency",
+            "width": 150
+        },
+        {
             "fieldname": "total_outstanding",
             "label": _("Total Outstanding"),
             "fieldtype": "Currency",
@@ -329,6 +347,9 @@ def get_data(filters):
             "pdc_amount": pdc_amount,
             "overdue_amount": overdue_amount,
             "months": {},
+            "outstanding_amount": 0,
+            "advance_amount": 0,
+            "credit_note_amount": 0,
             "total_outstanding": total_outstanding
         }
     
@@ -340,12 +361,20 @@ def get_data(filters):
         # Calculate actual outstanding for this invoice
         actual_outstanding = flt(inv.grand_total) - flt(inv.paid_amount) - flt(inv.je_adjusted)
         
-        # Only include if there's actual outstanding
-        if actual_outstanding > 0 and not inv.is_return:
-            if customer in customer_data:
-                if month_year not in customer_data[customer]["months"]:
-                    customer_data[customer]["months"][month_year] = 0
-                customer_data[customer]["months"][month_year] += actual_outstanding
+        if customer in customer_data:
+            # Handle credit notes vs regular invoices
+            if inv.is_return:
+                if actual_outstanding < 0:  # Credit notes are negative
+                    customer_data[customer]["credit_note_amount"] += abs(actual_outstanding)
+            else:
+                if actual_outstanding > 0:
+                    customer_data[customer]["outstanding_amount"] += actual_outstanding
+                    # Track by month
+                    if month_year not in customer_data[customer]["months"]:
+                        customer_data[customer]["months"][month_year] = 0
+                    customer_data[customer]["months"][month_year] += actual_outstanding
+                elif actual_outstanding < 0:  # Overpayment
+                    customer_data[customer]["advance_amount"] += abs(actual_outstanding)
     
     # Prepare final data
     data = []
@@ -367,6 +396,9 @@ def get_data(filters):
                 "sales_person": values["sales_person"],
                 "customer": values["customer"],
                 "customer_name": values["customer_name"],
+                "outstanding_amount": flt(values["outstanding_amount"], 2),
+                "advance_amount": flt(values["advance_amount"], 2),
+                "credit_note_amount": flt(values["credit_note_amount"], 2),
                 "total_outstanding": flt(total_outstanding, 2),
                 "pdc_amount": flt(values["pdc_amount"], 2),
                 "net_outstanding": flt(net_outstanding, 2),
