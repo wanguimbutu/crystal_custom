@@ -1,0 +1,25 @@
+{
+ "content": null,
+ "creation": "2026-03-25 13:16:31.181536",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-03-25 13:16:31.181536",
+ "modified_by": "Administrator",
+ "module": "Crystal Customizations",
+ "name": "sales-stock-report",
+ "owner": "Administrator",
+ "page_name": "sales-stock-report",
+ "roles":  [
+    { "role": "Manufacturing Manager" },
+    { "role": "Manufacturing User" },
+    { "role": "Stock Manager" },
+    { "role": "Stock User" },
+    { "role": "System Manager" }
+  ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Sales Stock Report"
+}

@@ -89,6 +89,13 @@ def get_columns(filters):
             "label": _("Customer Name"),
             "fieldtype": "Data",
             "width": 180
+        },
+        {
+            "fieldname": "payment_terms",
+            "label": _("Payment Terms"),
+            "fieldtype": "Link",
+            "options": "Payment Terms Template",
+            "width": 150
         }
     ]
     
@@ -335,7 +342,7 @@ def get_data(filters):
         customer = row.customer
         total_outstanding = flt(row.total_outstanding)
         
-        customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+        customer_name, payment_terms = frappe.db.get_value("Customer", customer, ["customer_name", "payment_terms"])
         sales_person = get_customer_sales_person(customer)
         pdc_amount = get_customer_pdc_amount(customer, company, to_date)
         overdue_amount = get_customer_overdue(customer, company, to_date)
@@ -343,6 +350,7 @@ def get_data(filters):
         customer_data[customer] = {
             "customer": customer,
             "customer_name": customer_name,
+            "payment_terms": payment_terms or "",
             "sales_person": sales_person,
             "pdc_amount": pdc_amount,
             "overdue_amount": overdue_amount,
@@ -396,6 +404,7 @@ def get_data(filters):
                 "sales_person": values["sales_person"],
                 "customer": values["customer"],
                 "customer_name": values["customer_name"],
+                "payment_terms": values["payment_terms"],
                 "outstanding_amount": flt(values["outstanding_amount"], 2),
                 "advance_amount": flt(values["advance_amount"], 2),
                 "credit_note_amount": flt(values["credit_note_amount"], 2),
