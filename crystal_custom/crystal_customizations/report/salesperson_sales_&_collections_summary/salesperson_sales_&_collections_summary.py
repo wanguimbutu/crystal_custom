@@ -28,6 +28,7 @@ def get_columns():
         {"label": _("Total Bounced"),     "fieldname": "total_bounced",    "fieldtype": "Currency", "width": 150},
         {"label": _("Total Rebanked"),    "fieldname": "total_rebanked",   "fieldtype": "Currency", "width": 150},
         {"label": _("Net Collections"),   "fieldname": "net_collections",  "fieldtype": "Currency", "width": 150},
+        {"label": _("PDC Cheques"),        "fieldname": "pdc_cheques",      "fieldtype": "Currency", "width": 150},
     ]
 
 
@@ -130,6 +131,23 @@ def get_data(filters):
         GROUP BY sp.name
     """.format(sp_filter=sp_filter_gl), filters, as_dict=1)
 
+    # ── 5. PDC CHEQUES (draft payment entries from to_date onwards) ───────────
+    pdc_rows = frappe.db.sql("""
+        SELECT
+            st.sales_person,
+            sa.parent_sales_person AS sales_coordinator,
+            SUM(pe.paid_amount) AS pdc_cheques
+        FROM `tabPayment Entry` pe
+        LEFT JOIN `tabSales Team` st
+            ON st.parent = pe.party AND st.parenttype = 'Customer'
+        LEFT JOIN `tabSales Person` sa ON sa.name = st.sales_person
+        WHERE pe.docstatus = 0
+          AND pe.payment_type = 'Receive'
+          AND (pe.reference_date >= %(to_date)s OR pe.posting_date >= %(to_date)s)
+          {sp_filter}
+        GROUP BY st.sales_person
+    """.format(sp_filter=sp_filter_payment), filters, as_dict=1)
+
     # ── MERGE INTO SUMMARY DICT ───────────────────────────────────────────────
     summary = {}
 
@@ -143,6 +161,7 @@ def get_data(filters):
                 "total_collected":  0,
                 "total_bounced":    0,
                 "total_rebanked":   0,
+                "pdc_cheques":      0,
             }
         summary[sp]["total_invoiced"] = summary[sp]["total_invoiced"] + (row.get("total_invoiced") or 0)
 
@@ -156,6 +175,7 @@ def get_data(filters):
                 "total_collected":  0,
                 "total_bounced":    0,
                 "total_rebanked":   0,
+                "pdc_cheques":      0,
             }
         summary[sp]["total_collected"] = summary[sp]["total_collected"] + (row.get("total_collected") or 0)
 
@@ -169,6 +189,7 @@ def get_data(filters):
                 "total_collected":  0,
                 "total_bounced":    0,
                 "total_rebanked":   0,
+                "pdc_cheques":      0,
             }
         summary[sp]["total_bounced"] = summary[sp]["total_bounced"] + (row.get("total_bounced") or 0)
 
@@ -182,8 +203,23 @@ def get_data(filters):
                 "total_collected":  0,
                 "total_bounced":    0,
                 "total_rebanked":   0,
+                "pdc_cheques":      0,
             }
         summary[sp]["total_rebanked"] = summary[sp]["total_rebanked"] + (row.get("total_rebanked") or 0)
+
+    for row in pdc_rows:
+        sp = row.get("sales_person") or "Unassigned"
+        if sp not in summary:
+            summary[sp] = {
+                "sales_person":     sp,
+                "sales_coordinator": row.get("sales_coordinator") or "",
+                "total_invoiced":   0,
+                "total_collected":  0,
+                "total_bounced":    0,
+                "total_rebanked":   0,
+                "pdc_cheques":      0,
+            }
+        summary[sp]["pdc_cheques"] = summary[sp]["pdc_cheques"] + (row.get("pdc_cheques") or 0)
 
     # ── CALCULATE NET & BUILD RESULT ──────────────────────────────────────────
     result = []
@@ -205,6 +241,7 @@ def get_data(filters):
             "total_bounced":     sum(r["total_bounced"]   for r in result),
             "total_rebanked":    sum(r["total_rebanked"]  for r in result),
             "net_collections":   sum(r["net_collections"] for r in result),
+            "pdc_cheques":       sum(r["pdc_cheques"]     for r in result),
         })
 
     return result
