@@ -227,6 +227,7 @@ def get_data(filters):
         row = summary[sp]
         row["net_collections"] = (
             row["total_collected"]
+            + row["pdc_cheques"]
             - row["total_bounced"]
             + row["total_rebanked"]
         )
