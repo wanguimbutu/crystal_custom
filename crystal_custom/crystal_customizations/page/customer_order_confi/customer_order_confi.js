@@ -38,6 +38,14 @@ class OrderConfirmationManager {
         });
 
         this.page.add_field({
+            label: 'Sales Person',
+            fieldtype: 'Link',
+            fieldname: 'sales_person',
+            options: 'Sales Person',
+            change: () => { this.current_page = 1; this.load_data(); }
+        });
+
+        this.page.add_field({
             label: 'Status',
             fieldtype: 'Select',
             fieldname: 'status_filter',
@@ -62,17 +70,21 @@ class OrderConfirmationManager {
     }
 
     load_data() {
+        const sp = this.page.fields_dict.sales_person.get_value();
+        const filters = [
+            ['Sales Order', 'docstatus', '=', 0],
+            ['Sales Order', 'workflow_state', '=', 'Pending Customer Order Reconfirmation'],
+        ];
+        if (sp) filters.push(['Sales Team', 'sales_person', '=', sp]);
+
         frappe.call({
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Sales Order',
-                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total', 
+                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
                          'custom_delivery_region', 'custom_phone_number', 'owner', 'workflow_state',
                          'custom_call_not_picked', 'custom_call_notes'],
-                filters: {
-                    docstatus: 0,
-                    workflow_state: 'Pending Customer Order Reconfirmation'
-                },
+                filters,
                 limit_page_length: 500
             },
             callback: (r) => {

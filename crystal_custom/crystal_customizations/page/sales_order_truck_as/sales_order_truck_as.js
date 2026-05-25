@@ -38,6 +38,11 @@ class TruckAssignmentManager {
 			options: 'Delivery Region',
 			change: () => { this.current_page = 1; this.render_view(); },
 		});
+		this.page.add_field({
+			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
+			options: 'Sales Person',
+			change: () => this.load_data(),
+		});
 
 		this.page.set_primary_action('Add Truck', () => this.add_new_truck(), 'octicon octicon-plus');
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
@@ -89,16 +94,18 @@ class TruckAssignmentManager {
 		this.container.html(this._loading_html());
 		const from = this.page.fields_dict.from_date.get_value();
 		const to   = this.page.fields_dict.to_date.get_value();
+		const sp   = this.page.fields_dict.sales_person.get_value();
 
-		const filters = {
-			docstatus: ['in', [0, 1]],
-			workflow_state: ['in', ['Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed']],
-			custom_on_hold: ['!=', 1],
-			custom_truck_closed: ['!=', 1],
-		};
-		if (from && to)   filters.transaction_date = ['between', [from, to]];
-		else if (from)    filters.transaction_date = ['>=', from];
-		else if (to)      filters.transaction_date = ['<=', to];
+		const filters = [
+			['Sales Order', 'docstatus', 'in', [0, 1]],
+			['Sales Order', 'workflow_state', 'in', ['Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed']],
+			['Sales Order', 'custom_on_hold', '!=', 1],
+			['Sales Order', 'custom_truck_closed', '!=', 1],
+		];
+		if (from && to) filters.push(['Sales Order', 'transaction_date', 'between', [from, to]]);
+		else if (from)  filters.push(['Sales Order', 'transaction_date', '>=', from]);
+		else if (to)    filters.push(['Sales Order', 'transaction_date', '<=', to]);
+		if (sp)         filters.push(['Sales Team', 'sales_person', '=', sp]);
 
 		frappe.call({
 			method: 'frappe.client.get_list',

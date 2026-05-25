@@ -55,6 +55,14 @@ class DeliveryNoteManager {
             change: () => this.apply_filters()
         });
 
+        this.page.add_field({
+            label: 'Sales Person',
+            fieldtype: 'Link',
+            fieldname: 'sales_person',
+            options: 'Sales Person',
+            change: () => { this.orders_page = 1; this.dns_page = 1; this.invoices_page = 1; this.load_data(); }
+        });
+
         this.page.add_button('Refresh', () => {
             this.load_data();
         }, 'octicon octicon-sync');
@@ -149,18 +157,22 @@ class DeliveryNoteManager {
 
         $('#dm-tab-pending').html(this.loading_html('orders'));
 
+        const sp_orders = this.page.fields_dict.sales_person.get_value();
+        const so_filters = [
+            ['Sales Order', 'docstatus', '=', 1],
+            ['Sales Order', 'transaction_date', 'between', [from_date, to_date]],
+            ['Sales Order', 'per_delivered', '<', 100],
+            ['Sales Order', 'status', '!=', 'Closed']
+        ];
+        if (sp_orders) so_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
+
         frappe.call({
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Sales Order',
                 fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
                          'custom_delivery_region', 'custom_phone_number', 'delivery_date', 'per_delivered', 'status'],
-                filters: [
-                    ['Sales Order', 'docstatus', '=', 1],
-                    ['Sales Order', 'transaction_date', 'between', [from_date, to_date]],
-                    ['Sales Order', 'per_delivered', '<', 100],
-                    ['Sales Order', 'status', '!=', 'Closed']
-                ],
+                filters: so_filters,
                 order_by: 'transaction_date desc',
                 limit_page_length: 500
             },
@@ -183,16 +195,20 @@ class DeliveryNoteManager {
 
         $('#dm-tab-dns').html(this.loading_html('delivery notes'));
 
+        const sp_dn = this.page.fields_dict.sales_person.get_value();
+        const dn_filters = [
+            ['Delivery Note', 'docstatus', '=', 1],
+            ['Delivery Note', 'posting_date', 'between', [from_date, to_date]]
+        ];
+        if (sp_dn) dn_filters.push(['Sales Team', 'sales_person', '=', sp_dn]);
+
         frappe.call({
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Delivery Note',
                 fields: ['name', 'customer', 'customer_name', 'posting_date', 'grand_total',
                          'per_billed', 'status', 'custom_delivery_region'],
-                filters: [
-                    ['Delivery Note', 'docstatus', '=', 1],
-                    ['Delivery Note', 'posting_date', 'between', [from_date, to_date]]
-                ],
+                filters: dn_filters,
                 order_by: 'posting_date desc',
                 limit_page_length: 500
             },
@@ -215,17 +231,21 @@ class DeliveryNoteManager {
 
         $('#dm-tab-invoices').html(this.loading_html('sales invoices'));
 
+        const sp_inv = this.page.fields_dict.sales_person.get_value();
+        const inv_filters = [
+            ['Sales Invoice', 'docstatus', '!=', 2],
+            ['Sales Invoice', 'posting_date', 'between', [from_date, to_date]],
+            ['Sales Invoice Item', 'delivery_note', '!=', '']
+        ];
+        if (sp_inv) inv_filters.push(['Sales Team', 'sales_person', '=', sp_inv]);
+
         frappe.call({
             method: 'frappe.client.get_list',
             args: {
                 doctype: 'Sales Invoice',
                 fields: ['name', 'customer', 'customer_name', 'posting_date', 'grand_total',
                          'outstanding_amount', 'status', 'docstatus'],
-                filters: [
-                    ['Sales Invoice', 'docstatus', '!=', 2],
-                    ['Sales Invoice', 'posting_date', 'between', [from_date, to_date]],
-                    ['Sales Invoice Item', 'delivery_note', '!=', '']
-                ],
+                filters: inv_filters,
                 order_by: 'posting_date desc',
                 limit_page_length: 500
             },
