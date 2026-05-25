@@ -1,0 +1,103 @@
+[
+  {
+    "doctype": "Workflow",
+    "name": "Sales Order Approval",
+    "document_type": "Sales Order",
+    "workflow_state_field": "workflow_state",
+    "is_active": 1,
+    "send_email_alert": 0,
+    "states": [
+      {
+        "doctype": "Workflow Document State",
+        "state": "Proceed To Order",
+        "doc_status": "0",
+        "allow_edit": "All",
+        "is_optional_state": 0,
+        "message": null,
+        "update_field": null,
+        "update_value": null,
+        "next_action_email_template": null
+      },
+      {
+        "doctype": "Workflow Document State",
+        "state": "Pending Finance Approval",
+        "doc_status": "0",
+        "allow_edit": "Finance Manager",
+        "is_optional_state": 0,
+        "message": null,
+        "update_field": null,
+        "update_value": null,
+        "next_action_email_template": null
+      },
+      {
+        "doctype": "Workflow Document State",
+        "state": "Pending Customer Order Reconfirmation",
+        "doc_status": "0",
+        "allow_edit": "Sales User",
+        "is_optional_state": 0,
+        "message": null,
+        "update_field": null,
+        "update_value": null,
+        "next_action_email_template": null
+      },
+      {
+        "doctype": "Workflow Document State",
+        "state": "Order Confirmed",
+        "doc_status": "1",
+        "allow_edit": "System Manager",
+        "is_optional_state": 0,
+        "message": null,
+        "update_field": null,
+        "update_value": null,
+        "next_action_email_template": null
+      }
+    ],
+    "transitions": [
+      {
+        "doctype": "Workflow Transition",
+        "state": "Proceed To Order",
+        "action": "Submit to Finance",
+        "next_state": "Pending Finance Approval",
+        "allowed": "Sales User",
+        "allow_self_approval": 1,
+        "condition": null
+      },
+      {
+        "doctype": "Workflow Transition",
+        "state": "Pending Finance Approval",
+        "action": "Approve",
+        "next_state": "Pending Customer Order Reconfirmation",
+        "allowed": "Finance Manager",
+        "allow_self_approval": 1,
+        "condition": null
+      },
+      {
+        "doctype": "Workflow Transition",
+        "state": "Pending Finance Approval",
+        "action": "Reject",
+        "next_state": "Proceed To Order",
+        "allowed": "Finance Manager",
+        "allow_self_approval": 1,
+        "condition": null
+      },
+      {
+        "doctype": "Workflow Transition",
+        "state": "Pending Customer Order Reconfirmation",
+        "action": "Confirm Order",
+        "next_state": "Order Confirmed",
+        "allowed": "Sales User",
+        "allow_self_approval": 1,
+        "condition": null
+      },
+      {
+        "doctype": "Workflow Transition",
+        "state": "Pending Customer Order Reconfirmation",
+        "action": "Return to Order Manager",
+        "next_state": "Proceed To Order",
+        "allowed": "Sales User",
+        "allow_self_approval": 1,
+        "condition": null
+      }
+    ]
+  }
+]

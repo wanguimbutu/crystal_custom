@@ -91,22 +91,13 @@ def create_material_request_from_shortage():
 
 
 def get_default_warehouse_for_manufacture(item_code):
-    """
-    Get the default warehouse for manufacturing
-    You can customize this based on your setup
-    """
-    # Option 1: Get from Item's default warehous
-    item = frappe.get_doc('Item', item_code)
-    if item.default_warehouse:
-        return item.default_warehouse
-    
-    # Option 2: Get first finished goods warehouse
-    warehouse = frappe.db.get_value('Warehouse', 
-        {'warehouse_type': 'Finished Goods - CAL', 'is_group': 0}, 
-        'name')
-    
+    # Item Default child table holds the per-company default warehouse
+    warehouse = frappe.db.get_value('Item Default', {'parent': item_code}, 'default_warehouse')
     if warehouse:
         return warehouse
+
+    # Fall back to any non-group, enabled warehouse
+    return frappe.db.get_value('Warehouse', {'is_group': 0, 'disabled': 0}, 'name')
     
     # Option 3: Return None and let user select
     return None

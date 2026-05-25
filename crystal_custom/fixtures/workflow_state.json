@@ -1,0 +1,26 @@
+[
+  {
+    "doctype": "Workflow State",
+    "workflow_state_name": "Proceed To Order",
+    "icon": "fa fa-edit",
+    "style": ""
+  },
+  {
+    "doctype": "Workflow State",
+    "workflow_state_name": "Pending Finance Approval",
+    "icon": "fa fa-clock-o",
+    "style": "Warning"
+  },
+  {
+    "doctype": "Workflow State",
+    "workflow_state_name": "Pending Customer Order Reconfirmation",
+    "icon": "fa fa-phone",
+    "style": "Info"
+  },
+  {
+    "doctype": "Workflow State",
+    "workflow_state_name": "Order Confirmed",
+    "icon": "fa fa-check",
+    "style": "Success"
+  }
+]

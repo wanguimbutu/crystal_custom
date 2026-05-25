@@ -5,6 +5,55 @@ app_description = "crystal customizations"
 app_email = "wangui.work@gmail.com"
 app_license = "mit"
 
+# Fixtures – installed automatically on `bench migrate` / `bench install-app`
+fixtures = [
+    # Custom fields on Sales Order and Delivery Note
+    {
+        "dt": "Custom Field",
+        "filters": [
+            ["dt", "in", ["Sales Order", "Delivery Note"]],
+            ["fieldname", "in", [
+                "custom_logistics_section",
+                "custom_delivery_region",
+                "custom_phone_number",
+                "custom_col_break_logistics",
+                "custom_on_hold",
+                "custom_call_not_picked",
+                "custom_call_notes",
+                "custom_truck_section",
+                "custom_truck_number",
+                "custom_truck_closed",
+            ]],
+        ],
+    },
+    # Sales Order approval workflow
+    {
+        "dt": "Workflow",
+        "filters": [["document_type", "=", "Sales Order"]],
+    },
+    # Workflow states referenced by the workflow above
+    {
+        "dt": "Workflow State",
+        "filters": [["workflow_state_name", "in", [
+            "Proceed To Order",
+            "Pending Finance Approval",
+            "Pending Customer Order Reconfirmation",
+            "Order Confirmed",
+        ]]],
+    },
+    # Workflow actions referenced by the workflow above
+    {
+        "dt": "Workflow Action Master",
+        "filters": [["workflow_action_name", "in", [
+            "Submit to Finance",
+            "Approve",
+            "Reject",
+            "Confirm Order",
+            "Return to Order Manager",
+        ]]],
+    },
+]
+
 # Apps
 # ------------------
 

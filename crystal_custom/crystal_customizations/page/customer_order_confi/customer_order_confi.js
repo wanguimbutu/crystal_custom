@@ -44,9 +44,13 @@ class OrderConfirmationManager {
             change: () => this.apply_filters()
         });
 
-        this.page.set_primary_action('Submit All Called Orders', () => {
-            this.submit_all_called_orders();
+        this.page.set_primary_action('Submit Called Orders', () => {
+            this.submit_orders(Array.from(this.called_orders), 'called');
         }, 'octicon octicon-check');
+
+        this.page.add_button('Submit Not Picked Orders', () => {
+            this.submit_orders(Array.from(this.not_picked_orders), 'not picked');
+        }, 'octicon octicon-arrow-right');
 
         this.page.add_button('Refresh', () => {
             this.load_data();
@@ -741,19 +745,14 @@ class OrderConfirmationManager {
         );
     }
 
-    submit_all_called_orders() {
-        const called_list = Array.from(this.called_orders);
-        
-        if (called_list.length === 0) {
-            frappe.msgprint(__('No orders have been marked as called'));
+    submit_orders(order_list, label) {
+        if (!order_list.length) {
+            frappe.msgprint(__('No {0} orders to submit.', [label]));
             return;
         }
-
         frappe.confirm(
-            __('Confirm {0} order(s) and move to Order Confirmed state?', [called_list.length]),
-            () => {
-                this.process_confirmations(called_list);
-            }
+            __('Submit {0} {1} order(s) and move to Order Confirmed?', [order_list.length, label]),
+            () => this.process_confirmations(order_list)
         );
     }
 
