@@ -14,6 +14,8 @@ class OrderConfirmationManager {
         this.orders = [];
         this.called_orders = new Set();
         this.not_picked_orders = new Set();
+        this.current_page = 1;
+        this.page_size = 50;
         this.setup_page();
         this.load_data();
     }
@@ -96,6 +98,7 @@ class OrderConfirmationManager {
             delivery_region: this.page.fields_dict.delivery_region.get_value(),
             status: this.page.fields_dict.status_filter.get_value()
         };
+        this.current_page = 1;
         this.render_orders();
     }
 
@@ -126,9 +129,15 @@ class OrderConfirmationManager {
     }
 
     render_orders() {
-        const filtered_orders = this.get_filtered_orders();
-        
-        if (filtered_orders.length === 0) {
+        const all_filtered = this.get_filtered_orders();
+        const total_pages = Math.ceil(all_filtered.length / this.page_size) || 1;
+        if (this.current_page > total_pages) this.current_page = total_pages;
+        const filtered_orders = all_filtered.slice(
+            (this.current_page - 1) * this.page_size,
+            this.current_page * this.page_size
+        );
+
+        if (all_filtered.length === 0) {
             this.container.html(`
                 <div class="alert alert-info" style="margin-top: 20px;">
                     <strong>No orders found</strong><br>
@@ -140,10 +149,10 @@ class OrderConfirmationManager {
             return;
         }
 
-        const total_value = filtered_orders.reduce((sum, o) => sum + o.grand_total, 0);
-        const called_count = filtered_orders.filter(o => this.called_orders.has(o.name)).length;
-        const not_picked_count = filtered_orders.filter(o => this.not_picked_orders.has(o.name)).length;
-        const pending_count = filtered_orders.filter(o => 
+        const total_value = all_filtered.reduce((sum, o) => sum + o.grand_total, 0);
+        const called_count = all_filtered.filter(o => this.called_orders.has(o.name)).length;
+        const not_picked_count = all_filtered.filter(o => this.not_picked_orders.has(o.name)).length;
+        const pending_count = all_filtered.filter(o =>
             !this.called_orders.has(o.name) && !this.not_picked_orders.has(o.name)
         ).length;
         
@@ -278,6 +287,7 @@ class OrderConfirmationManager {
         html += `
                         </tbody>
                     </table>
+                    ${this._pagination_html(all_filtered.length)}
                 </div>
             </div>
             <style>
@@ -546,6 +556,17 @@ class OrderConfirmationManager {
                     font-size: 13px;
                     font-style: italic;
                 }
+                .oc-pg-bar {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 14px;
+                    padding: 12px 16px;
+                    border-top: 1px solid #e5e7eb;
+                    background: #f9fafb;
+                }
+                .oc-pg-info { font-size: 13px; color: #6b7280; }
+                .oc-pg-bar .btn { min-width: 70px; }
             </style>
         `;
 
@@ -553,9 +574,30 @@ class OrderConfirmationManager {
         this.attach_events();
     }
 
+    _pagination_html(total) {
+        if (total <= this.page_size) return '';
+        const total_pages = Math.ceil(total / this.page_size);
+        const start = (this.current_page - 1) * this.page_size + 1;
+        const end   = Math.min(this.current_page * this.page_size, total);
+        return `<div class="oc-pg-bar">
+            <button class="btn btn-xs btn-default oc-pg-prev" ${this.current_page <= 1 ? 'disabled' : ''}>&lsaquo; Prev</button>
+            <span class="oc-pg-info">Showing ${start}–${end} of ${total} &nbsp;·&nbsp; Page ${this.current_page} of ${total_pages}</span>
+            <button class="btn btn-xs btn-default oc-pg-next" ${this.current_page >= total_pages ? 'disabled' : ''}>Next &rsaquo;</button>
+        </div>`;
+    }
+
     attach_events() {
         const self = this;
-        
+
+        // Pagination
+        this.container.find('.oc-pg-prev').on('click', () => {
+            if (this.current_page > 1) { this.current_page--; this.render_orders(); }
+        });
+        this.container.find('.oc-pg-next').on('click', () => {
+            const tp = Math.ceil(this.get_filtered_orders().length / this.page_size);
+            if (this.current_page < tp) { this.current_page++; this.render_orders(); }
+        });
+
         // Toggle details
         this.container.find('.toggle-details').off('click').on('click', function(e) {
             e.stopPropagation();

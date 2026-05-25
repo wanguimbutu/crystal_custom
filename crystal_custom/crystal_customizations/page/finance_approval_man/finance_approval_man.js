@@ -12,6 +12,8 @@ class FinanceApprovalManager {
 		this.page = page;
 		this.orders = [];
 		this.financials = {};   // keyed by customer
+		this.current_page = 1;
+		this.page_size = 50;
 		this.setup_page();
 		this.load_data();
 	}
@@ -24,12 +26,12 @@ class FinanceApprovalManager {
 		this.page.add_field({
 			label: 'From Date', fieldtype: 'Date', fieldname: 'from_date',
 			default: frappe.datetime.add_days(today, -7),
-			change: () => this.render_orders(),
+			change: () => { this.current_page = 1; this.render_orders(); },
 		});
 		this.page.add_field({
 			label: 'To Date', fieldtype: 'Date', fieldname: 'to_date',
 			default: today,
-			change: () => this.render_orders(),
+			change: () => { this.current_page = 1; this.render_orders(); },
 		});
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
@@ -38,8 +40,8 @@ class FinanceApprovalManager {
 		});
 		this.page.add_field({
 			label: 'Delivery Region', fieldtype: 'Link', fieldname: 'delivery_region',
-			options: 'Territory',
-			change: () => this.render_orders(),
+			options: 'Delivery Region',
+			change: () => { this.current_page = 1; this.render_orders(); },
 		});
 
 		this.page.set_primary_action('Approve Selected', () => this.approve_selected(), 'octicon octicon-check');
@@ -82,10 +84,12 @@ class FinanceApprovalManager {
 					args: { customers: JSON.stringify(customers) },
 					callback: (r2) => {
 						this.financials = r2.message || {};
+						this.current_page = 1;
 						this.render_orders();
 					},
 					error: () => {
 						this.financials = {};
+						this.current_page = 1;
 						this.render_orders();
 					},
 				});
@@ -109,9 +113,15 @@ class FinanceApprovalManager {
 	// ── Rendering ─────────────────────────────────────────────────────────────
 
 	render_orders() {
-		const orders = this.get_filtered_orders();
+		const all_orders = this.get_filtered_orders();
+		const total_pages = Math.ceil(all_orders.length / this.page_size) || 1;
+		if (this.current_page > total_pages) this.current_page = total_pages;
+		const orders = all_orders.slice(
+			(this.current_page - 1) * this.page_size,
+			this.current_page * this.page_size
+		);
 
-		if (!orders.length) {
+		if (!all_orders.length) {
 			this.container.html(`
 				<div class="alert alert-info" style="margin-top:20px;">
 					<strong>No orders pending finance approval</strong>
@@ -120,9 +130,9 @@ class FinanceApprovalManager {
 			return;
 		}
 
-		const total_value    = orders.reduce((s, o) => s + o.grand_total, 0);
-		const total_overdue  = orders.reduce((s, o) => s + (this.financials[o.customer]?.overdue || 0), 0);
-		const pdc_customers  = orders.filter(o => (this.financials[o.customer]?.pdc_count || 0) > 0).length;
+		const total_value    = all_orders.reduce((s, o) => s + o.grand_total, 0);
+		const total_overdue  = all_orders.reduce((s, o) => s + (this.financials[o.customer]?.overdue || 0), 0);
+		const pdc_customers  = all_orders.filter(o => (this.financials[o.customer]?.pdc_count || 0) > 0).length;
 
 		let html = `
 		<div class="fa-summary-row">
@@ -136,8 +146,12 @@ class FinanceApprovalManager {
 		<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
 			<label style="font-weight:600;cursor:pointer;">
 				<input type="checkbox" id="fa-select-all" style="margin-right:6px;">
-				Select All (${orders.length})
+				Select All (${all_orders.length})
 			</label>
+			<span style="font-size:12px;color:#6b7280;">
+				${all_orders.length} order${all_orders.length !== 1 ? 's' : ''}
+				${this.orders.length !== all_orders.length ? ` (filtered from ${this.orders.length})` : ''}
+			</span>
 		</div>
 		<table class="table table-bordered fa-table">
 			<thead><tr>
@@ -183,9 +197,23 @@ class FinanceApprovalManager {
 			</tr>`;
 		});
 
-		html += `</tbody></table></div>${this._styles()}`;
+		html += `</tbody></table>
+		${this._pagination_html(all_orders.length)}
+		</div>${this._styles()}`;
 		this.container.html(html);
 		this._attach_events();
+	}
+
+	_pagination_html(total) {
+		if (total <= this.page_size) return '';
+		const total_pages = Math.ceil(total / this.page_size);
+		const start = (this.current_page - 1) * this.page_size + 1;
+		const end   = Math.min(this.current_page * this.page_size, total);
+		return `<div class="fa-pg-bar">
+			<button class="btn btn-xs btn-default fa-pg-prev" ${this.current_page <= 1 ? 'disabled' : ''}>&lsaquo; Prev</button>
+			<span class="fa-pg-info">Showing ${start}–${end} of ${total} &nbsp;·&nbsp; Page ${this.current_page} of ${total_pages}</span>
+			<button class="btn btn-xs btn-default fa-pg-next" ${this.current_page >= total_pages ? 'disabled' : ''}>Next &rsaquo;</button>
+		</div>`;
 	}
 
 	_kpi(label, value, color) {
@@ -204,6 +232,14 @@ class FinanceApprovalManager {
 	_attach_events() {
 		$('#fa-select-all').off('change').on('change', function () {
 			$('.fa-chk').prop('checked', $(this).is(':checked'));
+		});
+
+		this.container.find('.fa-pg-prev').on('click', () => {
+			if (this.current_page > 1) { this.current_page--; this.render_orders(); }
+		});
+		this.container.find('.fa-pg-next').on('click', () => {
+			const tp = Math.ceil(this.get_filtered_orders().length / this.page_size);
+			if (this.current_page < tp) { this.current_page++; this.render_orders(); }
 		});
 	}
 
@@ -388,6 +424,18 @@ class FinanceApprovalManager {
 			color: #92400e;
 			cursor: default;
 		}
+		.fa-pg-bar {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 14px;
+			padding: 12px 16px;
+			border-top: 1px solid #e2e8f0;
+			background: #f8fafc;
+			margin-top: 4px;
+		}
+		.fa-pg-info { font-size: 13px; color: #64748b; }
+		.fa-pg-bar .btn { min-width: 70px; }
 		</style>`;
 	}
 }

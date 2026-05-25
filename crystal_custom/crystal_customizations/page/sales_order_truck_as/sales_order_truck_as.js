@@ -12,6 +12,8 @@ class TruckAssignmentManager {
 		this.page = page;
 		this.orders = [];
 		this.available_trucks = [];
+		this.current_page = 1;
+		this.page_size = 50;
 		this.setup_page();
 		this.load_trucks_from_orders();
 	}
@@ -34,7 +36,7 @@ class TruckAssignmentManager {
 		this.page.add_field({
 			label: 'Delivery Region', fieldtype: 'Link', fieldname: 'delivery_region',
 			options: 'Delivery Region',
-			change: () => this.render_view(),
+			change: () => { this.current_page = 1; this.render_view(); },
 		});
 
 		this.page.set_primary_action('Add Truck', () => this.add_new_truck(), 'octicon octicon-plus');
@@ -119,6 +121,7 @@ class TruckAssignmentManager {
 						this.available_trucks.push({ truck_number: o.custom_truck_number, driver_name: '', capacity_kg: 5000 });
 					}
 				});
+				this.current_page = 1;
 				this.render_view();
 			},
 		});
@@ -183,10 +186,17 @@ class TruckAssignmentManager {
 		</div>`;
 	}
 
-	_render_awaiting(orders) {
-		if (!orders.length) {
+	_render_awaiting(all_orders) {
+		if (!all_orders.length) {
 			return '<div class="ta-empty">All orders have been assigned to trucks.</div>';
 		}
+
+		const total_pages = Math.ceil(all_orders.length / this.page_size) || 1;
+		if (this.current_page > total_pages) this.current_page = total_pages;
+		const orders = all_orders.slice(
+			(this.current_page - 1) * this.page_size,
+			this.current_page * this.page_size
+		);
 
 		// Group by delivery region, sorted A-Z, unspecified last
 		const groups = {};
@@ -260,8 +270,22 @@ class TruckAssignmentManager {
 			});
 		});
 
-		html += `</tbody></table></div>`;
+		html += `</tbody></table>
+		${this._pagination_html(all_orders.length)}
+		</div>`;
 		return html;
+	}
+
+	_pagination_html(total) {
+		if (total <= this.page_size) return '';
+		const total_pages = Math.ceil(total / this.page_size);
+		const start = (this.current_page - 1) * this.page_size + 1;
+		const end   = Math.min(this.current_page * this.page_size, total);
+		return `<div class="ta-pg-bar">
+			<button class="btn btn-xs btn-default ta-pg-prev" ${this.current_page <= 1 ? 'disabled' : ''}>&lsaquo; Prev</button>
+			<span class="ta-pg-info">Showing ${start}–${end} of ${total} &nbsp;·&nbsp; Page ${this.current_page} of ${total_pages}</span>
+			<button class="btn btn-xs btn-default ta-pg-next" ${this.current_page >= total_pages ? 'disabled' : ''}>Next &rsaquo;</button>
+		</div>`;
 	}
 
 	_state_badge(state) {
@@ -354,6 +378,16 @@ class TruckAssignmentManager {
 		// Also assign on Enter key
 		this.container.find('.ta-truck-input').off('keydown').on('keydown', function (e) {
 			if (e.key === 'Enter') $(this).trigger('change');
+		});
+
+		// Pagination
+		this.container.find('.ta-pg-prev').on('click', () => {
+			if (this.current_page > 1) { this.current_page--; this.render_view(); }
+		});
+		this.container.find('.ta-pg-next').on('click', () => {
+			const unassigned = this.get_filtered_orders().filter(o => !o.custom_truck_number);
+			const tp = Math.ceil(unassigned.length / this.page_size);
+			if (this.current_page < tp) { this.current_page++; this.render_view(); }
 		});
 
 		this.container.find('.btn-unassign').off('click').on('click', function () {
@@ -748,6 +782,19 @@ ${driver_cols}
 		.ta-order-link { font-weight: 600; color: #3b82f6; }
 		.ta-order-cust { display: block; color: #6b7280; font-size: 11px; }
 		.ta-empty-truck { text-align: center; color: #94a3b8; padding: 16px; font-style: italic; }
+
+		/* Pagination */
+		.ta-pg-bar {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 14px;
+			padding: 12px 16px;
+			border-top: 1px solid #e2e8f0;
+			background: #f8fafc;
+		}
+		.ta-pg-info { font-size: 13px; color: #64748b; }
+		.ta-pg-bar .btn { min-width: 70px; }
 		</style>`;
 	}
 }

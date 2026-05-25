@@ -15,6 +15,10 @@ class DeliveryNoteManager {
         this.delivery_notes = [];
         this.invoices = [];
         this.active_tab = 'pending';
+        this.page_size = 50;
+        this.orders_page = 1;
+        this.dns_page = 1;
+        this.invoices_page = 1;
         this.setup_page();
         this.set_default_dates();
         this.load_data();
@@ -240,9 +244,12 @@ class DeliveryNoteManager {
         const regions = this.page.fields_dict.delivery_region.get_value();
         const customer = this.page.fields_dict.customer.get_value();
         this.filters = {
-            regions: regions ? regions.split(',').map(r => r.trim()) : [],
+            regions: regions ? [regions] : [],
             customer: customer
         };
+        this.orders_page = 1;
+        this.dns_page = 1;
+        this.invoices_page = 1;
 
         if (this.active_tab === 'pending') {
             this.render_pending_orders();
@@ -290,10 +297,16 @@ class DeliveryNoteManager {
     // ─── Tab 1: Pending Delivery ──────────────────────────────────────────────
 
     render_pending_orders() {
-        const filtered = this.get_filtered_orders();
+        const all_filtered = this.get_filtered_orders();
         const $tab = $('#dm-tab-pending');
+        const total_pages = Math.ceil(all_filtered.length / this.page_size) || 1;
+        if (this.orders_page > total_pages) this.orders_page = total_pages;
+        const filtered = all_filtered.slice(
+            (this.orders_page - 1) * this.page_size,
+            this.orders_page * this.page_size
+        );
 
-        if (filtered.length === 0) {
+        if (all_filtered.length === 0) {
             $tab.html(`
                 <div class="alert alert-info" style="margin-top: 20px;">
                     <strong>No orders found</strong><br>
@@ -305,8 +318,8 @@ class DeliveryNoteManager {
             return;
         }
 
-        const total_value = filtered.reduce((sum, o) => sum + o.grand_total, 0);
-        const regions = [...new Set(filtered.map(o => o.custom_delivery_region).filter(r => r))];
+        const total_value = all_filtered.reduce((sum, o) => sum + o.grand_total, 0);
+        const regions = [...new Set(all_filtered.map(o => o.custom_delivery_region).filter(r => r))];
 
         let html = `
             <div class="delivery-orders-table">
@@ -372,9 +385,12 @@ class DeliveryNoteManager {
             `;
         });
 
-        html += `</tbody></table></div></div>${this.shared_styles()}`;
+        html += `</tbody></table>
+        ${this._pagination_html(all_filtered.length, 'orders_page', '#dm-tab-pending', () => this.render_pending_orders())}
+        </div></div>${this.shared_styles()}`;
         $tab.html(html);
         this.attach_pending_events();
+        this._attach_pagination_events('#dm-tab-pending', 'orders_page', all_filtered.length, () => this.render_pending_orders());
     }
 
     attach_pending_events() {
@@ -457,10 +473,16 @@ class DeliveryNoteManager {
     // ─── Tab 2: Submitted Delivery Notes ─────────────────────────────────────
 
     render_delivery_notes() {
-        const filtered = this.get_filtered_delivery_notes();
+        const all_filtered = this.get_filtered_delivery_notes();
         const $tab = $('#dm-tab-dns');
+        const total_pages = Math.ceil(all_filtered.length / this.page_size) || 1;
+        if (this.dns_page > total_pages) this.dns_page = total_pages;
+        const filtered = all_filtered.slice(
+            (this.dns_page - 1) * this.page_size,
+            this.dns_page * this.page_size
+        );
 
-        if (filtered.length === 0) {
+        if (all_filtered.length === 0) {
             $tab.html(`
                 <div class="alert alert-info" style="margin-top: 20px;">
                     <strong>No submitted delivery notes found</strong><br>
@@ -472,9 +494,9 @@ class DeliveryNoteManager {
             return;
         }
 
-        const total_value = filtered.reduce((sum, dn) => sum + (dn.grand_total || 0), 0);
-        const billed = filtered.filter(dn => dn.per_billed >= 100).length;
-        const unbilled = filtered.length - billed;
+        const total_value = all_filtered.reduce((sum, dn) => sum + (dn.grand_total || 0), 0);
+        const billed = all_filtered.filter(dn => dn.per_billed >= 100).length;
+        const unbilled = all_filtered.length - billed;
 
         let html = `
             <div class="delivery-orders-table">
@@ -546,9 +568,12 @@ class DeliveryNoteManager {
             `;
         });
 
-        html += `</tbody></table></div></div>${this.shared_styles()}`;
+        html += `</tbody></table>
+        ${this._pagination_html(all_filtered.length, 'dns_page', '#dm-tab-dns', () => this.render_delivery_notes())}
+        </div></div>${this.shared_styles()}`;
         $tab.html(html);
         this.attach_dns_events(filtered);
+        this._attach_pagination_events('#dm-tab-dns', 'dns_page', all_filtered.length, () => this.render_delivery_notes());
     }
 
     attach_dns_events(filtered) {
@@ -673,10 +698,16 @@ class DeliveryNoteManager {
     // ─── Tab 3: Sales Invoices ────────────────────────────────────────────────
 
     render_sales_invoices() {
-        const filtered = this.get_filtered_invoices();
+        const all_filtered = this.get_filtered_invoices();
         const $tab = $('#dm-tab-invoices');
+        const total_pages = Math.ceil(all_filtered.length / this.page_size) || 1;
+        if (this.invoices_page > total_pages) this.invoices_page = total_pages;
+        const filtered = all_filtered.slice(
+            (this.invoices_page - 1) * this.page_size,
+            this.invoices_page * this.page_size
+        );
 
-        if (filtered.length === 0) {
+        if (all_filtered.length === 0) {
             $tab.html(`
                 <div class="alert alert-info" style="margin-top: 20px;">
                     <strong>No sales invoices found</strong><br>
@@ -688,9 +719,9 @@ class DeliveryNoteManager {
             return;
         }
 
-        const total_value = filtered.reduce((sum, inv) => sum + (inv.grand_total || 0), 0);
-        const total_outstanding = filtered.reduce((sum, inv) => sum + (inv.outstanding_amount || 0), 0);
-        const paid = filtered.filter(inv => inv.outstanding_amount <= 0).length;
+        const total_value = all_filtered.reduce((sum, inv) => sum + (inv.grand_total || 0), 0);
+        const total_outstanding = all_filtered.reduce((sum, inv) => sum + (inv.outstanding_amount || 0), 0);
+        const paid = all_filtered.filter(inv => inv.outstanding_amount <= 0).length;
 
         let html = `
             <div class="delivery-orders-table">
@@ -761,9 +792,12 @@ class DeliveryNoteManager {
             `;
         });
 
-        html += `</tbody></table></div></div>${this.shared_styles()}`;
+        html += `</tbody></table>
+        ${this._pagination_html(all_filtered.length, 'invoices_page', '#dm-tab-invoices', () => this.render_sales_invoices())}
+        </div></div>${this.shared_styles()}`;
         $tab.html(html);
         this.attach_invoices_events();
+        this._attach_pagination_events('#dm-tab-invoices', 'invoices_page', all_filtered.length, () => this.render_sales_invoices());
     }
 
     attach_invoices_events() {
@@ -804,6 +838,30 @@ class DeliveryNoteManager {
             </div>
         `).join('');
         return `<div class="summary-card">${cards}</div>`;
+    }
+
+    _pagination_html(total, page_key, tab_selector, render_fn) {
+        if (total <= this.page_size) return '';
+        const current = this[page_key];
+        const total_pages = Math.ceil(total / this.page_size);
+        const start = (current - 1) * this.page_size + 1;
+        const end   = Math.min(current * this.page_size, total);
+        return `<div class="dm-pg-bar">
+            <button class="btn btn-xs btn-default dm-pg-prev" ${current <= 1 ? 'disabled' : ''}>&lsaquo; Prev</button>
+            <span class="dm-pg-info">Showing ${start}–${end} of ${total} &nbsp;·&nbsp; Page ${current} of ${total_pages}</span>
+            <button class="btn btn-xs btn-default dm-pg-next" ${current >= total_pages ? 'disabled' : ''}>Next &rsaquo;</button>
+        </div>`;
+    }
+
+    _attach_pagination_events(tab_selector, page_key, total, render_fn) {
+        const $tab = $(tab_selector);
+        const total_pages = Math.ceil(total / this.page_size);
+        $tab.find('.dm-pg-prev').off('click').on('click', () => {
+            if (this[page_key] > 1) { this[page_key]--; render_fn(); }
+        });
+        $tab.find('.dm-pg-next').off('click').on('click', () => {
+            if (this[page_key] < total_pages) { this[page_key]++; render_fn(); }
+        });
     }
 
     shared_styles() {
@@ -892,6 +950,18 @@ class DeliveryNoteManager {
                 .item-header { font-weight: 600; margin-bottom: 8px; color: #111827; font-size: 14px; }
                 .item-details { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: #6b7280; }
                 .item-details strong { color: #374151; }
+                .dm-pg-bar {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 14px;
+                    padding: 12px 16px;
+                    border-top: 1px solid #e5e7eb;
+                    background: #f9fafb;
+                    margin-top: 4px;
+                }
+                .dm-pg-info { font-size: 13px; color: #6b7280; }
+                .dm-pg-bar .btn { min-width: 70px; }
             </style>
         `;
     }

@@ -14,6 +14,8 @@ class SalesOrderManager {
 		this.selected = new Set();
 		this.expanded = new Set();
 		this.item_cache = {};
+		this.current_page = 1;
+		this.page_size = 50;
 		this.setup_page();
 		this.load_data();
 	}
@@ -26,17 +28,17 @@ class SalesOrderManager {
 		this.page.add_field({
 			label: 'From Date', fieldtype: 'Date', fieldname: 'from_date',
 			default: frappe.datetime.add_days(today, -7),
-			change: () => this.render(),
+			change: () => { this.current_page = 1; this.render(); },
 		});
 		this.page.add_field({
 			label: 'To Date', fieldtype: 'Date', fieldname: 'to_date',
 			default: today,
-			change: () => this.render(),
+			change: () => { this.current_page = 1; this.render(); },
 		});
 		this.page.add_field({
 			label: 'Region', fieldtype: 'Link', fieldname: 'delivery_region',
-			options: 'Territory',
-			change: () => this.render(),
+			options: 'Delivery Region',
+			change: () => { this.current_page = 1; this.render(); },
 		});
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
@@ -85,6 +87,7 @@ class SalesOrderManager {
 					o.workflow_state === '' ||
 					o.workflow_state === 'Proceed To Order'
 				);
+				this.current_page = 1;
 				this.render();
 			},
 		});
@@ -105,9 +108,9 @@ class SalesOrderManager {
 	// ── Render ────────────────────────────────────────────────────────────────
 
 	render() {
-		const orders = this.filtered_orders();
+		const all_filtered = this.filtered_orders();
 
-		if (!orders.length) {
+		if (!all_filtered.length) {
 			this.$wrap.html(`
 				<div class="som-empty">
 					<div class="som-empty-icon">📋</div>
@@ -122,9 +125,16 @@ class SalesOrderManager {
 			return;
 		}
 
-		const total_val  = orders.reduce((s, o) => s + o.grand_total, 0);
-		const on_hold    = orders.filter(o => o.custom_on_hold).length;
-		const selectable = orders.filter(o => !o.custom_on_hold).length;
+		const total_pages = Math.ceil(all_filtered.length / this.page_size);
+		if (this.current_page > total_pages) this.current_page = total_pages;
+		const orders = all_filtered.slice(
+			(this.current_page - 1) * this.page_size,
+			this.current_page * this.page_size
+		);
+
+		const total_val  = all_filtered.reduce((s, o) => s + o.grand_total, 0);
+		const on_hold    = all_filtered.filter(o => o.custom_on_hold).length;
+		const selectable = all_filtered.filter(o => !o.custom_on_hold).length;
 
 		let html = `
 		${this._styles()}
@@ -142,8 +152,8 @@ class SalesOrderManager {
 					<span>Select all eligible</span>
 				</label>
 				<span class="som-count-label">
-					Showing ${orders.length} order${orders.length !== 1 ? 's' : ''}
-					${this.orders.length !== orders.length ? ` (${this.orders.length} total)` : ''}
+					${all_filtered.length} order${all_filtered.length !== 1 ? 's' : ''}
+					${this.orders.length !== all_filtered.length ? ` (filtered from ${this.orders.length})` : ''}
 				</span>
 			</div>
 
@@ -221,9 +231,23 @@ class SalesOrderManager {
 			}
 		});
 
-		html += `</tbody></table></div>`;
+		html += `</tbody></table>
+			${this._pagination_html(all_filtered.length)}
+		</div>`;
 		this.$wrap.html(html);
 		this._attach_events();
+	}
+
+	_pagination_html(total) {
+		if (total <= this.page_size) return '';
+		const total_pages = Math.ceil(total / this.page_size);
+		const start = (this.current_page - 1) * this.page_size + 1;
+		const end   = Math.min(this.current_page * this.page_size, total);
+		return `<div class="som-pg-bar">
+			<button class="btn btn-xs btn-default som-pg-prev" ${this.current_page <= 1 ? 'disabled' : ''}>&lsaquo; Prev</button>
+			<span class="som-pg-info">Showing ${start}–${end} of ${total} &nbsp;·&nbsp; Page ${this.current_page} of ${total_pages}</span>
+			<button class="btn btn-xs btn-default som-pg-next" ${this.current_page >= total_pages ? 'disabled' : ''}>Next &rsaquo;</button>
+		</div>`;
 	}
 
 	_render_items(order_name) {
@@ -305,6 +329,15 @@ class SalesOrderManager {
 				self.expanded.add(name);
 			}
 			self.render();
+		});
+
+		// Pagination
+		this.$wrap.find('.som-pg-prev').on('click', () => {
+			if (this.current_page > 1) { this.current_page--; this.render(); }
+		});
+		this.$wrap.find('.som-pg-next').on('click', () => {
+			const tp = Math.ceil(this.filtered_orders().length / this.page_size);
+			if (this.current_page < tp) { this.current_page++; this.render(); }
 		});
 
 		// Hold toggle
@@ -578,6 +611,19 @@ class SalesOrderManager {
 		}
 		.som-items-table tr:last-child td { border-bottom: none; }
 		.som-item-name { color: #64748b; }
+
+		/* Pagination */
+		.som-pg-bar {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 14px;
+			padding: 12px 16px;
+			border-top: 1px solid #f1f5f9;
+			background: #f8fafc;
+		}
+		.som-pg-info { font-size: 13px; color: #64748b; }
+		.som-pg-bar .btn { min-width: 70px; }
 		</style>`;
 	}
 }
