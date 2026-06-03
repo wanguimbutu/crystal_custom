@@ -1,26 +1,40 @@
 import frappe
 from frappe import _
 
+FINANCE_APPROVED_STATES = ('Pending Customer Order Reconfirmation', 'Order Confirmed')
+
 @frappe.whitelist()
-def get_sales_order_fulfillment():
+def get_sales_order_fulfillment(from_date=None, to_date=None):
     """
-    Analyze submitted sales orders against finished goods inventory
-    Returns items with required qty, available qty, and shortage
+    Analyze finance-approved sales orders against finished goods inventory.
+    Returns items with required qty, available qty, and shortage.
     """
-    
-    # Get all items from submitted sales orders
-    sales_order_items = frappe.db.sql("""
-        SELECT 
+    conditions = [
+        "so.workflow_state IN %(states)s",
+        "so.status NOT IN ('Completed', 'Closed')",
+        "soi.qty > soi.delivered_qty",
+    ]
+    params = {'states': FINANCE_APPROVED_STATES}
+
+    if from_date:
+        conditions.append("so.transaction_date >= %(from_date)s")
+        params['from_date'] = from_date
+    if to_date:
+        conditions.append("so.transaction_date <= %(to_date)s")
+        params['to_date'] = to_date
+
+    where_clause = " AND ".join(conditions)
+
+    sales_order_items = frappe.db.sql(f"""
+        SELECT
             soi.item_code,
             soi.item_name,
             SUM(soi.qty - soi.delivered_qty) as required_qty
         FROM `tabSales Order Item` soi
         INNER JOIN `tabSales Order` so ON soi.parent = so.name
-        WHERE so.docstatus = 1
-        AND so.status NOT IN ('Completed', 'Closed')
-        AND soi.qty > soi.delivered_qty
+        WHERE {where_clause}
         GROUP BY soi.item_code, soi.item_name
-    """, as_dict=1)
+    """, params, as_dict=1)
     
     result = []
     
@@ -55,13 +69,13 @@ def get_sales_order_fulfillment():
 
 
 @frappe.whitelist()
-def create_material_request_from_shortage():
+def create_material_request_from_shortage(from_date=None, to_date=None):
     """
     Create a draft Material Request for items with shortages
     Type: Manufacture
     """
-    
-    fulfillment_data = get_sales_order_fulfillment()
+
+    fulfillment_data = get_sales_order_fulfillment(from_date=from_date, to_date=to_date)
     
     # Filter only items with shortages
     shortage_items = [item for item in fulfillment_data if item['shortage'] > 0]

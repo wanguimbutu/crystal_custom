@@ -6,6 +6,20 @@ frappe.pages['item-order-fulfillme'].on_page_load = function(wrapper) {
 		title: 'Item Order Fulfillment',
 		single_column: true
 	});
+
+	const today = frappe.datetime.get_today();
+
+	page.add_field({
+		label: 'From Date', fieldtype: 'Date', fieldname: 'from_date',
+		default: frappe.datetime.add_days(today, -30),
+		change: () => { _ful_state.page = 1; load_fulfillment_data(page); }
+	});
+	page.add_field({
+		label: 'To Date', fieldtype: 'Date', fieldname: 'to_date',
+		default: today,
+		change: () => { _ful_state.page = 1; load_fulfillment_data(page); }
+	});
+
 	page.add_button('Refresh Analysis', function() {
 		_ful_state.page = 1;
 		load_fulfillment_data(page);
@@ -22,8 +36,12 @@ frappe.pages['item-order-fulfillme'].on_page_load = function(wrapper) {
 function load_fulfillment_data(page) {
     page.main.html('<div class="text-center" style="padding: 50px;"><i class="fa fa-spinner fa-spin fa-3x"></i><p>Loading analysis...</p></div>');
 
+    const from_date = page.fields_dict.from_date ? page.fields_dict.from_date.get_value() : null;
+    const to_date   = page.fields_dict.to_date   ? page.fields_dict.to_date.get_value()   : null;
+
     frappe.call({
         method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_sales_order_fulfillment',
+        args: { from_date, to_date },
         callback: function(r) {
             if (r.message) {
                 _ful_state.data = r.message;
@@ -102,11 +120,15 @@ function render_fulfillment_table(page) {
 }
 
 function create_material_request(page) {
+    const from_date = page.fields_dict.from_date ? page.fields_dict.from_date.get_value() : null;
+    const to_date   = page.fields_dict.to_date   ? page.fields_dict.to_date.get_value()   : null;
+
     frappe.confirm(
-        'This will create a draft Material Request for all items with shortages. Continue?',
+        'This will create a draft Material Request for all items with shortages in the selected date range. Continue?',
         function() {
             frappe.call({
                 method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.create_material_request_from_shortage',
+                args: { from_date, to_date },
                 freeze: true,
                 freeze_message: __('Creating Material Request...'),
                 callback: function(r) {

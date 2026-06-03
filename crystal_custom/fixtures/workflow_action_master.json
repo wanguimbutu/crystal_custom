@@ -1,7 +1,7 @@
 [
-  { "doctype": "Workflow Action Master", "workflow_action_name": "Submit to Finance" },
-  { "doctype": "Workflow Action Master", "workflow_action_name": "Approve" },
-  { "doctype": "Workflow Action Master", "workflow_action_name": "Reject" },
-  { "doctype": "Workflow Action Master", "workflow_action_name": "Confirm Order" },
-  { "doctype": "Workflow Action Master", "workflow_action_name": "Return to Order Manager" }
+  { "doctype": "Workflow Action Master", "name": "Submit to Finance",          "workflow_action_name": "Submit to Finance" },
+  { "doctype": "Workflow Action Master", "name": "Approve",                    "workflow_action_name": "Approve" },
+  { "doctype": "Workflow Action Master", "name": "Reject",                     "workflow_action_name": "Reject" },
+  { "doctype": "Workflow Action Master", "name": "Confirm Order",              "workflow_action_name": "Confirm Order" },
+  { "doctype": "Workflow Action Master", "name": "Return to Order Manager",    "workflow_action_name": "Return to Order Manager" }
 ]
