@@ -545,14 +545,8 @@ class DeliveryNoteManager {
     _fetch_order_items(order_names, callback) {
         if (!order_names.length) { frappe.msgprint(__('No orders to process.')); return; }
         frappe.call({
-            method: 'frappe.client.get_list',
-            args: {
-                doctype: 'Sales Order Item',
-                fields: ['parent', 'item_code', 'item_name', 'qty', 'delivered_qty',
-                         'uom', 'weight_per_unit', 'net_weight', 'rate', 'amount'],
-                filters: [['parent', 'in', order_names]],
-                limit_page_length: 5000,
-            },
+            method: 'crystal_custom.crystal_customizations.page.delivery_note_manage.delivery_note_manage.get_order_items',
+            args: { order_names: order_names },
             freeze: true,
             freeze_message: __('Loading items…'),
             callback: (r) => callback(r.message || []),
