@@ -47,6 +47,20 @@ class OrderConfirmationManager {
         });
 
         this.page.add_field({
+            label: 'From Date',
+            fieldtype: 'Date',
+            fieldname: 'from_date',
+            change: () => { this.current_page = 1; this.load_data(); }
+        });
+
+        this.page.add_field({
+            label: 'To Date',
+            fieldtype: 'Date',
+            fieldname: 'to_date',
+            change: () => { this.current_page = 1; this.load_data(); }
+        });
+
+        this.page.add_field({
             label: 'Status',
             fieldtype: 'Select',
             fieldname: 'status_filter',
@@ -72,11 +86,15 @@ class OrderConfirmationManager {
 
     load_data() {
         const sp = this.page.fields_dict.sales_person.get_value();
+        const from_date = this.page.fields_dict.from_date.get_value();
+        const to_date = this.page.fields_dict.to_date.get_value();
         const filters = [
             ['Sales Order', 'docstatus', '=', 0],
             ['Sales Order', 'workflow_state', '=', 'Pending Customer Order Reconfirmation'],
         ];
         if (sp) filters.push(['Sales Team', 'sales_person', '=', sp]);
+        if (from_date) filters.push(['Sales Order', 'transaction_date', '>=', from_date]);
+        if (to_date) filters.push(['Sales Order', 'transaction_date', '<=', to_date]);
 
         frappe.call({
             method: 'frappe.client.get_list',
@@ -400,7 +418,6 @@ class OrderConfirmationManager {
                 .oc-late-table td { padding: 11px 12px !important; vertical-align: middle !important; font-size: 13px; }
                 .oc-late-table tr:hover td { background: #f8fafc; }
                 .oc-note-cell { color: #475569; font-style: italic; max-width: 240px; }
-            </style>
                 .confirmation-orders-table { 
                     margin-top: 20px;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
