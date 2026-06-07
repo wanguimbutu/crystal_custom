@@ -10,10 +10,11 @@ frappe.pages['delivery-note-manage'].on_page_load = function(wrapper) {
 class DeliveryNoteManager {
     constructor(page) {
         this.page = page;
-        this.filters = { regions: [], customer: null };
+        this.filters = { regions: [], customer: null, truck: null };
         this.orders = [];
         this.delivery_notes = [];
         this.invoices = [];
+        this.selected_orders = new Set();
         this.active_tab = 'pending';
         this.page_size = 50;
         this.orders_page = 1;
@@ -56,6 +57,13 @@ class DeliveryNoteManager {
         });
 
         this.page.add_field({
+            label: 'Truck',
+            fieldtype: 'Data',
+            fieldname: 'truck_filter',
+            change: () => this.apply_filters(),
+        });
+
+        this.page.add_field({
             label: 'Sales Person',
             fieldtype: 'Link',
             fieldname: 'sales_person',
@@ -63,6 +71,8 @@ class DeliveryNoteManager {
             change: () => { this.orders_page = 1; this.dns_page = 1; this.invoices_page = 1; this.load_data(); }
         });
 
+        this.page.set_primary_action('Loading Sheet', () => this.generate_loading_sheet(), 'octicon octicon-list-unordered');
+        this.page.add_button('Packing List', () => this.generate_packing_list());
         this.page.add_button('Refresh', () => {
             this.load_data();
         }, 'octicon octicon-sync');
@@ -171,7 +181,8 @@ class DeliveryNoteManager {
             args: {
                 doctype: 'Sales Order',
                 fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
-                         'custom_delivery_region', 'custom_phone_number', 'delivery_date', 'per_delivered', 'status'],
+                         'custom_delivery_region', 'custom_phone_number', 'delivery_date',
+                         'per_delivered', 'status', 'custom_truck_number', 'total_net_weight'],
                 filters: so_filters,
                 order_by: 'transaction_date desc',
                 limit_page_length: 500
@@ -263,9 +274,11 @@ class DeliveryNoteManager {
     apply_filters() {
         const regions = this.page.fields_dict.delivery_region.get_value();
         const customer = this.page.fields_dict.customer.get_value();
+        const truck    = (this.page.fields_dict.truck_filter.get_value() || '').trim();
         this.filters = {
             regions: regions ? [regions] : [],
-            customer: customer
+            customer: customer,
+            truck: truck || null,
         };
         this.orders_page = 1;
         this.dns_page = 1;
@@ -285,6 +298,7 @@ class DeliveryNoteManager {
             if (this.filters.customer && order.customer !== this.filters.customer) return false;
             if (this.filters.regions && this.filters.regions.length > 0 &&
                 !this.filters.regions.includes(order.custom_delivery_region)) return false;
+            if (this.filters.truck && order.custom_truck_number !== this.filters.truck) return false;
             return true;
         });
     }
@@ -338,41 +352,100 @@ class DeliveryNoteManager {
             return;
         }
 
-        const total_value = all_filtered.reduce((sum, o) => sum + o.grand_total, 0);
+        const total_value  = all_filtered.reduce((sum, o) => sum + o.grand_total, 0);
+        const total_weight = all_filtered.reduce((sum, o) => sum + (o.total_net_weight || 0), 0);
         const regions = [...new Set(all_filtered.map(o => o.custom_delivery_region).filter(r => r))];
+        const trucks  = [...new Set(all_filtered.map(o => o.custom_truck_number).filter(t => t))];
+
+        // Group by truck for sorted rendering
+        const sorted = [...all_filtered].sort((a, b) => {
+            const ta = a.custom_truck_number || '';
+            const tb = b.custom_truck_number || '';
+            if (!ta && !tb) return 0;
+            if (!ta) return 1;
+            if (!tb) return -1;
+            return ta.localeCompare(tb);
+        });
+        const page_slice = sorted.slice(
+            (this.orders_page - 1) * this.page_size,
+            this.orders_page * this.page_size
+        );
+
+        // Group current page by truck
+        const groups = {};
+        page_slice.forEach(o => {
+            const k = o.custom_truck_number || '__no_truck__';
+            if (!groups[k]) groups[k] = [];
+            groups[k].push(o);
+        });
+        const group_keys = Object.keys(groups).sort((a, b) => {
+            if (a === '__no_truck__') return 1;
+            if (b === '__no_truck__') return -1;
+            return a.localeCompare(b);
+        });
 
         let html = `
             <div class="delivery-orders-table">
                 ${this.summary_cards([
-                    { label: 'Pending Delivery', value: filtered.length, color: '#667eea, #764ba2' },
+                    { label: 'Orders', value: all_filtered.length, color: '#667eea, #764ba2' },
                     { label: 'Total Value', value: format_currency(total_value), color: '#43e97b, #38f9d7' },
-                    { label: 'Regions', value: regions.length, color: '#f093fb, #f5576c' }
+                    { label: 'Total Weight', value: `${total_weight.toFixed(0)} kg`, color: '#f093fb, #f5576c' },
+                    { label: 'Trucks', value: trucks.length, color: '#f59e0b, #d97706' }
                 ])}
+
+                <div class="dm-selection-bar">
+                    <label class="dm-sel-all-label">
+                        <input type="checkbox" id="dm-select-all" style="width:15px;height:15px;accent-color:#667eea;">
+                        Select All (${all_filtered.length})
+                    </label>
+                    <span class="dm-sel-count" id="dm-sel-count">${this.selected_orders.size} selected</span>
+                </div>
+
                 <div class="table-wrapper">
                     <table class="table table-bordered modern-table">
                         <thead>
                             <tr>
-                                <th width="5%"></th>
-                                <th width="12%">Sales Order</th>
-                                <th width="15%">Customer</th>
-                                <th width="12%">Phone</th>
-                                <th width="10%">Amount</th>
-                                <th width="10%">Order Date</th>
-                                <th width="10%">Delivery Date</th>
-                                <th width="12%">Region</th>
-                                <th width="14%">Action</th>
+                                <th width="3%"></th>
+                                <th width="3%"></th>
+                                <th width="11%">Sales Order</th>
+                                <th width="13%">Customer</th>
+                                <th width="10%">Phone</th>
+                                <th width="8%">Amount</th>
+                                <th width="8%">Order Date</th>
+                                <th width="8%">Del. Date</th>
+                                <th width="9%">Truck</th>
+                                <th width="9%">Region</th>
+                                <th width="11%">Action</th>
                             </tr>
                         </thead>
                         <tbody>
         `;
 
-        filtered.forEach(order => {
-            const delivery_date = order.delivery_date || order.transaction_date;
-            const is_overdue = delivery_date && frappe.datetime.get_diff(frappe.datetime.get_today(), delivery_date) > 0;
-
+        group_keys.forEach(key => {
+            const grp = groups[key];
+            const grp_label = key === '__no_truck__' ? 'No Truck' : `Truck: ${key}`;
+            const grp_val   = grp.reduce((s, o) => s + o.grand_total, 0);
+            const grp_wt    = grp.reduce((s, o) => s + (o.total_net_weight || 0), 0);
             html += `
-                <tr class="order-row ${is_overdue ? 'order-overdue' : ''}" data-order="${order.name}">
-                    <td><span class="toggle-details" style="cursor:pointer; font-size:16px;">▶</span></td>
+                <tr class="dm-truck-header">
+                    <td colspan="11">
+                        ${key === '__no_truck__' ? '📋' : '🚛'} ${frappe.utils.escape_html(grp_label)}
+                        <span class="dm-truck-meta">${grp.length} orders &nbsp;·&nbsp; ${format_currency(grp_val)} &nbsp;·&nbsp; ${grp_wt.toFixed(0)} kg</span>
+                    </td>
+                </tr>`;
+
+            grp.forEach(order => {
+                const delivery_date = order.delivery_date || order.transaction_date;
+                const is_overdue    = delivery_date && frappe.datetime.get_diff(frappe.datetime.get_today(), delivery_date) > 0;
+                const is_selected   = this.selected_orders.has(order.name);
+
+                html += `
+                <tr class="order-row ${is_overdue ? 'order-overdue' : ''} ${is_selected ? 'dm-row-selected' : ''}" data-order="${order.name}">
+                    <td style="text-align:center;">
+                        <input type="checkbox" class="dm-order-chk" data-order="${order.name}"
+                               ${is_selected ? 'checked' : ''} style="width:15px;height:15px;accent-color:#667eea;cursor:pointer;">
+                    </td>
+                    <td><span class="toggle-details" style="cursor:pointer;font-size:16px;">▶</span></td>
                     <td><a href="/app/sales-order/${order.name}" target="_blank" class="order-link">${order.name}</a></td>
                     <td><a href="/app/customer/${order.customer}" target="_blank" class="customer-link">${order.customer_name || order.customer}</a></td>
                     <td>
@@ -388,22 +461,27 @@ class DeliveryNoteManager {
                             '<span class="text-muted">-</span>'}
                         ${is_overdue ? '<span class="overdue-badge">OVERDUE</span>' : ''}
                     </td>
+                    <td>${order.custom_truck_number
+                        ? `<span class="region-tag">${frappe.utils.escape_html(order.custom_truck_number)}</span>`
+                        : '<span class="text-muted">—</span>'}
+                    </td>
                     <td><span class="region-tag">${order.custom_delivery_region || '-'}</span></td>
                     <td>
                         <button class="btn btn-sm btn-primary btn-create-dn" data-order="${order.name}">
-                            Create Delivery Note
+                            Create DN
                         </button>
                     </td>
                 </tr>
                 <tr class="order-details-row" data-order="${order.name}" style="display:none;">
-                    <td colspan="9">
+                    <td colspan="11">
                         <div class="order-details-container" style="padding:15px; background:#f8f9fa;">
                             <div class="loading">Loading items...</div>
                         </div>
                     </td>
                 </tr>
             `;
-        });
+            });  // grp.forEach
+        });  // group_keys.forEach
 
         html += `</tbody></table>
         ${this._pagination_html(all_filtered.length, 'orders_page', '#dm-tab-pending', () => this.render_pending_orders())}
@@ -416,6 +494,25 @@ class DeliveryNoteManager {
     attach_pending_events() {
         const self = this;
 
+        // Select all
+        $('#dm-select-all').off('change').on('change', function () {
+            const checked = $(this).is(':checked');
+            self.get_filtered_orders().forEach(o => {
+                checked ? self.selected_orders.add(o.name) : self.selected_orders.delete(o.name);
+            });
+            $('#dm-tab-pending .dm-order-chk').prop('checked', checked);
+            $('#dm-sel-count').text(`${self.selected_orders.size} selected`);
+        });
+
+        // Individual checkbox
+        $('#dm-tab-pending').find('.dm-order-chk').off('change').on('change', function () {
+            const name = $(this).data('order');
+            $(this).is(':checked') ? self.selected_orders.add(name) : self.selected_orders.delete(name);
+            $(this).closest('tr').toggleClass('dm-row-selected', $(this).is(':checked'));
+            $('#dm-sel-count').text(`${self.selected_orders.size} selected`);
+        });
+
+        // Expand toggle
         $('#dm-tab-pending').find('.toggle-details').off('click').on('click', function(e) {
             e.stopPropagation();
             const $icon = $(this);
@@ -433,6 +530,257 @@ class DeliveryNoteManager {
 
         $('#dm-tab-pending').find('.btn-create-dn').off('click').on('click', function() {
             self.create_delivery_note($(this).data('order'));
+        });
+    }
+
+    // ─── Loading Sheet & Packing List ────────────────────────────────────────
+
+    _resolve_target_orders() {
+        const targets = Array.from(this.selected_orders);
+        if (targets.length) return targets;
+        // If nothing selected, use all filtered orders
+        return this.get_filtered_orders().map(o => o.name);
+    }
+
+    _fetch_order_items(order_names, callback) {
+        if (!order_names.length) { frappe.msgprint(__('No orders to process.')); return; }
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Sales Order Item',
+                fields: ['parent', 'item_code', 'item_name', 'qty', 'delivered_qty',
+                         'uom', 'weight_per_unit', 'net_weight', 'rate', 'amount'],
+                filters: [['parent', 'in', order_names]],
+                limit_page_length: 5000,
+            },
+            freeze: true,
+            freeze_message: __('Loading items…'),
+            callback: (r) => callback(r.message || []),
+        });
+    }
+
+    generate_loading_sheet() {
+        const order_names = this._resolve_target_orders();
+        if (!order_names.length) { frappe.msgprint(__('No orders available.')); return; }
+
+        this._fetch_order_items(order_names, (raw_items) => {
+            const orders_map = {};
+            this.get_filtered_orders().forEach(o => { orders_map[o.name] = o; });
+
+            // Aggregate by item_code
+            const agg = {};
+            raw_items.forEach(i => {
+                const pending = i.qty - (i.delivered_qty || 0);
+                if (pending <= 0) return;
+                if (!agg[i.item_code]) {
+                    agg[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom, weight: 0 };
+                }
+                agg[i.item_code].qty    += pending;
+                agg[i.item_code].weight += pending * (i.weight_per_unit || 0);
+            });
+
+            const items = Object.values(agg).sort((a, b) => a.item_code.localeCompare(b.item_code));
+            const total_qty    = items.reduce((s, i) => s + i.qty, 0);
+            const total_weight = items.reduce((s, i) => s + i.weight, 0);
+
+            const truck  = this.filters.truck || (order_names.length === 1 ? (this.get_filtered_orders().find(o => o.name === order_names[0]) || {}).custom_truck_number : '') || '';
+            const region = this.filters.regions[0] || '';
+            const today  = frappe.datetime.str_to_user(frappe.datetime.get_today());
+
+            const rows = items.map((item, idx) => `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td><strong>${item.item_code}</strong></td>
+                    <td>${item.item_name}</td>
+                    <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
+                    <td>${item.uom}</td>
+                    <td style="text-align:right;">${item.weight > 0 ? item.weight.toFixed(2) : '—'}</td>
+                    <td style="text-align:center;">___________</td>
+                </tr>`).join('');
+
+            const html = `<!DOCTYPE html><html>
+<head><meta charset="utf-8"><title>Loading Sheet</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:13px;margin:20px;}
+  h2{margin:0 0 4px;}
+  .meta{color:#555;margin-bottom:16px;font-size:12px;}
+  table{border-collapse:collapse;width:100%;}
+  th,td{border:1px solid #bbb;padding:7px 10px;}
+  th{background:#1e293b;color:#fff;text-align:left;}
+  tfoot td{background:#f1f5f9;font-weight:700;}
+  @media print{.no-print{display:none}}
+</style>
+</head><body>
+<button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#1e293b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Print</button>
+<h2>LOADING SHEET</h2>
+<div class="meta">
+  Date: ${today}
+  ${truck  ? ` &nbsp;|&nbsp; Truck: <strong>${truck}</strong>`   : ''}
+  ${region ? ` &nbsp;|&nbsp; Region: <strong>${region}</strong>` : ''}
+  &nbsp;|&nbsp; Orders: <strong>${order_names.length}</strong>
+  &nbsp;|&nbsp; Items: <strong>${items.length}</strong>
+</div>
+<table>
+  <thead><tr>
+    <th width="4%">#</th><th width="13%">Item Code</th><th width="32%">Description</th>
+    <th width="10%">Qty</th><th width="7%">UOM</th>
+    <th width="12%">Weight (kg)</th><th width="16%">Loaded ✓</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+  <tfoot><tr>
+    <td colspan="3" style="text-align:right;">TOTALS</td>
+    <td>${total_qty.toFixed(2)}</td><td>—</td>
+    <td>${total_weight > 0 ? total_weight.toFixed(2) : '—'}</td><td></td>
+  </tr></tfoot>
+</table>
+<p style="margin-top:24px;font-size:11px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
+</body></html>`;
+
+            const w = window.open('', '_blank');
+            w.document.write(html);
+            w.document.close();
+        });
+    }
+
+    generate_packing_list() {
+        const order_names = this._resolve_target_orders();
+        if (!order_names.length) { frappe.msgprint(__('No orders available.')); return; }
+
+        this._fetch_order_items(order_names, (raw_items) => {
+            const orders_map = {};
+            this.get_filtered_orders().forEach(o => { orders_map[o.name] = o; });
+
+            // Group items by order
+            const order_items = {};
+            raw_items.forEach(i => {
+                const pending = i.qty - (i.delivered_qty || 0);
+                if (pending <= 0) return;
+                if (!order_items[i.parent]) order_items[i.parent] = [];
+                order_items[i.parent].push({ ...i, pending_qty: pending });
+            });
+
+            // Aggregate totals
+            const totals = {};
+            raw_items.forEach(i => {
+                const pending = i.qty - (i.delivered_qty || 0);
+                if (pending <= 0) return;
+                if (!totals[i.item_code]) totals[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom };
+                totals[i.item_code].qty += pending;
+            });
+
+            // Sort orders by truck then customer
+            const sorted_orders = order_names
+                .filter(n => order_items[n])
+                .sort((a, b) => {
+                    const ta = (orders_map[a] || {}).custom_truck_number || '';
+                    const tb = (orders_map[b] || {}).custom_truck_number || '';
+                    if (ta !== tb) return ta.localeCompare(tb);
+                    return ((orders_map[a] || {}).customer_name || '').localeCompare((orders_map[b] || {}).customer_name || '');
+                });
+
+            const truck  = this.filters.truck || '';
+            const region = this.filters.regions[0] || '';
+            const today  = frappe.datetime.str_to_user(frappe.datetime.get_today());
+
+            let customer_blocks = '';
+            sorted_orders.forEach(order_name => {
+                const o     = orders_map[order_name] || { customer_name: order_name, custom_truck_number: '' };
+                const items = order_items[order_name] || [];
+                const subtotal_weight = items.reduce((s, i) => s + i.pending_qty * (i.weight_per_unit || 0), 0);
+                const subtotal_qty    = items.reduce((s, i) => s + i.pending_qty, 0);
+
+                const item_rows = items.map((item, idx) => `
+                    <tr>
+                        <td>${idx + 1}</td>
+                        <td><strong>${item.item_code}</strong></td>
+                        <td>${item.item_name}</td>
+                        <td style="text-align:right;">${item.pending_qty.toFixed(2)}</td>
+                        <td>${item.uom}</td>
+                        <td style="text-align:right;">${(item.pending_qty * (item.weight_per_unit || 0)).toFixed(2)}</td>
+                    </tr>`).join('');
+
+                customer_blocks += `
+                <div class="customer-block">
+                    <div class="cust-header">
+                        <span class="cust-name">${o.customer_name || order_name}</span>
+                        <span class="cust-meta">
+                            ${order_name}
+                            ${o.custom_truck_number ? ` &nbsp;·&nbsp; Truck: <strong>${o.custom_truck_number}</strong>` : ''}
+                            ${o.custom_delivery_region ? ` &nbsp;·&nbsp; ${o.custom_delivery_region}` : ''}
+                        </span>
+                    </div>
+                    <table>
+                        <thead><tr><th>#</th><th>Item Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Weight (kg)</th></tr></thead>
+                        <tbody>${item_rows}</tbody>
+                        <tfoot><tr>
+                            <td colspan="3" style="text-align:right;">Subtotal</td>
+                            <td>${subtotal_qty.toFixed(2)}</td><td>—</td>
+                            <td>${subtotal_weight.toFixed(2)}</td>
+                        </tr></tfoot>
+                    </table>
+                    <div class="sig-line">Received by: ___________________________ &nbsp;&nbsp; Signature: ___________________________</div>
+                </div>`;
+            });
+
+            const total_items = Object.values(totals).sort((a, b) => a.item_code.localeCompare(b.item_code));
+            const grand_qty   = total_items.reduce((s, i) => s + i.qty, 0);
+            const total_rows  = total_items.map((item, idx) => `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td><strong>${item.item_code}</strong></td>
+                    <td>${item.item_name}</td>
+                    <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
+                    <td>${item.uom}</td>
+                </tr>`).join('');
+
+            const html = `<!DOCTYPE html><html>
+<head><meta charset="utf-8"><title>Packing List</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#111;}
+  h2{margin:0 0 4px;}
+  .meta{color:#555;margin-bottom:20px;font-size:11px;}
+  table{border-collapse:collapse;width:100%;margin-bottom:4px;}
+  th,td{border:1px solid #bbb;padding:6px 9px;}
+  th{background:#1e293b;color:#fff;text-align:left;font-size:11px;}
+  tfoot td{background:#f1f5f9;font-weight:700;}
+  .customer-block{margin-bottom:28px;page-break-inside:avoid;}
+  .cust-header{background:#334155;color:#f1f5f9;padding:9px 12px;border-radius:4px 4px 0 0;margin-bottom:0;display:flex;justify-content:space-between;align-items:center;}
+  .cust-name{font-size:14px;font-weight:700;}
+  .cust-meta{font-size:11px;color:#94a3b8;}
+  .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;}
+  .totals-section{border-top:3px solid #1e293b;padding-top:12px;margin-top:8px;}
+  .totals-title{font-size:15px;font-weight:700;margin-bottom:8px;color:#1e293b;}
+  @media print{.no-print{display:none}body{margin:10px}}
+</style>
+</head><body>
+<button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#1e293b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Print</button>
+<h2>PACKING LIST</h2>
+<div class="meta">
+  Date: ${today}
+  ${truck  ? ` &nbsp;|&nbsp; Truck: <strong>${truck}</strong>`   : ''}
+  ${region ? ` &nbsp;|&nbsp; Region: <strong>${region}</strong>` : ''}
+  &nbsp;|&nbsp; Customers: <strong>${sorted_orders.length}</strong>
+</div>
+
+${customer_blocks}
+
+<div class="totals-section">
+  <div class="totals-title">GRAND TOTALS — All Items</div>
+  <table>
+    <thead><tr><th>#</th><th>Item Code</th><th>Description</th><th>Total Qty</th><th>UOM</th></tr></thead>
+    <tbody>${total_rows}</tbody>
+    <tfoot><tr>
+      <td colspan="3" style="text-align:right;">TOTAL</td>
+      <td>${grand_qty.toFixed(2)}</td><td>—</td>
+    </tr></tfoot>
+  </table>
+</div>
+<p style="margin-top:20px;font-size:10px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
+</body></html>`;
+
+            const w = window.open('', '_blank');
+            w.document.write(html);
+            w.document.close();
         });
     }
 
@@ -930,10 +1278,33 @@ class DeliveryNoteManager {
                     padding: 14px 12px !important;
                     border: none !important;
                 }
+                .dm-truck-header td {
+                    background: #1e293b !important;
+                    color: #f1f5f9 !important;
+                    font-weight: 700;
+                    font-size: 13px;
+                    padding: 9px 14px !important;
+                    border: none !important;
+                }
+                .dm-truck-meta { font-weight: 400; color: #94a3b8; margin-left: 10px; font-size: 12px; }
+                .dm-selection-bar {
+                    display: flex;
+                    align-items: center;
+                    gap: 16px;
+                    padding: 10px 14px;
+                    background: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 6px;
+                    margin-bottom: 12px;
+                    font-size: 13px;
+                }
+                .dm-sel-all-label { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; margin: 0; }
+                .dm-sel-count { color: #667eea; font-weight: 600; }
+                .dm-row-selected td { background: #eff6ff !important; }
                 .order-row { transition: all 0.2s; border-left: 3px solid transparent; }
                 .order-row:hover { background-color: #f3f4f6 !important; border-left-color: #667eea; }
                 .order-row.order-overdue { background-color: #fef2f2; }
-                .order-row td { padding: 12px !important; vertical-align: middle !important; }
+                .order-row td { padding: 10px !important; vertical-align: middle !important; }
                 .order-link, .customer-link { color: #667eea; font-weight: 600; text-decoration: none; }
                 .order-link:hover, .customer-link:hover { color: #764ba2; text-decoration: underline; }
                 .phone-link { color: #0891b2; font-weight: 600; text-decoration: none; }

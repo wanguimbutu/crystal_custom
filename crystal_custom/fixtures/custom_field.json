@@ -17,7 +17,7 @@
     "fieldname": "custom_delivery_region",
     "label": "Delivery Region",
     "fieldtype": "Link",
-    "options": "Territory",
+    "options": "Delivery Region",
     "insert_after": "custom_logistics_section",
     "in_list_view": 0,
     "in_standard_filter": 1,
@@ -54,7 +54,7 @@
     "label": "On Hold",
     "fieldtype": "Check",
     "insert_after": "custom_col_break_logistics",
-    "default": "0",
+    "default": 0,
     "allow_on_submit": 1,
     "permlevel": 0
   },
@@ -66,7 +66,7 @@
     "label": "Call Not Picked",
     "fieldtype": "Check",
     "insert_after": "custom_on_hold",
-    "default": "0",
+    "default": 0,
     "allow_on_submit": 1,
     "permlevel": 0
   },
@@ -79,6 +79,17 @@
     "fieldtype": "Small Text",
     "insert_after": "custom_call_not_picked",
     "allow_on_submit": 1,
+    "permlevel": 0
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Sales Order",
+    "name": "Sales Order-custom_finance_rejection_note",
+    "fieldname": "custom_finance_rejection_note",
+    "label": "Finance Rejection Note",
+    "fieldtype": "Small Text",
+    "insert_after": "custom_call_notes",
+    "read_only": 0,
     "permlevel": 0
   },
   {
@@ -112,7 +123,7 @@
     "label": "Truck Closed",
     "fieldtype": "Check",
     "insert_after": "custom_truck_number",
-    "default": "0",
+    "default": 0,
     "read_only": 1,
     "allow_on_submit": 1,
     "permlevel": 0
@@ -124,7 +135,7 @@
     "fieldname": "custom_delivery_region",
     "label": "Delivery Region",
     "fieldtype": "Link",
-    "options": "Territory",
+    "options": "Delivery Region",
     "insert_after": "territory",
     "in_standard_filter": 1,
     "allow_on_submit": 1,

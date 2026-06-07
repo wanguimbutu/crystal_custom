@@ -12,6 +12,7 @@ class OrderConfirmationManager {
         this.page = page;
         this.filters = {};
         this.orders = [];
+        this.submitted_orders = [];
         this.called_orders = new Set();
         this.not_picked_orders = new Set();
         this.current_page = 1;
@@ -83,24 +84,52 @@ class OrderConfirmationManager {
                 doctype: 'Sales Order',
                 fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
                          'custom_delivery_region', 'custom_phone_number', 'owner', 'workflow_state',
-                         'custom_call_not_picked', 'custom_call_notes'],
+                         'custom_call_not_picked', 'custom_call_notes', 'custom_truck_number'],
                 filters,
                 limit_page_length: 500
             },
             callback: (r) => {
                 if (r.message) {
                     this.orders = r.message;
-                    
-                    // Restore state for orders that were marked as not picked
                     this.orders.forEach(order => {
                         if (order.custom_call_not_picked === 1) {
                             this.not_picked_orders.add(order.name);
                         }
                     });
-                    
-                    this.render_orders();
+                    this.load_submitted_orders();
                 }
             }
+        });
+    }
+
+    load_submitted_orders() {
+        const sp = this.page.fields_dict.sales_person.get_value();
+        const filters = [
+            ['Sales Order', 'docstatus', '=', 1],
+            ['Sales Order', 'workflow_state', '=', 'Order Confirmed'],
+            ['Sales Order', 'transaction_date', '>=', frappe.datetime.add_days(frappe.datetime.get_today(), -14)],
+        ];
+        if (sp) filters.push(['Sales Team', 'sales_person', '=', sp]);
+
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Sales Order',
+                fields: ['name', 'customer', 'customer_name', 'transaction_date',
+                         'grand_total', 'custom_phone_number', 'custom_call_notes',
+                         'custom_call_not_picked', 'custom_truck_number'],
+                filters,
+                order_by: 'transaction_date desc',
+                limit_page_length: 200,
+            },
+            callback: (r) => {
+                this.submitted_orders = r.message || [];
+                this.render_orders();
+            },
+            error: () => {
+                this.submitted_orders = [];
+                this.render_orders();
+            },
         });
     }
 
@@ -142,9 +171,20 @@ class OrderConfirmationManager {
 
     render_orders() {
         const all_filtered = this.get_filtered_orders();
-        const total_pages = Math.ceil(all_filtered.length / this.page_size) || 1;
+
+        // Sort by truck so same-truck orders stay together across pages
+        const sorted_all = [...all_filtered].sort((a, b) => {
+            const ta = a.custom_truck_number || '';
+            const tb = b.custom_truck_number || '';
+            if (!ta && !tb) return 0;
+            if (!ta) return 1;
+            if (!tb) return -1;
+            return ta.localeCompare(tb);
+        });
+
+        const total_pages = Math.ceil(sorted_all.length / this.page_size) || 1;
         if (this.current_page > total_pages) this.current_page = total_pages;
-        const filtered_orders = all_filtered.slice(
+        const filtered_orders = sorted_all.slice(
             (this.current_page - 1) * this.page_size,
             this.current_page * this.page_size
         );
@@ -239,12 +279,36 @@ class OrderConfirmationManager {
                         <tbody>
         `;
 
+        // Group page-slice by truck for display
+        const groups = {};
         filtered_orders.forEach(order => {
-            const is_called = this.called_orders.has(order.name);
-            const is_not_picked = this.not_picked_orders.has(order.name);
-            
+            const key = order.custom_truck_number || '__no_truck__';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(order);
+        });
+        const group_keys = Object.keys(groups).sort((a, b) => {
+            if (a === '__no_truck__') return 1;
+            if (b === '__no_truck__') return -1;
+            return a.localeCompare(b);
+        });
+
+        group_keys.forEach(key => {
+            const truck_label = key === '__no_truck__' ? 'No Truck Assigned' : `Truck: ${key}`;
+            const grp = groups[key];
             html += `
-                <tr class="order-row ${is_called ? 'order-called' : ''} ${is_not_picked ? 'order-not-picked' : ''}" 
+                <tr class="oc-truck-header">
+                    <td colspan="9">
+                        ${key === '__no_truck__' ? '📋' : '🚛'} ${frappe.utils.escape_html(truck_label)}
+                        <span style="font-weight:normal;color:#94a3b8;margin-left:10px;">${grp.length} order${grp.length !== 1 ? 's' : ''}</span>
+                    </td>
+                </tr>`;
+
+            grp.forEach(order => {
+                const is_called     = this.called_orders.has(order.name);
+                const is_not_picked = this.not_picked_orders.has(order.name);
+
+                html += `
+                <tr class="order-row ${is_called ? 'order-called' : ''} ${is_not_picked ? 'order-not-picked' : ''}"
                     data-order="${order.name}">
                     <td>
                         <span class="toggle-details" style="cursor:pointer; font-size: 16px;">▶</span>
@@ -252,13 +316,13 @@ class OrderConfirmationManager {
                     <td><a href="/app/sales-order/${order.name}" target="_blank" class="order-link">${order.name}</a></td>
                     <td><a href="/app/customer/${order.customer}" target="_blank" class="customer-link">${order.customer_name || order.customer}</a></td>
                     <td>
-                        ${order.custom_phone_number ? 
+                        ${order.custom_phone_number ?
                             `<a href="tel:${order.custom_phone_number}" class="phone-link">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;">
                                     <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"></path>
                                 </svg>
                                 ${order.custom_phone_number}
-                            </a>` : 
+                            </a>` :
                             '<span class="text-muted">No phone</span>'}
                     </td>
                     <td><span class="amount-badge">${format_currency(order.grand_total)}</span></td>
@@ -266,21 +330,19 @@ class OrderConfirmationManager {
                     <td><span class="region-tag">${order.custom_delivery_region || '-'}</span></td>
                     <td>
                         <div class="action-buttons">
-                            <button class="btn btn-sm ${is_called ? 'btn-success' : 'btn-primary'} btn-mark-called" 
-                                    data-order="${order.name}"
-                                    ${is_called ? 'disabled' : ''}>
+                            <button class="btn btn-sm ${is_called ? 'btn-success' : 'btn-primary'} btn-mark-called"
+                                    data-order="${order.name}" ${is_called ? 'disabled' : ''}>
                                 ${is_called ? '✓ Called' : 'Mark Called'}
                             </button>
-                            <button class="btn btn-sm ${is_not_picked ? 'btn-danger' : 'btn-warning'} btn-not-picked" 
-                                    data-order="${order.name}"
-                                    ${is_called ? 'disabled' : ''}>
+                            <button class="btn btn-sm ${is_not_picked ? 'btn-danger' : 'btn-warning'} btn-not-picked"
+                                    data-order="${order.name}" ${is_called ? 'disabled' : ''}>
                                 ${is_not_picked ? '✓ Not Picked' : 'Not Picked'}
                             </button>
                         </div>
                     </td>
                     <td>
-                        ${is_called ? 
-                            '<span class="status-badge status-called">Ready to Submit</span>' : 
+                        ${is_called ?
+                            '<span class="status-badge status-called">Ready to Submit</span>' :
                             is_not_picked ?
                             '<span class="status-badge status-not-picked">Call Not Picked</span>' :
                             '<span class="status-badge status-pending">Pending Call</span>'}
@@ -288,12 +350,12 @@ class OrderConfirmationManager {
                 </tr>
                 <tr class="order-details-row" data-order="${order.name}" style="display:none;">
                     <td colspan="9">
-                        <div class="order-details-container" style="padding: 15px; background: #f8f9fa;">
+                        <div class="order-details-container" style="padding:15px;background:#f8f9fa;">
                             <div class="loading">Loading details...</div>
                         </div>
                     </td>
-                </tr>
-            `;
+                </tr>`;
+            });
         });
 
         html += `
@@ -302,7 +364,43 @@ class OrderConfirmationManager {
                     ${this._pagination_html(all_filtered.length)}
                 </div>
             </div>
+
+            ${this._render_late_notes_section()}
+
             <style>
+                .oc-truck-header td {
+                    background: #1e293b !important;
+                    color: #f1f5f9 !important;
+                    font-weight: 700;
+                    font-size: 13px;
+                    padding: 10px 14px !important;
+                    border: none !important;
+                    letter-spacing: .3px;
+                }
+                .oc-late-section {
+                    margin-top: 32px;
+                    background: #fff;
+                    border-radius: 12px;
+                    overflow: hidden;
+                    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+                }
+                .oc-late-header {
+                    background: #0f172a;
+                    color: #f1f5f9;
+                    padding: 14px 20px;
+                    font-weight: 700;
+                    font-size: 15px;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                }
+                .oc-late-sub { font-size: 12px; color: #94a3b8; font-weight: 400; }
+                .oc-late-table thead { background: #334155; }
+                .oc-late-table thead th { color: #fff !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: .4px; padding: 10px 12px !important; border: none !important; }
+                .oc-late-table td { padding: 11px 12px !important; vertical-align: middle !important; font-size: 13px; }
+                .oc-late-table tr:hover td { background: #f8fafc; }
+                .oc-note-cell { color: #475569; font-style: italic; max-width: 240px; }
+            </style>
                 .confirmation-orders-table { 
                     margin-top: 20px;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -586,6 +684,86 @@ class OrderConfirmationManager {
         this.attach_events();
     }
 
+    _render_late_notes_section() {
+        if (!this.submitted_orders.length) return '';
+
+        const rows = this.submitted_orders.map(o => `
+            <tr>
+                <td><a href="/app/sales-order/${o.name}" target="_blank" class="order-link">${o.name}</a></td>
+                <td>${frappe.utils.escape_html(o.customer_name || o.name)}</td>
+                <td>${o.custom_phone_number
+                    ? `<a href="tel:${o.custom_phone_number}" class="phone-link">${o.custom_phone_number}</a>`
+                    : '<span class="text-muted">—</span>'}
+                </td>
+                <td>${o.custom_truck_number
+                    ? `<span class="region-tag">${frappe.utils.escape_html(o.custom_truck_number)}</span>`
+                    : '<span class="text-muted">—</span>'}
+                </td>
+                <td class="oc-note-cell">
+                    ${o.custom_call_notes
+                        ? frappe.utils.escape_html(o.custom_call_notes)
+                        : '<span class="text-muted">No note yet</span>'}
+                </td>
+                <td>
+                    <button class="btn btn-xs ${o.custom_call_notes ? 'btn-default' : 'btn-primary'} btn-add-late-note"
+                            data-order="${o.name}">
+                        ${o.custom_call_notes ? 'Edit Note' : 'Add Note'}
+                    </button>
+                </td>
+            </tr>`).join('');
+
+        return `
+        <div class="oc-late-section">
+            <div class="oc-late-header">
+                📞 Late Call Notes
+                <span class="oc-late-sub">Add notes after submission — for customers who called back or picked up late</span>
+            </div>
+            <table class="table table-bordered oc-late-table" style="margin:0;">
+                <thead><tr>
+                    <th width="12%">Order</th>
+                    <th width="18%">Customer</th>
+                    <th width="13%">Phone</th>
+                    <th width="10%">Truck</th>
+                    <th width="30%">Call Note</th>
+                    <th width="12%">Action</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    }
+
+    add_late_note(order_name) {
+        const order = this.submitted_orders.find(o => o.name === order_name);
+        frappe.prompt([{
+            label: 'Call Notes',
+            fieldname: 'call_notes',
+            fieldtype: 'Small Text',
+            default: order ? (order.custom_call_notes || '') : '',
+            description: 'Log the outcome of this late call or callback',
+        }], (vals) => {
+            frappe.call({
+                method: 'frappe.client.set_value',
+                args: {
+                    doctype: 'Sales Order',
+                    name: order_name,
+                    fieldname: { custom_call_notes: vals.call_notes || '' },
+                },
+                callback: (r) => {
+                    if (!r.message) return;
+                    if (order) order.custom_call_notes = vals.call_notes;
+                    frappe.show_alert({ message: __('Note saved for {0}', [order_name]), indicator: 'green' });
+
+                    // Update the note cell and button label without a full re-render
+                    const $row = this.container.find(`.btn-add-late-note[data-order="${order_name}"]`).closest('tr');
+                    $row.find('.oc-note-cell').text(vals.call_notes || '');
+                    $row.find('.btn-add-late-note')
+                        .text('Edit Note')
+                        .removeClass('btn-primary').addClass('btn-default');
+                },
+            });
+        }, __('Late Call Note — {0}', [order_name]), __('Save Note'));
+    }
+
     _pagination_html(total) {
         if (total <= this.page_size) return '';
         const total_pages = Math.ceil(total / this.page_size);
@@ -625,6 +803,11 @@ class OrderConfirmationManager {
                 $icon.text('▼');
                 self.load_order_items(order_name);
             }
+        });
+
+        // Late call notes
+        this.container.find('.btn-add-late-note').off('click').on('click', function () {
+            self.add_late_note($(this).data('order'));
         });
 
         // Mark as called

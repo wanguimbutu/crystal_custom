@@ -14,6 +14,7 @@ class SalesOrderManager {
 		this.selected = new Set();
 		this.expanded = new Set();
 		this.item_cache = {};
+		this.doc_cache  = {};
 		this.current_page = 1;
 		this.page_size = 50;
 		this.setup_page();
@@ -59,6 +60,8 @@ class SalesOrderManager {
 	// ── Data ──────────────────────────────────────────────────────────────────
 
 	load_data() {
+		this.item_cache = {};
+		this.doc_cache  = {};
 		this.$wrap.html(this._spinner());
 
 		const sp = this.page.fields_dict.sales_person.get_value();
@@ -75,6 +78,7 @@ class SalesOrderManager {
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
 					'workflow_state', 'custom_on_hold',
+					'custom_additional_information', 'custom_finance_rejection_note',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -176,11 +180,12 @@ class SalesOrderManager {
 
 		orders.forEach(o => {
 			const held     = !!o.custom_on_hold;
+			const rejected = !held && !!o.custom_finance_rejection_note;
 			const checked  = this.selected.has(o.name);
 			const expanded = this.expanded.has(o.name);
 
 			html += `
-				<tr class="som-row ${held ? 'som-row-held' : ''} ${checked ? 'som-row-selected' : ''}"
+				<tr class="som-row ${held ? 'som-row-held' : ''} ${rejected ? 'som-row-rejected' : ''} ${checked ? 'som-row-selected' : ''}"
 				    data-order="${o.name}">
 					<td class="som-td-chk">
 						<input type="checkbox" class="som-chk" data-order="${o.name}"
@@ -208,7 +213,9 @@ class SalesOrderManager {
 					<td>
 						${held
 							? '<span class="som-badge som-badge-held">On Hold</span>'
-							: '<span class="som-badge som-badge-ready">Ready</span>'}
+							: rejected
+								? '<span class="som-badge som-badge-rejected">Finance Rejected</span>'
+								: '<span class="som-badge som-badge-ready">Ready</span>'}
 					</td>
 					<td class="som-th-act">
 						<button class="som-hold-btn ${held ? 'som-hold-btn-release' : 'som-hold-btn-hold'}"
@@ -220,11 +227,25 @@ class SalesOrderManager {
 				</tr>`;
 
 			if (expanded) {
+				const rejection_note  = o.custom_finance_rejection_note;
+				const additional_info = o.custom_additional_information;
 				html += `
 				<tr class="som-items-row" data-order="${o.name}">
 					<td colspan="10">
-						<div class="som-items-wrap" id="som-items-${o.name}">
-							${this._render_items(o.name)}
+						<div class="som-items-wrap">
+							${rejection_note ? `
+							<div class="som-rejection-alert">
+								<strong>⚠ Finance Rejection Note:</strong>
+								${frappe.utils.escape_html(rejection_note)}
+							</div>` : ''}
+							${additional_info ? `
+							<div class="som-info-note">
+								<strong>Additional Information:</strong>
+								${frappe.utils.escape_html(additional_info)}
+							</div>` : ''}
+							<div id="som-items-${o.name}">
+								${this._render_items(o.name)}
+							</div>
 						</div>
 					</td>
 				</tr>`;
@@ -262,21 +283,52 @@ class SalesOrderManager {
 			<thead><tr>
 				<th>Item Code</th><th>Description</th>
 				<th class="som-th-r">Qty</th><th>UOM</th>
-				<th class="som-th-r">Rate</th><th class="som-th-r">Amount</th>
+				<th class="som-th-r">Rate</th>
+				<th class="som-th-r">Wt / Unit (kg)</th>
+				<th class="som-th-r">Amount</th>
+				<th class="som-th-r">Total Wt</th>
 			</tr></thead><tbody>`;
 
-		items.forEach(item => {
+		items.forEach((item, idx) => {
+			const amount       = (item.qty || 0) * (item.rate || 0);
+			const total_weight = (item.qty || 0) * (item.weight_per_unit || 0);
 			html += `<tr>
-				<td><strong>${item.item_code}</strong></td>
-				<td class="som-item-name">${item.item_name || ''}</td>
-				<td class="som-th-r">${item.qty}</td>
-				<td>${item.uom || ''}</td>
-				<td class="som-th-r">${format_currency(item.rate)}</td>
-				<td class="som-th-r"><strong>${format_currency(item.amount)}</strong></td>
+				<td><strong>${frappe.utils.escape_html(item.item_code)}</strong></td>
+				<td class="som-item-name">${frappe.utils.escape_html(item.item_name || '')}</td>
+				<td class="som-th-r">
+					<input type="number" class="som-edit-input"
+					       data-order="${order_name}" data-idx="${idx}" data-field="qty"
+					       value="${item.qty || 0}" min="0" step="0.001">
+				</td>
+				<td>${frappe.utils.escape_html(item.uom || '')}</td>
+				<td class="som-th-r">
+					<input type="number" class="som-edit-input"
+					       data-order="${order_name}" data-idx="${idx}" data-field="rate"
+					       value="${item.rate || 0}" min="0" step="0.01">
+				</td>
+				<td class="som-th-r">
+					<input type="number" class="som-edit-input"
+					       data-order="${order_name}" data-idx="${idx}" data-field="weight_per_unit"
+					       value="${item.weight_per_unit || 0}" min="0" step="0.001">
+				</td>
+				<td class="som-th-r">
+					<span class="som-item-amount"><strong>${format_currency(amount)}</strong></span>
+				</td>
+				<td class="som-th-r">
+					<span class="som-item-total-wt">${total_weight.toFixed(3)}</span>
+				</td>
 			</tr>`;
 		});
 
-		html += `</tbody></table>`;
+		html += `</tbody></table>
+		<div class="som-items-footer">
+			<button class="btn btn-sm btn-primary som-save-items" data-order="${order_name}">
+				Save Changes
+			</button>
+			<button class="btn btn-sm btn-default som-discard-items" data-order="${order_name}">
+				Discard
+			</button>
+		</div>`;
 		return html;
 	}
 
@@ -286,10 +338,64 @@ class SalesOrderManager {
 			args: { doctype: 'Sales Order', name: order_name },
 			callback: (r) => {
 				if (r.message) {
+					this.doc_cache[order_name]  = r.message;
 					this.item_cache[order_name] = r.message.items || [];
 					const $wrap = $(`#som-items-${order_name}`);
 					if ($wrap.length) $wrap.html(this._render_items(order_name));
 				}
+			},
+		});
+	}
+
+	_save_order_items(order_name) {
+		const doc = this.doc_cache[order_name];
+		if (!doc) { frappe.msgprint(__('Document not loaded — please collapse and re-expand the row.')); return; }
+
+		const edited = this.item_cache[order_name] || [];
+		edited.forEach((item, idx) => {
+			if (doc.items[idx]) {
+				doc.items[idx].qty             = item.qty;
+				doc.items[idx].rate            = item.rate;
+				doc.items[idx].weight_per_unit = item.weight_per_unit;
+			}
+		});
+
+		frappe.call({
+			method: 'frappe.client.save',
+			args: { doc },
+			freeze: true,
+			freeze_message: __('Saving {0}…', [order_name]),
+			callback: (r) => {
+				if (!r.message) return;
+				this.doc_cache[order_name]  = r.message;
+				this.item_cache[order_name] = r.message.items || [];
+
+				// Update totals in the orders array so they reflect in the main table
+				const order = this.orders.find(o => o.name === order_name);
+				if (order) {
+					order.grand_total      = r.message.grand_total;
+					order.total_net_weight = r.message.total_net_weight;
+				}
+
+				frappe.show_alert({ message: __('Saved {0}', [order_name]), indicator: 'green' });
+
+				// Refresh just the items section
+				const $wrap = $(`#som-items-${order_name}`);
+				if ($wrap.length) $wrap.html(this._render_items(order_name));
+
+				// Update the amount cell in the parent row without a full re-render
+				this.$wrap.find(`tr.som-row[data-order="${order_name}"] .som-amount`)
+					.text(format_currency(r.message.grand_total));
+			},
+			error: (err) => {
+				frappe.msgprint({
+					title: __('Save Failed'),
+					message: frappe.utils.escape_html(
+						(err._server_messages && JSON.parse(err._server_messages)[0]) ||
+						err.message || __('Could not save {0}', [order_name])
+					),
+					indicator: 'red',
+				});
 			},
 		});
 	}
@@ -346,6 +452,37 @@ class SalesOrderManager {
 			const is_held = parseInt($(this).data('held')) === 1;
 			self._toggle_hold(name, !is_held);
 		});
+
+		// Item editing — delegated so they work after async fetch
+		this.$wrap.off('input.som-edit').on('input.som-edit', '.som-edit-input', function () {
+			const order_name = $(this).data('order');
+			const idx        = parseInt($(this).data('idx'));
+			const field      = $(this).data('field');
+			const value      = parseFloat($(this).val()) || 0;
+
+			const items = self.item_cache[order_name];
+			if (!items || !items[idx]) return;
+			items[idx][field] = value;
+
+			const item         = items[idx];
+			const amount       = (item.qty || 0) * (item.rate || 0);
+			const total_weight = (item.qty || 0) * (item.weight_per_unit || 0);
+			const $row         = $(this).closest('tr');
+			$row.find('.som-item-amount').html(`<strong>${format_currency(amount)}</strong>`);
+			$row.find('.som-item-total-wt').text(total_weight.toFixed(3));
+		});
+
+		this.$wrap.off('click.som-save').on('click.som-save', '.som-save-items', function () {
+			self._save_order_items($(this).data('order'));
+		});
+
+		this.$wrap.off('click.som-discard').on('click.som-discard', '.som-discard-items', function () {
+			const order_name = $(this).data('order');
+			delete self.item_cache[order_name];
+			delete self.doc_cache[order_name];
+			const $wrap = $(`#som-items-${order_name}`);
+			if ($wrap.length) $wrap.html(self._render_items(order_name));
+		});
 	}
 
 	_toggle_hold(order_name, hold) {
@@ -380,37 +517,38 @@ class SalesOrderManager {
 	}
 
 	_process(list) {
-		let done = 0, errors = [];
+		frappe.show_alert({ message: __('Sending to Finance…'), indicator: 'blue' });
 
-		frappe.show_alert({ message: __('Submitting…'), indicator: 'blue' });
+		// Use a direct DB-level Python function to avoid Frappe's workflow engine
+		// auto-applying further transitions for users who hold multiple roles.
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.send_to_finance',
+			args: { order_names: JSON.stringify(list) },
+			callback: (r) => {
+				const result  = r.message || {};
+				const updated = result.updated || [];
+				const skipped = result.skipped || [];
 
-		const next = () => {
-			if (done >= list.length) {
-				if (errors.length) {
-					frappe.msgprint({ title: __('Done with errors'), message: errors.join('<br>'), indicator: 'orange' });
+				if (skipped.length) {
+					frappe.msgprint({
+						title: __('Some orders skipped'),
+						message: __('Sent {0} orders. Skipped {1} (wrong state or already processed): {2}',
+							[updated.length, skipped.length, skipped.join(', ')]),
+						indicator: 'orange',
+					});
 				} else {
 					frappe.show_alert({
-						message: __('✓ {0} orders sent to Finance', [list.length]),
+						message: __('✓ {0} orders sent to Finance', [updated.length]),
 						indicator: 'green',
 					});
 				}
 				this.selected.clear();
 				this.load_data();
-				return;
-			}
-			const name = list[done];
-			frappe.call({
-				method: 'frappe.client.set_value',
-				args: { doctype: 'Sales Order', name, fieldname: 'workflow_state', value: 'Pending Finance Approval' },
-				callback: (r) => {
-					frappe.show_alert({ message: name, indicator: r.message ? 'green' : 'orange' });
-					if (!r.message) errors.push(name);
-					done++; next();
-				},
-				error: () => { errors.push(name); done++; next(); },
-			});
-		};
-		next();
+			},
+			error: () => {
+				frappe.msgprint({ title: __('Error'), message: __('Failed to send orders to Finance'), indicator: 'red' });
+			},
+		});
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
@@ -521,7 +659,8 @@ class SalesOrderManager {
 		.som-row:last-child td { border-bottom: none; }
 		.som-row:hover td { background: #f8fafc; }
 		.som-row-selected td { background: #eff6ff !important; }
-		.som-row-held td { background: #fffbeb; opacity: .85; }
+		.som-row-held td     { background: #fffbeb; opacity: .85; }
+		.som-row-rejected td { background: #fff5f5; border-left: 3px solid #ef4444 !important; }
 
 		.som-chk { width:16px; height:16px; accent-color:#3b82f6; cursor:pointer; }
 		.som-link { color:#3b82f6; font-weight:600; text-decoration:none; }
@@ -552,8 +691,9 @@ class SalesOrderManager {
 			text-transform: uppercase;
 			letter-spacing: .4px;
 		}
-		.som-badge-ready { background:#dcfce7; color:#166534; }
-		.som-badge-held  { background:#fef3c7; color:#92400e; }
+		.som-badge-ready    { background:#dcfce7; color:#166534; }
+		.som-badge-held     { background:#fef3c7; color:#92400e; }
+		.som-badge-rejected { background:#fee2e2; color:#991b1b; }
 
 		/* Expand button */
 		.som-expand-btn {
@@ -611,6 +751,49 @@ class SalesOrderManager {
 		}
 		.som-items-table tr:last-child td { border-bottom: none; }
 		.som-item-name { color: #64748b; }
+		.som-edit-input {
+			width: 88px;
+			height: 26px;
+			padding: 2px 6px;
+			font-size: 12px;
+			text-align: right;
+			border: 1px solid #cbd5e1;
+			border-radius: 4px;
+			background: #fff;
+			transition: border-color .15s, box-shadow .15s;
+		}
+		.som-edit-input:focus {
+			outline: none;
+			border-color: #3b82f6;
+			box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+		}
+		.som-items-footer {
+			display: flex;
+			gap: 8px;
+			padding: 10px 0 2px;
+			border-top: 1px solid #e2e8f0;
+			margin-top: 8px;
+		}
+		.som-rejection-alert {
+			background: #fff5f5;
+			border: 1px solid #fca5a5;
+			border-left: 4px solid #ef4444;
+			border-radius: 4px;
+			padding: 10px 14px;
+			font-size: 13px;
+			color: #7f1d1d;
+			margin-bottom: 12px;
+		}
+		.som-info-note {
+			background: #f0f9ff;
+			border: 1px solid #bae6fd;
+			border-left: 4px solid #3b82f6;
+			border-radius: 4px;
+			padding: 10px 14px;
+			font-size: 13px;
+			color: #1e3a5f;
+			margin-bottom: 12px;
+		}
 
 		/* Pagination */
 		.som-pg-bar {

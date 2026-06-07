@@ -20,6 +20,7 @@ fixtures = [
                 "custom_on_hold",
                 "custom_call_not_picked",
                 "custom_call_notes",
+                "custom_finance_rejection_note",
                 "custom_truck_section",
                 "custom_truck_number",
                 "custom_truck_closed",

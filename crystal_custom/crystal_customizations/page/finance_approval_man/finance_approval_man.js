@@ -182,7 +182,16 @@ class FinanceApprovalManager {
 				<td><a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a></td>
 				<td title="${o.customer}">${o.customer_name || o.customer}</td>
 				<td class="fa-amt">${format_currency(o.grand_total)}</td>
-				<td class="fa-amt ${(fin.outstanding || 0) > 0 ? 'fa-red' : ''}">${format_currency(fin.outstanding || 0)}</td>
+				<td class="fa-amt ${(fin.outstanding || 0) > 0 ? 'fa-red' : ''}">
+					${format_currency(fin.outstanding || 0)}
+					${(fin.outstanding || 0) > 0 ? `
+					<div class="fa-aging">
+						${fin.aging_0_30   > 0 ? `<span class="fa-age fa-age-1">1–30d: ${format_currency(fin.aging_0_30,   null, 0)}</span>` : ''}
+						${fin.aging_31_60  > 0 ? `<span class="fa-age fa-age-2">31–60d: ${format_currency(fin.aging_31_60, null, 0)}</span>` : ''}
+						${fin.aging_61_90  > 0 ? `<span class="fa-age fa-age-3">61–90d: ${format_currency(fin.aging_61_90, null, 0)}</span>` : ''}
+						${fin.aging_90_plus > 0 ? `<span class="fa-age fa-age-4">90+d: ${format_currency(fin.aging_90_plus, null, 0)}</span>` : ''}
+					</div>` : ''}
+				</td>
 				<td class="fa-amt ${has_overdue ? 'fa-red fa-bold' : ''}">${format_currency(fin.overdue || 0)}</td>
 				<td class="fa-amt">${format_currency(fin.credit_limit || 0)}</td>
 				<td><span class="fa-tag">${fin.payment_terms || '—'}</span></td>
@@ -259,8 +268,35 @@ class FinanceApprovalManager {
 
 		frappe.confirm(
 			__('Approve {0} order(s) and send to Customer Confirmation?', [selected.length]),
-			() => this._process_batch(selected.map(s => s.order), 'Pending Customer Order Reconfirmation', null)
+			() => this._do_approve(selected.map(s => s.order))
 		);
+	}
+
+	_do_approve(order_names) {
+		frappe.show_alert({ message: __('Approving…'), indicator: 'blue' });
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.finance_approval_man.finance_approval_man.approve_orders',
+			args: { order_names: JSON.stringify(order_names) },
+			callback: (r) => {
+				const result  = r.message || {};
+				const updated = result.updated || [];
+				const skipped = result.skipped || [];
+				if (skipped.length) {
+					frappe.msgprint({
+						title: __('Done with skips'),
+						message: __('Approved {0}. Skipped {1} (state mismatch): {2}',
+							[updated.length, skipped.length, skipped.join(', ')]),
+						indicator: 'orange',
+					});
+				} else {
+					frappe.show_alert({
+						message: __('Done — {0} orders approved', [updated.length]),
+						indicator: 'green',
+					});
+				}
+				this.load_data();
+			},
+		});
 	}
 
 	reject_selected() {
@@ -296,9 +332,13 @@ class FinanceApprovalManager {
 				return;
 			}
 			const name = order_names[done];
+			const fields = { workflow_state: target_state };
+			if (target_state === 'Pending Customer Order Reconfirmation') {
+				fields.custom_finance_rejection_note = '';
+			}
 			frappe.call({
 				method: 'frappe.client.set_value',
-				args: { doctype: 'Sales Order', name, fieldname: 'workflow_state', value: target_state },
+				args: { doctype: 'Sales Order', name, fieldname: fields },
 				callback: (r) => {
 					frappe.show_alert({ message: name, indicator: r.message ? 'green' : 'orange' });
 					if (!r.message) errors.push(name);
@@ -343,10 +383,10 @@ class FinanceApprovalManager {
 					comment_by: frappe.session.user_fullname,
 				},
 				callback: () => {
-					// 3. Reset workflow so it reappears in Order Manager
+					// 3. Reset workflow + save rejection note via direct DB write
 					frappe.call({
-						method: 'frappe.client.set_value',
-						args: { doctype: 'Sales Order', name: order, fieldname: 'workflow_state', value: 'Proceed To Order' },
+						method: 'crystal_custom.crystal_customizations.page.finance_approval_man.finance_approval_man.reject_order_state',
+						args: { order_name: order, reason },
 						callback: (r) => {
 							frappe.show_alert({ message: __('Rejected {0}', [order]), indicator: 'red' });
 							if (!r.message) errors.push(order);
@@ -413,6 +453,19 @@ class FinanceApprovalManager {
 			font-size: 12px;
 			color: #475569;
 		}
+		.fa-aging { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-end; }
+		.fa-age {
+			display: inline-block;
+			padding: 1px 5px;
+			border-radius: 3px;
+			font-size: 10px;
+			font-weight: 600;
+			white-space: nowrap;
+		}
+		.fa-age-1 { background: #fef3c7; color: #92400e; }
+		.fa-age-2 { background: #fed7aa; color: #9a3412; }
+		.fa-age-3 { background: #fecaca; color: #991b1b; }
+		.fa-age-4 { background: #dc2626; color: #fff; }
 		.fa-pdc-badge {
 			display: inline-block;
 			padding: 3px 9px;

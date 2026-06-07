@@ -1,0 +1,327 @@
+<style>
+  @page { size: A4; margin: 10mm 12mm 12mm 12mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; color: #000; }
+
+  /* ── CUSTOMER STATEMENT STYLES ── */
+  .header-wrap { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+  .header-left  { display: flex; align-items: center; gap: 8px; width: 30%; }
+  .brand-name   { font-size: 13pt; font-weight: bold; color: #c00; text-transform: uppercase; letter-spacing: 1px; }
+  .header-center { width: 30%; text-align: center; font-size: 22pt; font-weight: bold; letter-spacing: 3px; align-self: center; }
+  .header-right { width: 36%; text-align: right; font-size: 7.5pt; line-height: 1.55; }
+  .header-right .co-name { font-weight: bold; font-size: 8.5pt; }
+  .header-right .iso { font-style: italic; font-weight: bold; font-size: 6.8pt; margin-top: 2px; }
+  .header-divider { border: none; border-top: 2px solid #000; margin-bottom: 4px; }
+  .print-date-line { text-align: right; font-size: 7.8pt; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1px solid #bbb; }
+  .meta-wrap  { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .meta-left  { width: 48%; font-size: 7.8pt; line-height: 1.75; }
+  .meta-left table { border-collapse: collapse; width: 100%; }
+  .meta-left td.lbl { font-weight: bold; width: 110px; vertical-align: top; }
+  .meta-left td.val { vertical-align: top; }
+  .meta-right { width: 48%; font-size: 7.8pt; line-height: 1.65; }
+  .meta-right .bill-lbl  { font-weight: bold; font-size: 8pt; margin-bottom: 2px; }
+  .meta-right .bill-name { font-weight: bold; }
+  .txn-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 7.8pt; }
+  .txn-table thead tr { background-color: #e0e0e0; }
+  .txn-table th { border: 0.5px solid #888; padding: 3px 5px; font-weight: bold; font-size: 7.5pt; vertical-align: bottom; }
+  .txn-table td { border-bottom: 0.3px solid #ddd; padding: 2px 5px; vertical-align: top; }
+  .txn-table tbody tr:nth-child(even) td { background-color: #f7f7f7; }
+  .c-date { width: 65px; }
+  .c-inv  { width: 62px; }
+  .c-type { width: 70px; }
+  .c-num  { width: 78px; text-align: right; }
+  .aging-wrap  { margin-bottom: 8px; }
+  .aging-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+  .aging-table th, .aging-table td { border: 1px solid #888; padding: 4px 6px; text-align: center; }
+  .aging-table thead th     { background-color: #e0e0e0; font-weight: bold; }
+  .aging-table .amt-due-lbl { background-color: #bbb; font-weight: bold; }
+  .aging-table .amt-due-val { background-color: #bbb; font-weight: bold; }
+  .footer-notes { font-size: 7pt; line-height: 1.55; color: #111; border-top: 1px solid #bbb; padding-top: 5px; margin-top: 2px; }
+  .footer-notes p { margin-bottom: 3px; }
+  .footer-notes .cheque { font-weight: bold; text-transform: uppercase; margin-top: 4px; }
+  .gen-by { display: flex; justify-content: space-between; font-size: 7pt; font-style: italic; margin-top: 6px; }
+
+  /* ── DEFAULT GL STYLES ── */
+  .gl-title { font-size: 14pt; font-weight: bold; text-align: center; margin-bottom: 6px; }
+  .gl-filters { font-size: 8pt; text-align: center; color: #444; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px solid #ccc; }
+  .gl-table { width: 100%; border-collapse: collapse; font-size: 7.8pt; }
+  .gl-table th { background-color: #e0e0e0; border: 0.5px solid #888; padding: 3px 5px; font-weight: bold; }
+  .gl-table td { border-bottom: 0.3px solid #ddd; padding: 2px 5px; }
+  .gl-table tbody tr:nth-child(even) td { background-color: #f7f7f7; }
+  .gl-table .num { text-align: right; }
+  .gl-summary { font-size: 7pt; font-style: italic; text-align: right; margin-top: 6px; color: #444; }
+</style>
+
+{%
+  /* ── HELPERS ── */
+  var fmt = function(n) {
+    var v = parseFloat(n) || 0;
+    return v.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  var fmtSigned = function(n) {
+    var v = parseFloat(n) || 0;
+    return v < 0 ? fmt(Math.abs(v)) + "-" : fmt(v);
+  };
+  var fmtDate = function(val) {
+    if (!val) return "";
+    var d = new Date(val);
+    if (isNaN(d)) return val;
+    return String(d.getDate()).padStart(2,"0") + "/" +
+           String(d.getMonth()+1).padStart(2,"0") + "/" +
+           d.getFullYear();
+  };
+  var nowStr = function() {
+    var d = new Date();
+    var months = ["January","February","March","April","May","June",
+                  "July","August","September","October","November","December"];
+    return String(d.getDate()).padStart(2,"0") + " " + months[d.getMonth()] + " " + d.getFullYear()
+      + " " + String(d.getHours()).padStart(2,"0") + ":"
+      + String(d.getMinutes()).padStart(2,"0") + ":"
+      + String(d.getSeconds()).padStart(2,"0");
+  };
+  var getLabel = function(vtype, credit) {
+    if (vtype === "Sales Invoice" && parseFloat(credit) > 0) return "Credit";
+    if (vtype === "Sales Invoice")  return "Invoice";
+    if (vtype === "Payment Entry")  return "Paymnt";
+    if (vtype === "Journal Entry")  return "Adjmnt";
+    if (vtype === "Credit Note")    return "Credit";
+    return vtype || "";
+  };
+
+  /* ── DETECT CUSTOMER STATEMENT ── */
+  /* data rows are plain objects: row.posting_date, row.voucher_no, etc. */
+  var isCustomerStatement = (
+    filters.party_type === "Customer" &&
+    filters.party && filters.party !== ""
+  );
+
+  var party     = filters.party      || "";
+  var partyName = filters.party_name || party;
+  var fromDate  = filters.from_date  || "";
+  var toDate    = filters.to_date    || "";
+  var company   = filters.company    || "";
+%}
+
+<!-- ══════════════════════════════════════════════
+     BRANCH A — CUSTOMER STATEMENT
+══════════════════════════════════════════════ -->
+{% if (isCustomerStatement) { %}
+
+{%
+  /* split rows into opening / transactions / closing */
+  var openingDebit = 0, openingCredit = 0, openingBalance = 0, closingBal = 0;
+  var txnRows = [];
+
+  for (var ri = 0; ri < data.length; ri++) {
+    var row  = data[ri];
+    var acct = String(row.account || "");
+
+    if (acct.indexOf("Opening") !== -1) {
+      openingDebit   = parseFloat(row.debit)   || 0;
+      openingCredit  = parseFloat(row.credit)  || 0;
+      openingBalance = parseFloat(row.balance) || 0;
+    } else if (acct.indexOf("Closing") !== -1) {
+      closingBal = parseFloat(row.balance) || 0;
+    } else if (acct.indexOf("Total") !== -1) {
+      /* skip */
+    } else if (row.posting_date) {
+      txnRows.push(row);
+    }
+  }
+
+  /* aging buckets using posting_date as proxy */
+  var toDateObj = filters.to_date ? new Date(filters.to_date) : new Date();
+  var agCurrent = 0, agD30 = 0, agD60 = 0, agD90 = 0, agD120 = 0;
+
+  for (var ai = 0; ai < txnRows.length; ai++) {
+    var ar = txnRows[ai];
+    var db = parseFloat(ar.debit)  || 0;
+    var cr = parseFloat(ar.credit) || 0;
+    if (ar.voucher_type === "Sales Invoice" && db > 0 && cr === 0) {
+      var days = Math.floor((toDateObj - new Date(ar.posting_date)) / 86400000);
+      if      (days <= 0)  agCurrent += db;
+      else if (days <= 30) agD30     += db;
+      else if (days <= 60) agD60     += db;
+      else if (days <= 90) agD90     += db;
+      else                 agD120    += db;
+    }
+  }
+
+  var runBal = openingBalance;
+%}
+
+<div class="header-wrap">
+  <div class="header-left">
+    <div class="brand-name">Crystal Paints</div>
+  </div>
+  <div class="header-center">STATEMENT</div>
+  <div class="header-right">
+    <div class="co-name">{%= company %}</div>
+    <div>P.O.BOX 26647-00100</div>
+    <div>KAY Complex, Godown D3, Opposite Cabannas, Mombasa Road</div>
+    <div>Nairobi, Kenya</div>
+    <div>Tel: +254 717959929</div>
+    <div>www.crystaladhesivesltd.com</div>
+    <div class="iso">AN ISO 9001:2015 CERTIFIED COMPANY</div>
+  </div>
+</div>
+<hr class="header-divider"/>
+<div class="print-date-line">{%= nowStr() %}</div>
+
+<div class="meta-wrap">
+  <div class="meta-left">
+    <table>
+      <tr><td class="lbl">Statement Date:</td><td class="val">{%= toDate %}</td></tr>
+      <tr><td class="lbl">Customer Name:</td> <td class="val">{%= partyName %}</td></tr>
+      <tr><td class="lbl">Customer #:</td>    <td class="val">{%= party %}</td></tr>
+      <tr><td class="lbl">Currency:</td>      <td class="val">KES</td></tr>
+      <tr><td class="lbl">Terms:</td>         <td class="val">30 DAYS</td></tr>
+    </table>
+  </div>
+  <div class="meta-right">
+    <div class="bill-lbl">Bill To:</div>
+    <div class="bill-name">{%= partyName %}</div>
+  </div>
+</div>
+
+<table class="txn-table">
+  <thead>
+    <tr>
+      <th class="c-date">Document<br>Date</th>
+      <th class="c-inv">Invoice No.</th>
+      <th class="c-type">Transaction Type</th>
+      <th>Reference/Order No.</th>
+      <th class="c-num">Debit</th>
+      <th class="c-num">Credit</th>
+      <th class="c-num">Balance</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% if (txnRows.length === 0) { %}
+      <tr>
+        <td colspan="7" style="text-align:center;padding:8px;color:#666;">
+          No transactions found for this period.
+        </td>
+      </tr>
+    {% } else { %}
+      {% for (var ti = 0; ti < txnRows.length; ti++) { %}
+        {%
+          var trow   = txnRows[ti];
+          var debit3 = parseFloat(trow.debit)   || 0;
+          var cred3  = parseFloat(trow.credit)  || 0;
+          var vtype3 = trow.voucher_type         || "";
+          var vno3   = trow.voucher_no           || "";
+          var rmks   = trow.remarks              || "";
+          var pdate3 = fmtDate(trow.posting_date);
+          var invNo  = (vtype3 === "Sales Invoice" || vtype3 === "Credit Note") ? vno3 : "";
+          var lbl3   = getLabel(vtype3, cred3);
+          runBal    += debit3 - cred3;
+        %}
+        <tr>
+          <td class="c-date">{%= pdate3 %}</td>
+          <td class="c-inv">{%= invNo %}</td>
+          <td class="c-type">{%= lbl3 %}</td>
+          <td>{%= rmks %}</td>
+          <td class="c-num">{%= debit3 > 0 ? fmt(debit3) : "" %}</td>
+          <td class="c-num">{%= cred3  > 0 ? fmt(cred3) + "-" : "" %}</td>
+          <td class="c-num">{%= runBal < 0 ? fmt(Math.abs(runBal)) + "-" : fmt(runBal) %}</td>
+        </tr>
+      {% } %}
+    {% } %}
+  </tbody>
+</table>
+
+<div class="aging-wrap">
+  <table class="aging-table">
+    <thead>
+      <tr>
+        <th>Current</th><th>30 Days</th><th>60 Days</th>
+        <th>90 Days</th><th>120 Days</th>
+        <th class="amt-due-lbl">Amount Due</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{%= fmt(agCurrent) %}</td>
+        <td>{%= fmt(agD30) %}</td>
+        <td>{%= fmt(agD60) %}</td>
+        <td>{%= fmt(agD90) %}</td>
+        <td>{%= fmt(agD120) %}</td>
+        <td class="amt-due-val">{%= fmtSigned(closingBal) %}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer-notes">
+  <p>Your credit terms with us are <em>(30 DAYS)</em>.</p>
+  <p>In case of any queries/ disputes, kindly write to us within 7 days from the statement date. Failure to this communication, we will assume the balance is correct.</p>
+  <p>When making payment, kindly ensure that invoice numbers are specified (remittance advice) to enable us allocate the payments correctly, if no remittance advice is received, we shall allocate the payments to the oldest invoices first. Where withholding tax is applicable, if no remittance advise is received, the account may go on hold due to incorrect allocation of payments.</p>
+  <p class="cheque">Cheque Payable to {%= company %}</p>
+</div>
+<div class="gen-by">
+  <span><em>Generated by:</em> {%= frappe.session.user %}</span>
+  <span>Page 1</span>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     BRANCH B — DEFAULT GENERAL LEDGER PRINT
+     All non-customer GL prints fall here
+══════════════════════════════════════════════ -->
+{% } else { %}
+
+{%
+  var report_columns = report.get_columns_for_print();
+%}
+
+<div class="gl-title">General Ledger</div>
+<div class="gl-filters">
+  {%= company %}
+  {% if (fromDate) { %}&nbsp;|&nbsp; From: {%= fromDate %}{% } %}
+  {% if (toDate)   { %}&nbsp;|&nbsp; To: {%= toDate %}{% } %}
+  {% if (filters.account) { %}&nbsp;|&nbsp; Account: {%= filters.account %}{% } %}
+  {% if (filters.party)   { %}&nbsp;|&nbsp; Party: {%= filters.party %}{% } %}
+  &nbsp;|&nbsp; Printed: {%= nowStr() %}
+</div>
+
+<table class="gl-table">
+  <thead>
+    <tr>
+      {% for (var col = 0; col < report_columns.length; col++) { %}
+        <th>{%= report_columns[col].label %}</th>
+      {% } %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for (var di = 0; di < data.length; di++) { %}
+      {%
+        var drow     = data[di];
+        var isGrpRow = !drow.posting_date;
+      %}
+      <tr {% if (isGrpRow) { %} style="font-weight:bold;background:#efefef;" {% } %}>
+        {% for (var col = 0; col < report_columns.length; col++) { %}
+          {%
+            var fn    = report_columns[col].fieldname;
+            var ft    = report_columns[col].fieldtype;
+            var val   = drow[fn];
+            var isNum = (ft === "Currency" || ft === "Float");
+            var cell  = "";
+            if (val === null || val === undefined) {
+              cell = "";
+            } else if (isNum) {
+              cell = fmt(val);
+            } else if (ft === "Date") {
+              cell = fmtDate(val);
+            } else {
+              cell = val;
+            }
+          %}
+          <td {% if (isNum) { %} class="num" {% } %}>{%= cell %}</td>
+        {% } %}
+      </tr>
+    {% } %}
+  </tbody>
+</table>
+<div class="gl-summary">Total rows: {%= data.length %} &nbsp;|&nbsp; Printed: {%= nowStr() %}</div>
+
+{% } %}
