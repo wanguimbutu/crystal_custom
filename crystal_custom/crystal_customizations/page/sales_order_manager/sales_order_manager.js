@@ -78,7 +78,7 @@ class SalesOrderManager {
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
 					'workflow_state', 'custom_on_hold',
-					'custom_additional_information', 'custom_finance_rejection_note',
+					'custom_finance_rejection_note',
 				],
 				filters,
 				order_by: 'transaction_date desc',
