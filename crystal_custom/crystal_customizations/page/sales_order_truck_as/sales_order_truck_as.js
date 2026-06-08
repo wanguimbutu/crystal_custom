@@ -128,8 +128,31 @@ class TruckAssignmentManager {
 						this.available_trucks.push({ truck_number: o.custom_truck_number, driver_name: '', capacity_kg: 5000 });
 					}
 				});
-				this.current_page = 1;
-				this.render_view();
+
+				// Fetch customer locations then render
+				const customers = [...new Set(this.orders.map(o => o.customer).filter(Boolean))];
+				if (!customers.length) {
+					this.current_page = 1;
+					this.render_view();
+					return;
+				}
+				frappe.call({
+					method: 'frappe.client.get_list',
+					args: {
+						doctype: 'Customer',
+						fields: ['name', 'custom_location'],
+						filters: [['name', 'in', customers]],
+						limit_page_length: customers.length,
+					},
+					callback: (rc) => {
+						const loc_map = {};
+						(rc.message || []).forEach(c => { loc_map[c.name] = c.custom_location || ''; });
+						this.orders.forEach(o => { o.custom_location = loc_map[o.customer] || ''; });
+						this.current_page = 1;
+						this.render_view();
+					},
+					error: () => { this.current_page = 1; this.render_view(); },
+				});
 			},
 		});
 	}
@@ -227,13 +250,14 @@ class TruckAssignmentManager {
 		<div class="ta-table-wrap">
 		<table class="table table-bordered ta-table">
 			<thead><tr>
-				<th width="13%">Sales Order</th>
-				<th width="18%">Customer</th>
-				<th width="10%">Region</th>
-				<th width="9%">Value</th>
-				<th width="8%">Weight</th>
-				<th width="11%">Status</th>
-				<th width="15%">Assign Truck</th>
+				<th width="12%">Sales Order</th>
+				<th width="15%">Customer</th>
+				<th width="12%">Location</th>
+				<th width="9%">Region</th>
+				<th width="8%">Value</th>
+				<th width="7%">Weight</th>
+				<th width="10%">Status</th>
+				<th width="14%">Assign Truck</th>
 			</tr></thead>
 			<tbody>`;
 
@@ -243,7 +267,7 @@ class TruckAssignmentManager {
 			const grp_val = grp.reduce((s, o) => s + (o.grand_total || 0), 0);
 
 			html += `<tr class="ta-group-row">
-				<td colspan="7">
+				<td colspan="8">
 					<strong>${label}</strong>
 					<span class="ta-group-meta">${grp.length} order${grp.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${format_currency(grp_val)}</span>
 				</td>
@@ -261,6 +285,7 @@ class TruckAssignmentManager {
 						${frappe.utils.escape_html(o.customer_name || o.customer)}
 						${not_picked && o.custom_call_notes ? `<br><small class="ta-note">${frappe.utils.escape_html(o.custom_call_notes)}</small>` : ''}
 					</td>
+					<td>${o.custom_location ? frappe.utils.escape_html(o.custom_location) : '<span class="text-muted">—</span>'}</td>
 					<td>${o.custom_delivery_region || '—'}</td>
 					<td class="ta-amt">${format_currency(o.grand_total)}</td>
 					<td class="ta-amt">${(o.total_net_weight || 0).toFixed(1)} kg</td>
@@ -355,6 +380,7 @@ class TruckAssignmentManager {
 						<div>
 							<a href="/app/sales-order/${o.name}" target="_blank" class="ta-order-link">${o.name}</a>
 							<span class="ta-order-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
+							${o.custom_location ? `<span class="ta-order-loc">${frappe.utils.escape_html(o.custom_location)}</span>` : ''}
 						</div>
 						<button class="btn btn-xs btn-default btn-unassign" data-order="${o.name}" title="Remove from truck">&#215;</button>
 					</div>`).join('')}
@@ -788,6 +814,7 @@ ${driver_cols}
 		}
 		.ta-order-link { font-weight: 600; color: #3b82f6; }
 		.ta-order-cust { display: block; color: #6b7280; font-size: 11px; }
+		.ta-order-loc  { display: block; color: #94a3b8; font-size: 10px; font-style: italic; }
 		.ta-empty-truck { text-align: center; color: #94a3b8; padding: 16px; font-style: italic; }
 
 		/* Pagination */

@@ -561,38 +561,82 @@ class DeliveryNoteManager {
             const orders_map = {};
             this.get_filtered_orders().forEach(o => { orders_map[o.name] = o; });
 
-            // Aggregate by item_code
+            // Aggregate pending qty / weight / amount by item_code
             const agg = {};
             raw_items.forEach(i => {
                 const pending = i.qty - (i.delivered_qty || 0);
                 if (pending <= 0) return;
                 if (!agg[i.item_code]) {
-                    agg[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom, weight: 0 };
+                    agg[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom, weight: 0, amount: 0 };
                 }
                 agg[i.item_code].qty    += pending;
                 agg[i.item_code].weight += pending * (i.weight_per_unit || 0);
+                agg[i.item_code].amount += pending * (i.rate || 0);
             });
 
             const items = Object.values(agg).sort((a, b) => a.item_code.localeCompare(b.item_code));
-            const total_qty    = items.reduce((s, i) => s + i.qty, 0);
-            const total_weight = items.reduce((s, i) => s + i.weight, 0);
 
-            const truck  = this.filters.truck || (order_names.length === 1 ? (this.get_filtered_orders().find(o => o.name === order_names[0]) || {}).custom_truck_number : '') || '';
-            const region = this.filters.regions[0] || '';
-            const today  = frappe.datetime.str_to_user(frappe.datetime.get_today());
+            // Open print window immediately (same as original behaviour)
+            this._print_loading_sheet(order_names, items, orders_map);
 
-            const rows = items.map((item, idx) => `
-                <tr>
-                    <td>${idx + 1}</td>
-                    <td><strong>${item.item_code}</strong></td>
-                    <td>${item.item_name}</td>
-                    <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
-                    <td>${item.uom}</td>
-                    <td style="text-align:right;">${item.weight > 0 ? item.weight.toFixed(2) : '—'}</td>
-                    <td style="text-align:center;">___________</td>
-                </tr>`).join('');
+            // Also create a Loading Sheet document record in the background
+            frappe.call({
+                method: 'frappe.client.insert',
+                args: {
+                    doc: {
+                        doctype: 'Loading Sheet',
+                        date: frappe.datetime.get_today(),
+                        loading_sheet_items: items.map(item => ({
+                            doctype: 'Loading Sheet Items',
+                            item_code: item.item_code,
+                            item_name: item.item_name,
+                            qty: Math.round(item.qty),
+                            uom: item.uom,
+                            amount: item.amount,
+                        })),
+                        customer_details: order_names.map(name => {
+                            const o = orders_map[name] || {};
+                            return {
+                                doctype: 'Customer Details',
+                                customer_name: o.customer_name || name,
+                                delivery_notes: '',
+                                amount: o.grand_total || 0,
+                            };
+                        }),
+                    }
+                },
+                callback: (r) => {
+                    if (r.message) {
+                        frappe.show_alert({
+                            message: __('Loading Sheet {0} saved — <a href="/app/loading-sheet/{1}" target="_blank">open</a>', [r.message.name, r.message.name]),
+                            indicator: 'green',
+                        }, 8);
+                    }
+                }
+            });
+        });
+    }
 
-            const html = `<!DOCTYPE html><html>
+    _print_loading_sheet(order_names, items, orders_map) {
+        const total_qty    = items.reduce((s, i) => s + i.qty, 0);
+        const total_weight = items.reduce((s, i) => s + i.weight, 0);
+
+        const truck  = this.filters.truck || (order_names.length === 1 ? (orders_map[order_names[0]] || {}).custom_truck_number : '') || '';
+        const region = this.filters.regions[0] || '';
+        const today  = frappe.datetime.str_to_user(frappe.datetime.get_today());
+
+        const rows = items.map((item, idx) => `
+            <tr>
+                <td>${idx + 1}</td>
+                <td><strong>${item.item_code}</strong></td>
+                <td>${item.item_name}</td>
+                <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
+                <td>${item.uom}</td>
+                <td style="text-align:right;">${item.weight > 0 ? item.weight.toFixed(2) : '—'}</td>
+                <td style="text-align:center;">___________</td>
+            </tr>`).join('');
+
+        const html = `<!DOCTYPE html><html>
 <head><meta charset="utf-8"><title>Loading Sheet</title>
 <style>
   body{font-family:Arial,sans-serif;font-size:13px;margin:20px;}
@@ -630,10 +674,9 @@ class DeliveryNoteManager {
 <p style="margin-top:24px;font-size:11px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
 </body></html>`;
 
-            const w = window.open('', '_blank');
-            w.document.write(html);
-            w.document.close();
-        });
+        const w = window.open('', '_blank');
+        w.document.write(html);
+        w.document.close();
     }
 
     generate_packing_list() {

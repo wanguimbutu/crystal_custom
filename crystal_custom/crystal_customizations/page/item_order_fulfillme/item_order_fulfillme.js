@@ -44,7 +44,6 @@ class OrderFulfillmentManager {
 	// ── Data loading ──────────────────────────────────────────────────────────
 
 	load_data() {
-		this.allocations = {};
 		this.container.html(this._loading_html());
 
 		const from_date = this.page.fields_dict.from_date.get_value();
