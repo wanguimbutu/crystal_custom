@@ -138,7 +138,7 @@ class SalesOrderManager {
 
 		const total_val  = all_filtered.reduce((s, o) => s + o.grand_total, 0);
 		const on_hold    = all_filtered.filter(o => o.custom_on_hold).length;
-		const selectable = all_filtered.filter(o => !o.custom_on_hold).length;
+		const selectable = all_filtered.length;
 
 		let html = `
 		${this._styles()}
@@ -189,7 +189,7 @@ class SalesOrderManager {
 				    data-order="${o.name}">
 					<td class="som-td-chk">
 						<input type="checkbox" class="som-chk" data-order="${o.name}"
-						       ${checked ? 'checked' : ''} ${held ? 'disabled' : ''}>
+						       ${checked ? 'checked' : ''}>
 					</td>
 					<td class="som-td-exp">
 						<button class="som-expand-btn" data-order="${o.name}"
@@ -408,11 +408,9 @@ class SalesOrderManager {
 		// Select all
 		this.$wrap.find('#som-select-all').on('change', function () {
 			const checked = $(this).is(':checked');
-			self.$wrap.find('.som-chk:not(:disabled)').prop('checked', checked);
-			self.orders.forEach(o => {
-				if (!o.custom_on_hold) {
-					checked ? self.selected.add(o.name) : self.selected.delete(o.name);
-				}
+			self.$wrap.find('.som-chk').prop('checked', checked);
+			self.filtered_orders().forEach(o => {
+				checked ? self.selected.add(o.name) : self.selected.delete(o.name);
 			});
 			self.render();
 		});
@@ -493,7 +491,6 @@ class SalesOrderManager {
 				if (r.message) {
 					const o = this.orders.find(x => x.name === order_name);
 					if (o) o.custom_on_hold = hold ? 1 : 0;
-					if (hold) this.selected.delete(order_name);
 					frappe.show_alert({
 						message: __(hold ? '{0} put on hold' : '{0} hold released', [order_name]),
 						indicator: hold ? 'orange' : 'green',
