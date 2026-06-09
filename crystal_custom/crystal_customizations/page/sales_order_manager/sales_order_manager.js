@@ -52,6 +52,7 @@ class SalesOrderManager {
 			() => this.submit_selected(),
 			'octicon octicon-arrow-right'
 		);
+		this.page.add_button('Release All Holds', () => this._release_all_holds());
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
 
 		this.$wrap = $('<div class="som-wrap"></div>').appendTo(this.page.main);
@@ -551,6 +552,32 @@ class SalesOrderManager {
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
+
+	_release_all_holds() {
+		const held_count = this.orders.filter(o => o.custom_on_hold).length;
+		if (!held_count) {
+			frappe.show_alert({ message: __('No orders are currently on hold'), indicator: 'blue' });
+			return;
+		}
+		frappe.confirm(
+			__('Release hold on all {0} held orders?', [held_count]),
+			() => {
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.release_all_holds',
+					freeze: true,
+					freeze_message: __('Releasing holds…'),
+					callback: (r) => {
+						frappe.show_alert({
+							message: __('Holds released — reloading…'),
+							indicator: 'green',
+						});
+						this.load_data();
+					},
+					error: () => frappe.msgprint({ title: __('Error'), message: __('Failed to release holds'), indicator: 'red' }),
+				});
+			}
+		);
+	}
 
 	_kpi(label, value, color, icon) {
 		return `<div class="som-kpi">
