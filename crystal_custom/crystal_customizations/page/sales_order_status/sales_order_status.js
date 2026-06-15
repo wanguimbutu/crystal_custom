@@ -367,8 +367,11 @@ class SalesOrderStatusPage {
 			html += `
 			<div class="sos-truck-card">
 				<div class="sos-tc-head">
-					<span class="sos-tc-num">&#128666; ${frappe.utils.escape_html(truck_num)}</span>
-					${meta.driver_name ? `<span class="sos-tc-driver">${frappe.utils.escape_html(meta.driver_name)}</span>` : ''}
+					<div>
+						<span class="sos-tc-num">&#128666; ${frappe.utils.escape_html(truck_num)}</span>
+						${meta.driver_name ? `<span class="sos-tc-driver">${frappe.utils.escape_html(meta.driver_name)}</span>` : ''}
+					</div>
+					<button class="btn btn-xs sos-tc-dl-btn" data-truck="${frappe.utils.escape_html(truck_num)}" title="Download truck report">&#8659;</button>
 				</div>
 				<div class="sos-tc-stats">
 					<span>${t_orders.length} order${t_orders.length !== 1 ? 's' : ''}</span>
@@ -461,6 +464,91 @@ class SalesOrderStatusPage {
 			const tp = Math.ceil(this._get_filtered_orders().length / this.page_size);
 			if (this.current_page < tp) { this.current_page++; this.render(); }
 		});
+
+		this.container.find('.sos-tc-dl-btn').on('click', (e) => {
+			this._download_truck_status($(e.currentTarget).data('truck'));
+		});
+	}
+
+	_download_truck_status(truck_num) {
+		const meta        = this.truck_meta[truck_num] || {};
+		const t_orders    = this.orders.filter(o => o.custom_truck_number === truck_num);
+		const total_wt    = t_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+		const total_val   = t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+		const today       = frappe.datetime.now_date();
+
+		const state_label = (state) => {
+			const map = {
+				'Pending Finance Approval':              'Finance Approval',
+				'Pending Customer Order Reconfirmation': 'Pending Confirm',
+				'Order Confirmed':                       'Confirmed',
+			};
+			return map[state] || state || '—';
+		};
+
+		const sorted = [...t_orders].sort((a, b) =>
+			(a.custom_delivery_region || '').localeCompare(b.custom_delivery_region || '')
+		);
+
+		const rows = sorted.map(o => {
+			const del_pct = Math.round(o.per_delivered || 0);
+			return `<tr>
+				<td>${frappe.utils.escape_html(o.name)}</td>
+				<td>${frappe.utils.escape_html(o.customer_name || o.customer)}</td>
+				<td>${frappe.utils.escape_html(o.custom_delivery_region || '—')}</td>
+				<td style="text-align:right">${(o.total_net_weight || 0).toFixed(2)}</td>
+				<td style="text-align:right">${(o.grand_total || 0).toFixed(2)}</td>
+				<td>${state_label(o.workflow_state)}</td>
+				<td style="text-align:center">${del_pct}%</td>
+				<td style="text-align:center">${del_pct >= 100 ? 'Yes' : 'No'}</td>
+			</tr>`;
+		}).join('');
+
+		const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+			xmlns:x="urn:schemas-microsoft-com:office:excel"
+			xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8">
+<style>
+	table{border-collapse:collapse}
+	th,td{border:1px solid #ddd;padding:8px;text-align:left;font-family:sans-serif;font-size:12px}
+	th{background:#1e293b;color:#fff;font-weight:bold}
+	tfoot td{background:#f1f5f9;font-weight:bold}
+</style>
+</head><body>
+<h2 style="font-family:sans-serif">TRUCK STATUS REPORT</h2>
+<table style="margin-bottom:16px;border:none;font-family:sans-serif"><tr style="border:none">
+	<td style="border:none;font-weight:bold">Truck:</td><td style="border:none">${frappe.utils.escape_html(truck_num)}</td>
+	${meta.driver_name ? `<td style="border:none;font-weight:bold;padding-left:20px">Driver:</td><td style="border:none">${frappe.utils.escape_html(meta.driver_name)}</td>` : ''}
+	<td style="border:none;font-weight:bold;padding-left:20px">Date:</td><td style="border:none">${today}</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Orders:</td><td style="border:none">${t_orders.length}</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Weight:</td><td style="border:none">${total_wt.toFixed(2)} kg</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Value:</td><td style="border:none">${total_val.toFixed(2)}</td>
+</tr></table>
+<table>
+	<thead><tr>
+		<th>Order</th><th>Customer</th><th>Region</th>
+		<th>Weight (kg)</th><th>Value</th><th>Status</th>
+		<th>Delivered %</th><th>Fully Delivered</th>
+	</tr></thead>
+	<tbody>${rows}</tbody>
+	<tfoot><tr>
+		<td colspan="3" style="text-align:right">TOTALS</td>
+		<td style="text-align:right">${total_wt.toFixed(2)}</td>
+		<td style="text-align:right">${total_val.toFixed(2)}</td>
+		<td colspan="3"></td>
+	</tr></tfoot>
+</table>
+</body></html>`;
+
+		const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+		const a    = document.createElement('a');
+		a.href     = URL.createObjectURL(blob);
+		a.download = `Truck_${truck_num}_Status_${today}.xls`;
+		a.style.display = 'none';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		frappe.show_alert({ message: __('Downloaded status report for {0}', [truck_num]), indicator: 'green' });
 	}
 
 	// ── Styles ────────────────────────────────────────────────────────────────
@@ -669,7 +757,17 @@ class SalesOrderStatusPage {
 			gap: 8px;
 		}
 		.sos-tc-num { font-weight: 700; font-size: 13px; }
-		.sos-tc-driver { font-size: 11px; color: #94a3b8; }
+		.sos-tc-driver { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+		.sos-tc-dl-btn {
+			background: rgba(255,255,255,0.12);
+			border: 1px solid rgba(255,255,255,0.25);
+			color: #fff;
+			border-radius: 4px;
+			padding: 2px 8px;
+			font-size: 13px;
+			flex-shrink: 0;
+		}
+		.sos-tc-dl-btn:hover { background: rgba(255,255,255,0.22); color: #fff; }
 		.sos-tc-stats {
 			padding: 7px 14px;
 			background: #f8fafc;
