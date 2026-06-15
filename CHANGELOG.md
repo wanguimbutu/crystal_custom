@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.1.0...v1.2.0) (2026-06-15)
+
+
+### Features
+
+* auto-fill DN vehicle/driver from truck assignment; add Truck View to status page ([aed3d97](https://github.com/wanguimbutu/crystal_custom/commit/aed3d971165ea537b3c74082c0be8255e81e175c))
+
 # [1.1.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.0.0...v1.1.0) (2026-04-14)
 
 
