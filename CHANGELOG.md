@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.2.2...v1.3.0) (2026-06-15)
+
+
+### Features
+
+* show all trucks (active + dispatched) in DN Manager truck view ([7ec868c](https://github.com/wanguimbutu/crystal_custom/commit/7ec868c5dc10dbd6e467f5537b76709aa191dd75))
+
 ## [1.2.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.2.1...v1.2.2) (2026-06-15)
 
 
