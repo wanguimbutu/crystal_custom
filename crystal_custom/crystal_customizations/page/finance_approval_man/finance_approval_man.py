@@ -76,8 +76,8 @@ def get_customer_financial_summary(customers):
 		FROM `tabPayment Entry`
 		WHERE party_type  = 'Customer'
 		  AND party IN ({placeholders})
-		  AND docstatus   = 1
-		  AND posting_date > %s
+		  AND docstatus   IN (0, 1)
+		  AND posting_date >= %s
 		  AND (mode_of_payment LIKE '%%Cheque%%' OR mode_of_payment LIKE '%%PDC%%')
 		GROUP BY party
 		""",
