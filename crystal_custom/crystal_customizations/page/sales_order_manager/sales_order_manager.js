@@ -17,6 +17,7 @@ class SalesOrderManager {
 		this.doc_cache  = {};
 		this.current_page = 1;
 		this.page_size = 50;
+		this.search_term = '';
 		this.setup_page();
 		this.load_data();
 	}
@@ -45,6 +46,15 @@ class SalesOrderManager {
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
 			options: 'Sales Person',
 			change: () => this.load_data(),
+		});
+		this.page.add_field({
+			label: 'Search', fieldtype: 'Data', fieldname: 'search_query',
+			placeholder: 'Customer or order no…',
+			change: () => {
+				this.search_term = this.page.fields_dict.search_query.get_value() || '';
+				this.current_page = 1;
+				this.render();
+			},
 		});
 
 		this.page.set_primary_action(
@@ -104,6 +114,13 @@ class SalesOrderManager {
 			if (from   && o.transaction_date < from)               return false;
 			if (to     && o.transaction_date > to)                 return false;
 			if (region && o.custom_delivery_region !== region)     return false;
+			if (this.search_term) {
+				const q = this.search_term.toLowerCase();
+				const match = (o.name          || '').toLowerCase().includes(q) ||
+				              (o.customer_name  || '').toLowerCase().includes(q) ||
+				              (o.customer       || '').toLowerCase().includes(q);
+				if (!match) return false;
+			}
 			return true;
 		});
 	}
