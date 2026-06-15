@@ -857,19 +857,15 @@ ${customer_blocks}
         frappe.call({
             method: 'erpnext.selling.doctype.sales_order.sales_order.make_delivery_note',
             args: { source_name: order_name },
+            freeze: true,
+            freeze_message: __('Preparing Delivery Note…'),
             callback: (r) => {
                 if (r.message) {
-                    frappe.call({
-                        method: 'frappe.client.insert',
-                        args: { doc: r.message },
-                        callback: (res) => {
-                            frappe.show_alert({
-                                message: __('Draft Delivery Note {0} created', [res.message.name]),
-                                indicator: 'green'
-                            });
-                            frappe.set_route('Form', 'Delivery Note', res.message.name);
-                        }
-                    });
+                    // Sync the pre-filled doc to Frappe's local model store and open the
+                    // form so the user can fill in mandatory fields (Vehicle No, Driver Name)
+                    // before saving — auto-inserting would fail those validations.
+                    frappe.model.sync(r.message);
+                    frappe.set_route('Form', 'Delivery Note', r.message.name);
                 }
             }
         });
