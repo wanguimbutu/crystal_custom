@@ -35,6 +35,20 @@ class OrderFulfillmentManager {
 			change: () => this.load_data(),
 		});
 
+		this.page.add_field({
+			label: 'Search', fieldtype: 'Data', fieldname: 'search_query',
+			placeholder: 'Customer, order or item…',
+			change: () => {
+				this.search_term = this.page.fields_dict.search_query.get_value() || '';
+				if (this.active_tab === 'trucks') {
+					this.container.find('#tf-trucks-pane').html(this._render_trucks_tab());
+				} else {
+					this.container.find('#tf-summary-pane').html(this._render_summary_tab());
+				}
+				this._attach_events();
+			},
+		});
+
 		this.page.set_primary_action('Create Requisition', () => this.create_requisition(), 'octicon octicon-plus');
 		this.page.add_button('Auto Allocate', () => this.auto_allocate());
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
@@ -74,12 +88,6 @@ class OrderFulfillmentManager {
 		const items_badge  = this.summary_data.length;
 
 		let html = `${this._styles()}
-		<div class="tf-search-row">
-			<input type="text" class="form-control tf-search-input"
-			       placeholder="${this.active_tab === 'trucks' ? 'Search by order number or customer…' : 'Search by item code or description…'}"
-			       value="${frappe.utils.escape_html(this.search_term || '')}">
-			${this.search_term ? `<span class="tf-search-count">Filtering active</span>` : ''}
-		</div>
 		<div class="tf-tabs">
 			<button class="tf-tab-btn ${this.active_tab === 'trucks'  ? 'active' : ''}" data-tab="trucks">
 				Truck Fulfillment
@@ -403,37 +411,18 @@ class OrderFulfillmentManager {
 	_attach_events() {
 		const self = this;
 
-		// Search bar
-		this.container.find('.tf-search-input').off('input').on('input', function () {
-			self.search_term = this.value;
-			// Re-render only the active tab pane, not the whole page
-			if (self.active_tab === 'trucks') {
-				self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
-			} else {
-				self.container.find('#tf-summary-pane').html(self._render_summary_tab());
-			}
-			self._attach_events();
-			const $inp = self.container.find('.tf-search-input');
-			const len  = $inp.val().length;
-			$inp[0] && $inp[0].focus();
-			$inp[0] && $inp[0].setSelectionRange(len, len);
-		});
-
 		// Tab switching
 		this.container.find('.tf-tab-btn').on('click', function () {
 			const tab = $(this).data('tab');
 			self.active_tab = tab;
 			self.search_term = '';
+			if (self.page.fields_dict.search_query) {
+				self.page.fields_dict.search_query.set_value('');
+			}
 			self.container.find('.tf-tab-btn').removeClass('active');
 			$(this).addClass('active');
 			self.container.find('.tf-tab-pane').removeClass('active');
 			self.container.find(`#tf-${tab}-pane`).addClass('active');
-			// Update placeholder to match the active tab
-			self.container.find('.tf-search-input')
-				.val('')
-				.attr('placeholder', tab === 'trucks'
-					? 'Search by order number or customer…'
-					: 'Search by item code or description…');
 		});
 
 		// Allocation input (delegated — works after re-render)

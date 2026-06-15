@@ -44,6 +44,15 @@ class TruckAssignmentManager {
 			options: 'Sales Person',
 			change: () => this.load_data(),
 		});
+		this.page.add_field({
+			label: 'Search', fieldtype: 'Data', fieldname: 'search_query',
+			placeholder: 'Customer or order no…',
+			change: () => {
+				this.search_term = this.page.fields_dict.search_query.get_value() || '';
+				this.current_page = 1;
+				this.render_view();
+			},
+		});
 
 		this.page.set_primary_action('Add Truck', () => this.add_new_truck(), 'octicon octicon-plus');
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
@@ -187,13 +196,6 @@ class TruckAssignmentManager {
 		const trucks_used = new Set(assigned.map(o => o.custom_truck_number)).size;
 
 		let html = `
-		<div class="ta-search-row">
-			<input type="text" class="form-control ta-search-input"
-			       placeholder="Search by order number or customer…"
-			       value="${frappe.utils.escape_html(this.search_term || '')}">
-			${this.search_term ? `<span class="ta-search-count">${orders.length} result${orders.length !== 1 ? 's' : ''}</span>` : ''}
-		</div>
-
 		<div class="ta-kpi-row">
 			${this._kpi('Total Orders',   orders.length,                '#667eea')}
 			${this._kpi('Unassigned',     unassigned.length,            unassigned.length > 0 ? '#ef4444' : '#10b981')}
@@ -419,18 +421,6 @@ class TruckAssignmentManager {
 
 	_attach_events() {
 		const self = this;
-
-		// Search bar
-		this.container.find('.ta-search-input').off('input').on('input', function () {
-			self.search_term = this.value;
-			self.current_page = 1;
-			self.render_view();
-			// Restore focus after DOM replace
-			const $inp = self.container.find('.ta-search-input');
-			const len  = $inp.val().length;
-			$inp[0] && $inp[0].focus();
-			$inp[0] && $inp[0].setSelectionRange(len, len);
-		});
 
 		// Truck assignment via text input (on change / blur)
 		this.container.find('.ta-truck-input').off('change').on('change', function () {

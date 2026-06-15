@@ -41,6 +41,15 @@ class SalesOrderStatusPage {
 			options: 'Delivery Region',
 			change: () => { this.active_state_filter = null; this.current_page = 1; this.load_data(); }
 		});
+		this.page.add_field({
+			label: 'Search', fieldtype: 'Data', fieldname: 'search_query',
+			placeholder: 'Customer or order no…',
+			change: () => {
+				this.search_term = this.page.fields_dict.search_query.get_value() || '';
+				this.current_page = 1;
+				this.render();
+			},
+		});
 
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
 
@@ -133,13 +142,6 @@ class SalesOrderStatusPage {
 
 		<div class="sos-pipeline">
 			${this._pipeline_html()}
-		</div>
-
-		<div class="sos-search-row">
-			<input type="text" class="form-control sos-search-input"
-			       placeholder="Search by order number or customer…"
-			       value="${frappe.utils.escape_html(this.search_term || '')}">
-			${this.search_term ? `<span class="sos-search-count">${all.length} result${all.length !== 1 ? 's' : ''}</span>` : ''}
 		</div>
 
 		<div class="sos-table-section">
@@ -307,17 +309,6 @@ class SalesOrderStatusPage {
 	// ── Events ────────────────────────────────────────────────────────────────
 
 	_attach_events() {
-		// Search bar
-		this.container.find('.sos-search-input').off('input').on('input', (e) => {
-			this.search_term = e.target.value;
-			this.current_page = 1;
-			this.render();
-			const $inp = this.container.find('.sos-search-input');
-			const len  = $inp.val().length;
-			$inp[0] && $inp[0].focus();
-			$inp[0] && $inp[0].setSelectionRange(len, len);
-		});
-
 		this.container.find('.sos-pipe-stage').on('click', (e) => {
 			const state = $(e.currentTarget).data('state');
 			this.active_state_filter = this.active_state_filter === state ? null : state;
