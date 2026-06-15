@@ -17,6 +17,7 @@ class SalesOrderStatusPage {
 		this.page_size = 50;
 		this.view_mode = 'orders'; // 'orders' | 'trucks'
 		this.truck_meta = {};      // keyed by truck_number → {driver_name, capacity_kg}
+		this.closed_trucks = [];
 		this.setup_page();
 		this.set_default_dates();
 		this.load_data();
@@ -71,9 +72,9 @@ class SalesOrderStatusPage {
 
 		this.container.html(this._loading_html());
 
-		let orders_done = false, meta_done = false;
+		let orders_done = false, meta_done = false, closed_done = false;
 		const try_render = () => {
-			if (orders_done && meta_done) {
+			if (orders_done && meta_done && closed_done) {
 				this.current_page = 1;
 				this.render();
 			}
@@ -112,6 +113,16 @@ class SalesOrderStatusPage {
 				try_render();
 			},
 			error: () => { meta_done = true; try_render(); }
+		});
+
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
+			callback: (r) => {
+				try { this.closed_trucks = JSON.parse(r.message || '[]') || []; } catch(e) { this.closed_trucks = []; }
+				closed_done = true;
+				try_render();
+			},
+			error: () => { this.closed_trucks = []; closed_done = true; try_render(); },
 		});
 	}
 
@@ -396,6 +407,47 @@ class SalesOrderStatusPage {
 			</div>`;
 		}
 
+		if (this.closed_trucks.length) {
+			html += `<div class="sos-closed-section">
+				<div class="sos-closed-header">Dispatched Trucks <span class="sos-closed-count">${this.closed_trucks.length}</span></div>
+				<div class="sos-truck-grid">`;
+
+			this.closed_trucks.forEach((ct, idx) => {
+				const closed_label = ct.closed_at
+					? frappe.datetime.str_to_user(ct.closed_at.split(' ')[0]) + ' ' + (ct.closed_at.split(' ')[1] || '').slice(0, 5)
+					: '—';
+				const order_rows = (ct.orders || []).map(o => `
+					<div class="sos-tv-order">
+						<div class="sos-tv-order-main">
+							<a href="/app/sales-order/${o.name}" target="_blank" class="sos-link">${frappe.utils.escape_html(o.name)}</a>
+							<span class="sos-tv-cust">${frappe.utils.escape_html(o.customer_name || '')}</span>
+						</div>
+						${o.delivery_region ? `<span style="font-size:10px;color:#94a3b8;">${frappe.utils.escape_html(o.delivery_region)}</span>` : ''}
+					</div>`).join('');
+
+				html += `<div class="sos-truck-card sos-closed-card">
+					<div class="sos-tc-head" style="background:#475569;">
+						<div>
+							<span class="sos-tc-num">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</span>
+							${ct.driver_name ? `<span class="sos-tc-driver">${frappe.utils.escape_html(ct.driver_name)}</span>` : ''}
+						</div>
+						<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+							<span style="font-size:10px;color:#94a3b8;">Dispatched ${frappe.utils.escape_html(closed_label)}</span>
+							<button class="btn btn-xs sos-tc-dl-btn sos-dl-closed-btn" data-idx="${idx}" title="Download report">&#8659;</button>
+						</div>
+					</div>
+					<div class="sos-tc-stats">
+						<span>${ct.order_count} order${ct.order_count !== 1 ? 's' : ''}</span>
+						<span class="sos-tc-val">${format_currency(ct.total_value || 0, null, 0)}</span>
+						<span class="sos-tc-wt">${(ct.total_weight || 0).toFixed(0)} kg</span>
+					</div>
+					${(ct.orders || []).length ? `<div class="sos-tc-orders">${order_rows}</div>` : ''}
+				</div>`;
+			});
+
+			html += '</div></div>';
+		}
+
 		return html;
 	}
 
@@ -465,9 +517,57 @@ class SalesOrderStatusPage {
 			if (this.current_page < tp) { this.current_page++; this.render(); }
 		});
 
-		this.container.find('.sos-tc-dl-btn').on('click', (e) => {
+		this.container.find('.sos-tc-dl-btn:not(.sos-dl-closed-btn)').on('click', (e) => {
 			this._download_truck_status($(e.currentTarget).data('truck'));
 		});
+
+		this.container.find('.sos-dl-closed-btn').on('click', (e) => {
+			const ct = this.closed_trucks[parseInt($(e.currentTarget).data('idx'), 10)];
+			if (ct) this._download_closed_truck(ct);
+		});
+	}
+
+	_download_closed_truck(ct) {
+		const today = frappe.datetime.now_date();
+		const rows  = (ct.orders || []).map(o => `<tr>
+			<td>${frappe.utils.escape_html(o.name)}</td>
+			<td>${frappe.utils.escape_html(o.customer_name || '')}</td>
+			<td>${frappe.utils.escape_html(o.delivery_region || '—')}</td>
+		</tr>`).join('');
+
+		const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+			xmlns:x="urn:schemas-microsoft-com:office:excel"
+			xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8">
+<style>
+	table{border-collapse:collapse}
+	th,td{border:1px solid #ddd;padding:8px;font-family:sans-serif;font-size:12px}
+	th{background:#475569;color:#fff;font-weight:bold}
+</style></head><body>
+<h2 style="font-family:sans-serif">DISPATCHED TRUCK — ${frappe.utils.escape_html(ct.truck_number)}</h2>
+<table style="margin-bottom:16px;border:none;font-family:sans-serif"><tr style="border:none">
+	<td style="border:none;font-weight:bold">Truck:</td><td style="border:none">${frappe.utils.escape_html(ct.truck_number)}</td>
+	${ct.driver_name ? `<td style="border:none;font-weight:bold;padding-left:20px">Driver:</td><td style="border:none">${frappe.utils.escape_html(ct.driver_name)}</td>` : ''}
+	<td style="border:none;font-weight:bold;padding-left:20px">Dispatched:</td><td style="border:none">${frappe.utils.escape_html(ct.closed_at || '—')}</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Orders:</td><td style="border:none">${ct.order_count}</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Weight:</td><td style="border:none">${(ct.total_weight || 0).toFixed(2)} kg</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Value:</td><td style="border:none">${(ct.total_value || 0).toFixed(2)}</td>
+</tr></table>
+<table>
+	<thead><tr><th>Order</th><th>Customer</th><th>Region</th></tr></thead>
+	<tbody>${rows}</tbody>
+</table>
+</body></html>`;
+
+		const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+		const a    = document.createElement('a');
+		a.href     = URL.createObjectURL(blob);
+		a.download = `Truck_${ct.truck_number}_Dispatched_${today}.xls`;
+		a.style.display = 'none';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		frappe.show_alert({ message: __('Downloaded report for dispatched truck {0}', [ct.truck_number]), indicator: 'green' });
 	}
 
 	_download_truck_status(truck_num) {
@@ -809,6 +909,26 @@ class SalesOrderStatusPage {
 			font-size: 12px;
 			color: #9ca3af;
 		}
+		.sos-closed-section { margin-top: 28px; }
+		.sos-closed-header {
+			font-size: 13px;
+			font-weight: 700;
+			color: #475569;
+			padding: 6px 0 12px;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			border-top: 2px solid #e2e8f0;
+		}
+		.sos-closed-count {
+			background: #475569;
+			color: #fff;
+			border-radius: 10px;
+			padding: 1px 8px;
+			font-size: 11px;
+		}
+		.sos-closed-card { opacity: 0.85; }
+		.sos-closed-card:hover { opacity: 1; }
 
 		/* Pagination */
 		.sos-pg-bar {

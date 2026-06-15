@@ -14,6 +14,7 @@ class OrderFulfillmentManager {
 		this.summary_data  = [];
 		this.truck_data    = { trucks: [], stock: {} };
 		this.allocations   = {};   // { item_code: { truck_number: qty } }
+		this.closed_trucks = [];
 		this.search_term   = '';
 		this._alloc_save_timer = null;
 		this.setup_page();
@@ -89,7 +90,7 @@ class OrderFulfillmentManager {
 
 		const prev_stock = this.truck_data ? { ...this.truck_data.stock } : {};
 
-		// Load both tabs in parallel
+		// Load all data in parallel
 		Promise.all([
 			new Promise(resolve => frappe.call({
 				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_sales_order_fulfillment',
@@ -102,6 +103,14 @@ class OrderFulfillmentManager {
 				args: { from_date, to_date },
 				callback: r => { this.truck_data = r.message || { trucks: [], stock: {} }; resolve(); },
 				error: () => resolve(),
+			})),
+			new Promise(resolve => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
+				callback: r => {
+					try { this.closed_trucks = JSON.parse(r.message || '[]') || []; } catch(e) { this.closed_trucks = []; }
+					resolve();
+				},
+				error: () => { this.closed_trucks = []; resolve(); },
 			})),
 		]).then(() => {
 			// Detect stock changes and notify
@@ -221,6 +230,18 @@ class OrderFulfillmentManager {
 				${trucks.map(t => this._render_truck_card(t, item_summary)).join('')}
 			</div>
 		</div>`;
+
+		if (this.closed_trucks.length) {
+			html += `<div class="tf-section tf-closed-section">
+				<div class="tf-section-header">
+					Dispatched Trucks
+					<span class="tf-tab-badge">${this.closed_trucks.length}</span>
+				</div>
+				<div class="tf-trucks-grid">
+					${this.closed_trucks.map((ct, idx) => this._render_closed_truck_card(ct, idx)).join('')}
+				</div>
+			</div>`;
+		}
 
 		return html;
 	}
@@ -393,6 +414,93 @@ class OrderFulfillmentManager {
 		</div>`;
 	}
 
+	_render_closed_truck_card(ct, idx) {
+		const closed_label = ct.closed_at
+			? frappe.datetime.str_to_user(ct.closed_at.split(' ')[0]) + ' ' + (ct.closed_at.split(' ')[1] || '').slice(0, 5)
+			: '—';
+
+		const order_rows = (ct.orders || []).map(o => `
+			<div class="tf-order-row">
+				<div>
+					<a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${frappe.utils.escape_html(o.name)}</a>
+					<span class="tf-order-cust">${frappe.utils.escape_html(o.customer_name || '')}</span>
+				</div>
+				${o.delivery_region ? `<span style="font-size:11px;color:#94a3b8;">${frappe.utils.escape_html(o.delivery_region)}</span>` : ''}
+			</div>`).join('');
+
+		return `
+		<div class="tf-truck-card tf-closed-card">
+			<div class="tf-truck-head" style="background:#475569;">
+				<div>
+					<span class="tf-truck-num" style="color:#f1f5f9;">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</span>
+					<span class="tf-truck-meta" style="color:#cbd5e1;">
+						${ct.order_count} order${ct.order_count !== 1 ? 's' : ''}
+						${ct.total_weight ? ` &nbsp;·&nbsp; ${(ct.total_weight).toFixed(0)} kg` : ''}
+					</span>
+				</div>
+				<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+					<span style="font-size:10px;color:#94a3b8;">Dispatched ${frappe.utils.escape_html(closed_label)}</span>
+					<button class="btn btn-xs tf-dl-closed-btn" data-idx="${idx}"
+					        style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;"
+					        title="Download report">&#8659; Download</button>
+				</div>
+			</div>
+			${ct.driver_name ? `<div style="padding:6px 14px;font-size:12px;color:#475569;border-bottom:1px solid #e5e7eb;">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
+			${(ct.orders || []).length ? `
+			<div class="tf-orders-section">
+				<div class="tf-orders-toggle tf-closed-toggle" data-idx="${idx}">
+					&#9658; View ${(ct.orders || []).length} order${(ct.orders || []).length !== 1 ? 's' : ''}
+				</div>
+				<div class="tf-orders-list tf-closed-orders-list" id="tf-closed-orders-${idx}" style="display:none;">
+					${order_rows}
+				</div>
+			</div>` : ''}
+		</div>`;
+	}
+
+	_download_closed_truck(ct) {
+		const today = frappe.datetime.now_date();
+		const rows  = (ct.orders || []).map(o => `<tr>
+			<td>${frappe.utils.escape_html(o.name)}</td>
+			<td>${frappe.utils.escape_html(o.customer_name || '')}</td>
+			<td>${frappe.utils.escape_html(o.delivery_region || '—')}</td>
+		</tr>`).join('');
+
+		const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+			xmlns:x="urn:schemas-microsoft-com:office:excel"
+			xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8">
+<style>
+	table{border-collapse:collapse}
+	th,td{border:1px solid #ddd;padding:8px;font-family:sans-serif;font-size:12px}
+	th{background:#475569;color:#fff;font-weight:bold}
+</style></head><body>
+<h2 style="font-family:sans-serif">DISPATCHED TRUCK — ${frappe.utils.escape_html(ct.truck_number)}</h2>
+<table style="margin-bottom:16px;border:none;font-family:sans-serif"><tr style="border:none">
+	<td style="border:none;font-weight:bold">Truck:</td><td style="border:none">${frappe.utils.escape_html(ct.truck_number)}</td>
+	${ct.driver_name ? `<td style="border:none;font-weight:bold;padding-left:20px">Driver:</td><td style="border:none">${frappe.utils.escape_html(ct.driver_name)}</td>` : ''}
+	<td style="border:none;font-weight:bold;padding-left:20px">Dispatched:</td><td style="border:none">${frappe.utils.escape_html(ct.closed_at || '—')}</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Orders:</td><td style="border:none">${ct.order_count}</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Weight:</td><td style="border:none">${(ct.total_weight || 0).toFixed(2)} kg</td>
+	<td style="border:none;font-weight:bold;padding-left:20px">Value:</td><td style="border:none">${(ct.total_value || 0).toFixed(2)}</td>
+</tr></table>
+<table>
+	<thead><tr><th>Order</th><th>Customer</th><th>Region</th></tr></thead>
+	<tbody>${rows}</tbody>
+</table>
+</body></html>`;
+
+		const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+		const a    = document.createElement('a');
+		a.href     = URL.createObjectURL(blob);
+		a.download = `Truck_${ct.truck_number}_Dispatched_${today}.xls`;
+		a.style.display = 'none';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		frappe.show_alert({ message: __('Downloaded report for dispatched truck {0}', [ct.truck_number]), indicator: 'green' });
+	}
+
 	// ── Summary Tab (existing per-item view) ──────────────────────────────────
 
 	_render_summary_tab() {
@@ -515,6 +623,23 @@ class OrderFulfillmentManager {
 		// Summary tab: create MR button
 		this.container.off('click.tf-mr').on('click.tf-mr', '.btn-create-mr-summary', () => {
 			this._create_mr_from_summary();
+		});
+
+		// Closed truck order list toggle
+		this.container.off('click.tf-closed-toggle').on('click.tf-closed-toggle', '.tf-closed-toggle', function () {
+			const idx   = $(this).data('idx');
+			const $list = $(`#tf-closed-orders-${idx}`);
+			const open  = $list.is(':visible');
+			$list.slideToggle(150);
+			const ct = self.closed_trucks[idx] || {};
+			const n  = (ct.orders || []).length;
+			$(this).html(`${open ? '&#9658;' : '&#9660;'} View ${n} order${n !== 1 ? 's' : ''}`);
+		});
+
+		// Closed truck download
+		this.container.off('click.tf-dl-closed').on('click.tf-dl-closed', '.tf-dl-closed-btn', function () {
+			const ct = self.closed_trucks[parseInt($(this).data('idx'), 10)];
+			if (ct) self._download_closed_truck(ct);
 		});
 	}
 
