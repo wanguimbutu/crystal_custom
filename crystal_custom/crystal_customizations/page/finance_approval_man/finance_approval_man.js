@@ -140,7 +140,7 @@ class FinanceApprovalManager {
 			${this._kpi('Pending',       orders.length,                  '#667eea')}
 			${this._kpi('Total Value',   format_currency(total_value),   '#10b981')}
 			${this._kpi('Total Overdue', format_currency(total_overdue), '#ef4444')}
-			${this._kpi('Draft Payments', pdc_customers,                  '#f59e0b')}
+			${this._kpi('Upcoming Payments', pdc_customers,                '#f59e0b')}
 		</div>
 
 		<div class="fa-table-wrap">
@@ -164,7 +164,7 @@ class FinanceApprovalManager {
 				<th width="8%">Overdue</th>
 				<th width="8%">Credit Limit</th>
 				<th width="8%">Terms</th>
-				<th width="7%">Draft Payments</th>
+				<th width="7%">Upcoming Pmts</th>
 				<th width="7%">Region</th>
 				<th width="7%">Date</th>
 			</tr></thead>

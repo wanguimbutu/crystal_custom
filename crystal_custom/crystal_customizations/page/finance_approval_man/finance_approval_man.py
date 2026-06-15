@@ -66,7 +66,9 @@ def get_customer_financial_summary(customers):
 	)
 	terms_map = {r.name: r.payment_terms or "" for r in terms_rows}
 
-	# ── Draft Payment Entries (not yet submitted, posting_date not in the past) ─
+	# ── Upcoming payments: draft or submitted PEs with posting_date >= today ────
+	# Submitted entries with future dates are ERPNext's standard PDC model.
+	# docstatus = 2 (cancelled) is excluded; past-dated entries are excluded.
 	pdc_rows = frappe.db.sql(
 		f"""
 		SELECT
@@ -76,7 +78,7 @@ def get_customer_financial_summary(customers):
 		FROM `tabPayment Entry`
 		WHERE party_type  = 'Customer'
 		  AND party IN ({placeholders})
-		  AND docstatus   = 0
+		  AND docstatus   IN (0, 1)
 		  AND posting_date >= %s
 		GROUP BY party
 		""",
