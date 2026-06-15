@@ -21,3 +21,15 @@ def save_truck_meta(trucks_json):
 def get_truck_meta():
     """Return previously saved truck metadata as a JSON string."""
     return frappe.db.get_default('crystal_truck_meta') or '[]'
+
+@frappe.whitelist()
+def save_closed_trucks(closed_trucks_json):
+    """Persist the list of closed truck records."""
+    frappe.db.set_default('crystal_closed_trucks', closed_trucks_json)
+    frappe.db.commit()
+    return True
+
+@frappe.whitelist()
+def get_closed_trucks():
+    """Return the persisted closed truck records."""
+    return frappe.db.get_default('crystal_closed_trucks') or '[]'

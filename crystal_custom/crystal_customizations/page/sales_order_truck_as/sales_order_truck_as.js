@@ -17,6 +17,7 @@ class TruckAssignmentManager {
 		this.search_term = '';
 		this.selected_orders = new Set();
 		this.saved_meta = {};
+		this.closed_trucks = [];
 		this.setup_page();
 		this.load_trucks_from_orders();
 	}
@@ -117,7 +118,15 @@ class TruckAssignmentManager {
 								}
 							});
 						}
-						this.load_data();
+						// Fetch closed-truck history before first render
+						frappe.call({
+							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
+							callback: (cr) => {
+								try { this.closed_trucks = JSON.parse(cr.message || '[]') || []; } catch(e) {}
+								this.load_data();
+							},
+							error: () => this.load_data(),
+						});
 					},
 				});
 			},
@@ -232,11 +241,11 @@ class TruckAssignmentManager {
 			${this._kpi('Trucks Active',  trucks_used,                  '#8b5cf6')}
 		</div>
 
-		${this.available_trucks.length ? `
+		${(this.available_trucks.length || this.closed_trucks.length) ? `
 		<div class="ta-section">
 			<div class="ta-section-header">
-				Assigned Trucks
-				<span class="ta-count-badge">${trucks_used} of ${this.available_trucks.length}</span>
+				Trucks
+				<span class="ta-count-badge">${trucks_used} active${this.closed_trucks.length ? ` &nbsp;·&nbsp; ${this.closed_trucks.length} dispatched` : ''}</span>
 			</div>
 			${this._render_trucks(this.orders)}
 		</div>` : ''}
@@ -485,6 +494,51 @@ class TruckAssignmentManager {
 			</div>`;
 		});
 
+		// Append closed/dispatched trucks to the same grid
+		this.closed_trucks.forEach((ct, idx) => {
+			const closed_label = ct.closed_at
+				? frappe.datetime.str_to_user(ct.closed_at.split(' ')[0]) + ' ' + (ct.closed_at.split(' ')[1] || '').slice(0, 5)
+				: '—';
+
+			const order_rows = (ct.orders || []).map(o => `
+			<div class="ta-truck-order">
+				<div>
+					<a href="/app/sales-order/${o.name}" target="_blank" class="ta-order-link">${frappe.utils.escape_html(o.name)}</a>
+					<span class="ta-order-cust">${frappe.utils.escape_html(o.customer_name || '')}</span>
+					${o.delivery_region ? `<span class="ta-order-loc">${frappe.utils.escape_html(o.delivery_region)}</span>` : ''}
+				</div>
+			</div>`).join('');
+
+			html += `
+			<div class="ta-truck-card ta-closed-card">
+				<div class="ta-truck-head" style="background:#475569;">
+					<div>
+						<div class="ta-truck-num">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</div>
+						${ct.driver_name ? `<div class="ta-truck-driver">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
+					</div>
+					<div style="text-align:right;font-size:11px;color:#94a3b8;">
+						<div>Dispatched</div>
+						<div style="color:#cbd5e1;font-weight:600;">${frappe.utils.escape_html(closed_label)}</div>
+					</div>
+				</div>
+
+				<div class="ta-truck-stats">
+					<div class="ta-truck-stat"><span>${ct.order_count}</span>Orders</div>
+					<div class="ta-truck-stat"><span>${(ct.total_weight || 0).toFixed(0)} kg</span>Weight</div>
+					<div class="ta-truck-stat"><span>${format_currency(ct.total_value || 0, null, 0)}</span>Value</div>
+				</div>
+
+				<div class="ta-orders-section">
+					<div class="ta-closed-toggle" data-idx="${idx}">
+						&#9658; View ${(ct.orders || []).length} order${(ct.orders || []).length !== 1 ? 's' : ''}
+					</div>
+					<div class="ta-closed-orders-list" id="ta-closed-orders-${idx}" style="display:none;">
+						${order_rows}
+					</div>
+				</div>
+			</div>`;
+		});
+
 		html += '</div>';
 		return html;
 	}
@@ -611,6 +665,17 @@ class TruckAssignmentManager {
 
 		this.container.find('.btn-dl-manifest').off('click').on('click', function () {
 			self.download_manifest($(this).data('truck'));
+		});
+
+		// Closed truck order list toggle
+		this.container.off('click.ta-closed').on('click.ta-closed', '.ta-closed-toggle', function () {
+			const idx   = $(this).data('idx');
+			const $list = $(`#ta-closed-orders-${idx}`);
+			const open  = $list.is(':visible');
+			$list.slideToggle(150);
+			const ct = self.closed_trucks[idx] || {};
+			const n  = (ct.orders || []).length;
+			$(this).html(`${open ? '&#9658;' : '&#9660;'} View ${n} order${n !== 1 ? 's' : ''}`);
 		});
 	}
 
@@ -767,8 +832,35 @@ class TruckAssignmentManager {
 		let done = 0;
 		const next = () => {
 			if (done >= truck_orders.length) {
+				// Build a closure record before removing the truck
+				const truck_info = this.available_trucks.find(t => t.truck_number === truck_number) || {};
+				const closure = {
+					truck_number,
+					driver_name:  truck_info.driver_name || '',
+					capacity_kg:  truck_info.capacity_kg || 0,
+					closed_at:    frappe.datetime.now_datetime(),
+					order_count:  truck_orders.length,
+					total_weight: truck_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0),
+					total_value:  truck_orders.reduce((s, o) => s + (o.grand_total || 0), 0),
+					orders: truck_orders.map(o => ({
+						name:            o.name,
+						customer_name:   o.customer_name || o.customer,
+						delivery_region: o.custom_delivery_region || '',
+					})),
+				};
+
+				// Prepend to history (most recent first) and persist
+				this.closed_trucks = [closure, ...this.closed_trucks];
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
+					args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
+				});
+
+				// Remove from active list and persist truck meta
 				this.available_trucks = this.available_trucks.filter(t => t.truck_number !== truck_number);
-				frappe.show_alert({ message: __('Truck {0} closed', [truck_number]), indicator: 'green' });
+				this._save_truck_meta();
+
+				frappe.show_alert({ message: __('Truck {0} closed and recorded', [truck_number]), indicator: 'green' });
 				this.load_data();
 				return;
 			}
@@ -781,6 +873,7 @@ class TruckAssignmentManager {
 		};
 		next();
 	}
+
 
 	download_manifest(truck_number) {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
@@ -1069,6 +1162,21 @@ ${driver_cols}
 		.ta-order-cust { display: block; color: #6b7280; font-size: 11px; }
 		.ta-order-loc  { display: block; color: #94a3b8; font-size: 10px; font-style: italic; }
 		.ta-empty-truck { text-align: center; color: #94a3b8; padding: 16px; font-style: italic; }
+
+		/* Closed trucks */
+		.ta-closed-card { opacity: 0.85; }
+		.ta-closed-card:hover { opacity: 1; }
+		.ta-closed-toggle {
+			padding: 8px 14px;
+			font-size: 12px;
+			font-weight: 600;
+			color: #64748b;
+			cursor: pointer;
+			background: #f8fafc;
+			user-select: none;
+		}
+		.ta-closed-toggle:hover { background: #f1f5f9; color: #475569; }
+		.ta-closed-orders-list { border-top: 1px solid #f1f5f9; }
 
 		/* Pagination */
 		.ta-pg-bar {
