@@ -486,20 +486,48 @@ class SalesOrderManager {
 		const list = Array.from(this.selected);
 		if (!list.length) { frappe.msgprint(__('Select at least one order.')); return; }
 
-		frappe.confirm(
-			__('Send {0} order(s) to Finance for approval?', [list.length]),
-			() => this._process(list)
-		);
+		// Identify which selected orders were previously rejected
+		const resubmissions = list.filter(name => {
+			const o = this.orders.find(x => x.name === name);
+			return o && !!o.custom_finance_rejection_note;
+		});
+
+		if (resubmissions.length) {
+			frappe.prompt(
+				[{
+					label: 'Resubmission Note',
+					fieldname: 'note',
+					fieldtype: 'Small Text',
+					reqd: 1,
+					description: __(`{0} of the selected order(s) were previously rejected by Finance.
+Add a note explaining what has changed — Finance will see this alongside the original rejection reason.`, [resubmissions.length]),
+				}],
+				(vals) => {
+					frappe.confirm(
+						__('Send {0} order(s) to Finance? ({1} resubmission(s))', [list.length, resubmissions.length]),
+						() => this._process(list, vals.note, resubmissions)
+					);
+				},
+				__('Resubmission Note'), __('Continue')
+			);
+		} else {
+			frappe.confirm(
+				__('Send {0} order(s) to Finance for approval?', [list.length]),
+				() => this._process(list, '', [])
+			);
+		}
 	}
 
-	_process(list) {
+	_process(list, resubmission_note, resubmissions) {
 		frappe.show_alert({ message: __('Sending to Finance…'), indicator: 'blue' });
 
-		// Use a direct DB-level Python function to avoid Frappe's workflow engine
-		// auto-applying further transitions for users who hold multiple roles.
 		frappe.call({
 			method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.send_to_finance',
-			args: { order_names: JSON.stringify(list) },
+			args: {
+				order_names: JSON.stringify(list),
+				resubmission_note: resubmission_note || '',
+				resubmission_orders: JSON.stringify(resubmissions || []),
+			},
 			callback: (r) => {
 				const result  = r.message || {};
 				const updated = result.updated || [];

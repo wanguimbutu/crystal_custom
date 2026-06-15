@@ -60,17 +60,23 @@ def notify_finance_of_new_orders(order_names):
 
 
 @frappe.whitelist()
-def send_to_finance(order_names):
+def send_to_finance(order_names, resubmission_note='', resubmission_orders=None):
     """
     Move draft Sales Orders to 'Pending Finance Approval' using a direct DB write
     so Frappe's workflow engine cannot auto-apply further transitions regardless
     of which roles the calling user holds.
+
+    resubmission_note: note explaining what changed, for orders being re-sent after rejection
+    resubmission_orders: JSON list of order names that are resubmissions (subset of order_names)
     """
     import json
 
     if isinstance(order_names, str):
         order_names = json.loads(order_names)
+    if isinstance(resubmission_orders, str):
+        resubmission_orders = json.loads(resubmission_orders) if resubmission_orders else []
 
+    resub_set = set(resubmission_orders or [])
     valid_from = {'', None, 'Proceed To Order'}
     updated, skipped = [], []
 
@@ -84,10 +90,12 @@ def send_to_finance(order_names):
         if current.docstatus != 0 or current.workflow_state not in valid_from:
             skipped.append(name)
             continue
-        frappe.db.set_value(
-            'Sales Order', name, 'workflow_state', 'Pending Finance Approval',
-            update_modified=False,
-        )
+
+        fields = {'workflow_state': 'Pending Finance Approval'}
+        if name in resub_set and resubmission_note:
+            fields['custom_resubmission_note'] = resubmission_note
+
+        frappe.db.set_value('Sales Order', name, fields, update_modified=False)
         updated.append(name)
 
     if updated:

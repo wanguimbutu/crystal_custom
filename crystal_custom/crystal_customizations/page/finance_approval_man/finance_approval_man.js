@@ -68,6 +68,7 @@ class FinanceApprovalManager {
 				fields: [
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner', 'workflow_state',
+					'custom_finance_rejection_note', 'custom_resubmission_note',
 				],
 				filters,
 				limit_page_length: 500,
@@ -156,16 +157,16 @@ class FinanceApprovalManager {
 		<table class="table table-bordered fa-table">
 			<thead><tr>
 				<th width="3%"></th>
-				<th width="12%">Sales Order</th>
-				<th width="14%">Customer</th>
-				<th width="9%">Order Amt</th>
-				<th width="9%">Outstanding</th>
-				<th width="9%">Overdue</th>
-				<th width="9%">Credit Limit</th>
-				<th width="10%">Terms</th>
-				<th width="8%">PDC Today</th>
-				<th width="8%">Region</th>
-				<th width="9%">Date</th>
+				<th width="18%">Sales Order</th>
+				<th width="12%">Customer</th>
+				<th width="8%">Order Amt</th>
+				<th width="8%">Outstanding</th>
+				<th width="8%">Overdue</th>
+				<th width="8%">Credit Limit</th>
+				<th width="8%">Terms</th>
+				<th width="7%">PDC Today</th>
+				<th width="7%">Region</th>
+				<th width="7%">Date</th>
 			</tr></thead>
 			<tbody>`;
 
@@ -175,11 +176,25 @@ class FinanceApprovalManager {
 			const over_limit = (fin.outstanding || 0) + o.grand_total > (fin.credit_limit || 0);
 			const has_pdc    = (fin.pdc_count || 0) > 0;
 			const has_overdue = (fin.overdue || 0) > 0;
+			const is_resub   = !!o.custom_resubmission_note;
 
 			html += `
-			<tr class="fa-row ${over_limit ? 'fa-row-warn' : ''}" data-order="${o.name}">
+			<tr class="fa-row ${over_limit ? 'fa-row-warn' : ''} ${is_resub ? 'fa-row-resub' : ''}" data-order="${o.name}">
 				<td><input type="checkbox" class="fa-chk" data-order="${o.name}" data-owner="${o.owner}"></td>
-				<td><a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a></td>
+				<td>
+					<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
+					${is_resub ? '<span class="fa-resub-badge">Re-submitted</span>' : ''}
+					${o.custom_finance_rejection_note ? `
+					<div class="fa-note fa-note-rejection">
+						<span class="fa-note-label">Prev. rejection:</span>
+						${frappe.utils.escape_html(o.custom_finance_rejection_note)}
+					</div>` : ''}
+					${o.custom_resubmission_note ? `
+					<div class="fa-note fa-note-resub">
+						<span class="fa-note-label">Resubmission note:</span>
+						${frappe.utils.escape_html(o.custom_resubmission_note)}
+					</div>` : ''}
+				</td>
 				<td title="${o.customer}">${o.customer_name || o.customer}</td>
 				<td class="fa-amt">${format_currency(o.grand_total)}</td>
 				<td class="fa-amt ${(fin.outstanding || 0) > 0 ? 'fa-red' : ''}">
@@ -439,9 +454,45 @@ class FinanceApprovalManager {
 			border: none !important;
 			white-space: nowrap;
 		}
-		.fa-row td { padding: 11px 10px !important; vertical-align: middle !important; font-size: 13px; }
+		.fa-row td { padding: 11px 10px !important; vertical-align: top !important; font-size: 13px; }
 		.fa-row:hover { background: #f8fafc !important; }
 		.fa-row-warn { border-left: 3px solid #ef4444 !important; background: #fff5f5; }
+		.fa-row-resub { border-left: 3px solid #8b5cf6 !important; }
+		.fa-resub-badge {
+			display: inline-block;
+			margin-left: 6px;
+			padding: 1px 7px;
+			background: #ede9fe;
+			color: #6d28d9;
+			border-radius: 3px;
+			font-size: 10px;
+			font-weight: 700;
+			vertical-align: middle;
+			text-transform: uppercase;
+			letter-spacing: .3px;
+		}
+		.fa-note {
+			margin-top: 5px;
+			padding: 5px 8px;
+			border-radius: 4px;
+			font-size: 11px;
+			line-height: 1.5;
+		}
+		.fa-note-rejection {
+			background: #fff5f5;
+			border-left: 3px solid #ef4444;
+			color: #7f1d1d;
+		}
+		.fa-note-resub {
+			background: #f5f3ff;
+			border-left: 3px solid #8b5cf6;
+			color: #4c1d95;
+		}
+		.fa-note-label {
+			font-weight: 700;
+			display: block;
+			margin-bottom: 2px;
+		}
 		.fa-amt { text-align: right; font-family: monospace; font-size: 13px; }
 		.fa-red { color: #dc2626; }
 		.fa-bold { font-weight: 700; }

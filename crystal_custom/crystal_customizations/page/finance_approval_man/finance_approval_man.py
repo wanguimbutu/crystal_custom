@@ -130,6 +130,7 @@ def approve_orders(order_names):
             {
                 'workflow_state': 'Pending Customer Order Reconfirmation',
                 'custom_finance_rejection_note': '',
+                'custom_resubmission_note': '',
             },
             update_modified=False,
         )
@@ -154,6 +155,7 @@ def reject_order_state(order_name, reason):
         {
             'workflow_state': 'Proceed To Order',
             'custom_finance_rejection_note': reason,
+            'custom_resubmission_note': '',
         },
         update_modified=False,
     )
