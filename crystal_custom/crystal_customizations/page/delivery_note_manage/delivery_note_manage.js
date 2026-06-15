@@ -16,6 +16,8 @@ class DeliveryNoteManager {
         this.invoices = [];
         this.selected_orders = new Set();
         this.active_tab = 'pending';
+        this.pending_view = 'table'; // 'table' | 'trucks'
+        this.truck_meta = {};
         this.page_size = 50;
         this.orders_page = 1;
         this.dns_page = 1;
@@ -176,6 +178,9 @@ class DeliveryNoteManager {
         ];
         if (sp_orders) so_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
 
+        let orders_done = false, meta_done = false;
+        const try_render = () => { if (orders_done && meta_done) this.render_pending_orders(); };
+
         frappe.call({
             method: 'frappe.client.get_list',
             args: {
@@ -189,12 +194,28 @@ class DeliveryNoteManager {
             },
             callback: (r) => {
                 this.orders = r.message || [];
-                this.render_pending_orders();
+                orders_done = true;
+                try_render();
             },
             error: () => {
                 this.orders = [];
-                this.render_pending_orders();
+                orders_done = true;
+                try_render();
             }
+        });
+
+        frappe.call({
+            method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_meta',
+            callback: (r) => {
+                try {
+                    const trucks = JSON.parse(r.message || '[]');
+                    this.truck_meta = {};
+                    trucks.forEach(t => { this.truck_meta[t.truck_number] = t; });
+                } catch(e) { this.truck_meta = {}; }
+                meta_done = true;
+                try_render();
+            },
+            error: () => { this.truck_meta = {}; meta_done = true; try_render(); },
         });
     }
 
@@ -384,15 +405,30 @@ class DeliveryNoteManager {
             return a.localeCompare(b);
         });
 
-        let html = `
-            <div class="delivery-orders-table">
-                ${this.summary_cards([
-                    { label: 'Orders', value: all_filtered.length, color: '#667eea, #764ba2' },
-                    { label: 'Total Value', value: format_currency(total_value), color: '#43e97b, #38f9d7' },
-                    { label: 'Total Weight', value: `${total_weight.toFixed(0)} kg`, color: '#f093fb, #f5576c' },
-                    { label: 'Trucks', value: trucks.length, color: '#f59e0b, #d97706' }
-                ])}
+        const view_toggle = `
+            <div class="dm-view-toggle">
+                <button class="dm-view-btn ${this.pending_view === 'table' ? 'dm-view-btn-active' : ''}" data-view="table">
+                    &#9776; Table View
+                </button>
+                <button class="dm-view-btn ${this.pending_view === 'trucks' ? 'dm-view-btn-active' : ''}" data-view="trucks">
+                    &#128666; Truck View
+                </button>
+            </div>`;
 
+        const summary = this.summary_cards([
+            { label: 'Orders', value: all_filtered.length, color: '#667eea, #764ba2' },
+            { label: 'Total Value', value: format_currency(total_value), color: '#43e97b, #38f9d7' },
+            { label: 'Total Weight', value: `${total_weight.toFixed(0)} kg`, color: '#f093fb, #f5576c' },
+            { label: 'Trucks', value: trucks.length, color: '#f59e0b, #d97706' }
+        ]);
+
+        if (this.pending_view === 'trucks') {
+            $tab.html(`<div class="delivery-orders-table">${summary}${view_toggle}${this._render_dm_truck_cards(all_filtered)}</div>${this.shared_styles()}`);
+            this.attach_pending_events();
+            return;
+        }
+
+        let html = `<div class="delivery-orders-table">${summary}${view_toggle}
                 <div class="dm-selection-bar">
                     <label class="dm-sel-all-label">
                         <input type="checkbox" id="dm-select-all" style="width:15px;height:15px;accent-color:#667eea;">
@@ -418,8 +454,7 @@ class DeliveryNoteManager {
                                 <th width="11%">Action</th>
                             </tr>
                         </thead>
-                        <tbody>
-        `;
+                        <tbody>`;
 
         group_keys.forEach(key => {
             const grp = groups[key];
@@ -478,10 +513,9 @@ class DeliveryNoteManager {
                             <div class="loading">Loading items...</div>
                         </div>
                     </td>
-                </tr>
-            `;
-            });  // grp.forEach
-        });  // group_keys.forEach
+                </tr>`;
+            });
+        });
 
         html += `</tbody></table>
         ${this._pagination_html(all_filtered.length, 'orders_page', '#dm-tab-pending', () => this.render_pending_orders())}
@@ -531,6 +565,117 @@ class DeliveryNoteManager {
         $('#dm-tab-pending').find('.btn-create-dn').off('click').on('click', function() {
             self.create_delivery_note($(this).data('order'));
         });
+
+        // View toggle
+        $('#dm-tab-pending').find('.dm-view-btn').off('click').on('click', function() {
+            const view = $(this).data('view');
+            if (self.pending_view !== view) {
+                self.pending_view = view;
+                self.render_pending_orders();
+            }
+        });
+    }
+
+    _render_dm_truck_cards(orders) {
+        const truck_map = {};
+        const no_truck  = [];
+        orders.forEach(o => {
+            if (o.custom_truck_number) {
+                if (!truck_map[o.custom_truck_number]) truck_map[o.custom_truck_number] = [];
+                truck_map[o.custom_truck_number].push(o);
+            } else {
+                no_truck.push(o);
+            }
+        });
+
+        const truck_numbers = Object.keys(truck_map).sort();
+        if (!truck_numbers.length) {
+            return `<div style="padding:30px;text-align:center;color:#6b7280;">
+                No orders with truck assignments in the selected date range.
+                ${no_truck.length ? `<br><br>${no_truck.length} order${no_truck.length !== 1 ? 's' : ''} have no truck assigned.` : ''}
+            </div>`;
+        }
+
+        let html = '<div class="dm-truck-grid">';
+
+        truck_numbers.forEach(truck_num => {
+            const meta      = this.truck_meta[truck_num] || {};
+            const t_orders  = truck_map[truck_num];
+            const total_val = t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+            const total_wt  = t_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+            const capacity  = meta.capacity_kg || 0;
+            const cap_pct   = capacity > 0 ? Math.min((total_wt / capacity) * 100, 100).toFixed(0) : null;
+
+            const order_rows = t_orders.map(o => {
+                const delivery_date = o.delivery_date || o.transaction_date;
+                const is_overdue    = delivery_date && frappe.datetime.get_diff(frappe.datetime.get_today(), delivery_date) > 0;
+                return `<div class="dm-tc-order">
+                    <div class="dm-tc-order-main">
+                        <a href="/app/sales-order/${o.name}" target="_blank" class="order-link">${frappe.utils.escape_html(o.name)}</a>
+                        <span class="dm-tc-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
+                        ${o.custom_delivery_region ? `<span class="region-tag" style="font-size:10px;">${frappe.utils.escape_html(o.custom_delivery_region)}</span>` : ''}
+                    </div>
+                    <div class="dm-tc-order-right">
+                        <span class="amount-badge" style="font-size:11px;">${format_currency(o.grand_total, null, 0)}</span>
+                        ${is_overdue ? '<span class="overdue-badge">OVERDUE</span>' : ''}
+                        <button class="btn btn-xs btn-primary btn-create-dn" data-order="${o.name}" style="margin-left:6px;">
+                            Create DN
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+
+            html += `<div class="dm-truck-card">
+                <div class="dm-tc-head">
+                    <span class="dm-tc-num">&#128666; ${frappe.utils.escape_html(truck_num)}</span>
+                    ${meta.driver_name ? `<span class="dm-tc-driver">${frappe.utils.escape_html(meta.driver_name)}</span>` : ''}
+                </div>
+                <div class="dm-tc-stats">
+                    <span>${t_orders.length} order${t_orders.length !== 1 ? 's' : ''}</span>
+                    <span class="dm-tc-val">${format_currency(total_val, null, 0)}</span>
+                    <span class="dm-tc-wt">${total_wt.toFixed(0)} kg</span>
+                </div>
+                ${cap_pct !== null ? `
+                <div class="sos-tc-cap-bar">
+                    <div class="sos-tc-cap-fill" style="width:${cap_pct}%;background:${cap_pct > 90 ? '#ef4444' : '#10b981'}"></div>
+                </div>
+                <div class="sos-tc-cap-label">${cap_pct}% of ${capacity.toLocaleString()} kg</div>
+                ` : ''}
+                <div class="dm-tc-orders">${order_rows}</div>
+            </div>`;
+        });
+
+        html += '</div>';
+
+        if (no_truck.length) {
+            html += `<div class="dm-tv-unassigned">
+                ${no_truck.length} order${no_truck.length !== 1 ? 's' : ''} without truck assignment
+            </div>`;
+        }
+
+        html += `<style>
+            .dm-truck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; margin-top: 16px; }
+            .dm-truck-card { background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.08); overflow: hidden; }
+            .dm-tc-head { background: #1e293b; color: #f1f5f9; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+            .dm-tc-num { font-weight: 700; font-size: 13px; }
+            .dm-tc-driver { font-size: 11px; color: #94a3b8; }
+            .dm-tc-stats { display: flex; gap: 14px; padding: 10px 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #475569; }
+            .dm-tc-val { font-weight: 600; color: #374151; }
+            .dm-tc-wt { color: #6b7280; }
+            .dm-tc-orders { padding: 8px 12px; }
+            .dm-tc-order { display: flex; justify-content: space-between; align-items: center; padding: 8px 4px; border-bottom: 1px solid #f1f5f9; gap: 8px; }
+            .dm-tc-order:last-child { border-bottom: none; }
+            .dm-tc-order-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+            .dm-tc-cust { font-size: 11px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+            .dm-tc-order-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+            .dm-tv-unassigned { margin-top: 16px; padding: 10px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; color: #6b7280; }
+            .dm-view-toggle { display: flex; gap: 6px; margin-bottom: 16px; }
+            .dm-view-btn { background: #fff; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 16px; font-size: 13px; font-weight: 600; color: #374151; cursor: pointer; }
+            .dm-view-btn:hover { background: #f3f4f6; }
+            .dm-view-btn-active { background: #1e293b; color: #fff; border-color: #1e293b; }
+        </style>`;
+
+        return html;
     }
 
     // ─── Loading Sheet & Packing List ────────────────────────────────────────
