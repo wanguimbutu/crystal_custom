@@ -14,6 +14,7 @@ class OrderFulfillmentManager {
 		this.summary_data  = [];
 		this.truck_data    = { trucks: [], stock: {} };
 		this.allocations   = {};   // { item_code: { truck_number: qty } }
+		this.search_term   = '';
 		this.setup_page();
 		this.load_data();
 	}
@@ -73,6 +74,12 @@ class OrderFulfillmentManager {
 		const items_badge  = this.summary_data.length;
 
 		let html = `${this._styles()}
+		<div class="tf-search-row">
+			<input type="text" class="form-control tf-search-input"
+			       placeholder="${this.active_tab === 'trucks' ? 'Search by order number or customer…' : 'Search by item code or description…'}"
+			       value="${frappe.utils.escape_html(this.search_term || '')}">
+			${this.search_term ? `<span class="tf-search-count">Filtering active</span>` : ''}
+		</div>
 		<div class="tf-tabs">
 			<button class="tf-tab-btn ${this.active_tab === 'trucks'  ? 'active' : ''}" data-tab="trucks">
 				Truck Fulfillment
@@ -99,11 +106,23 @@ class OrderFulfillmentManager {
 	// ── Trucks Tab ────────────────────────────────────────────────────────────
 
 	_render_trucks_tab() {
-		const trucks = this.truck_data.trucks;
+		let trucks = this.truck_data.trucks;
+
+		if (this.search_term) {
+			const q = this.search_term.toLowerCase();
+			trucks = trucks.filter(t =>
+				(t.truck_number || '').toLowerCase().includes(q) ||
+				(t.orders || []).some(o =>
+					(o.name          || '').toLowerCase().includes(q) ||
+					(o.customer_name || '').toLowerCase().includes(q)
+				)
+			);
+		}
 
 		if (!trucks.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>No trucks with assigned orders</strong> — assign orders to trucks in the Truck Assignment page first.
+				<strong>${this.search_term ? 'No trucks match your search.' : 'No trucks with assigned orders'}</strong>
+				${!this.search_term ? ' — assign orders to trucks in the Truck Assignment page first.' : ''}
 			</div>`;
 		}
 
@@ -315,11 +334,19 @@ class OrderFulfillmentManager {
 	// ── Summary Tab (existing per-item view) ──────────────────────────────────
 
 	_render_summary_tab() {
-		const data = this.summary_data;
+		let data = this.summary_data;
+
+		if (this.search_term) {
+			const q = this.search_term.toLowerCase();
+			data = data.filter(d =>
+				(d.item_code || '').toLowerCase().includes(q) ||
+				(d.item_name || '').toLowerCase().includes(q)
+			);
+		}
 
 		if (!data.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>No items found</strong> — no finance-approved orders in this date range.
+				<strong>${this.search_term ? 'No items match your search.' : 'No items found — no finance-approved orders in this date range.'}</strong>
 			</div>`;
 		}
 
@@ -376,14 +403,37 @@ class OrderFulfillmentManager {
 	_attach_events() {
 		const self = this;
 
+		// Search bar
+		this.container.find('.tf-search-input').off('input').on('input', function () {
+			self.search_term = this.value;
+			// Re-render only the active tab pane, not the whole page
+			if (self.active_tab === 'trucks') {
+				self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
+			} else {
+				self.container.find('#tf-summary-pane').html(self._render_summary_tab());
+			}
+			self._attach_events();
+			const $inp = self.container.find('.tf-search-input');
+			const len  = $inp.val().length;
+			$inp[0] && $inp[0].focus();
+			$inp[0] && $inp[0].setSelectionRange(len, len);
+		});
+
 		// Tab switching
 		this.container.find('.tf-tab-btn').on('click', function () {
 			const tab = $(this).data('tab');
 			self.active_tab = tab;
+			self.search_term = '';
 			self.container.find('.tf-tab-btn').removeClass('active');
 			$(this).addClass('active');
 			self.container.find('.tf-tab-pane').removeClass('active');
 			self.container.find(`#tf-${tab}-pane`).addClass('active');
+			// Update placeholder to match the active tab
+			self.container.find('.tf-search-input')
+				.val('')
+				.attr('placeholder', tab === 'trucks'
+					? 'Search by order number or customer…'
+					: 'Search by item code or description…');
 		});
 
 		// Allocation input (delegated — works after re-render)
@@ -632,6 +682,28 @@ class OrderFulfillmentManager {
 	_styles() {
 		return `<style>
 		.tf-container { margin-top: 16px; }
+
+		/* Search bar */
+		.tf-search-row {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			margin-bottom: 16px;
+		}
+		.tf-search-input {
+			max-width: 340px;
+			height: 34px;
+			font-size: 13px;
+			border-radius: 6px;
+		}
+		.tf-search-count {
+			font-size: 12px;
+			color: #6b7280;
+			background: #fef3c7;
+			border: 1px solid #fcd34d;
+			border-radius: 4px;
+			padding: 1px 8px;
+		}
 
 		/* Tabs */
 		.tf-tabs {

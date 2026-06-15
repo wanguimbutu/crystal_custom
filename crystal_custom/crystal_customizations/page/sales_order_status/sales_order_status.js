@@ -12,6 +12,7 @@ class SalesOrderStatusPage {
 		this.page = page;
 		this.orders = [];
 		this.active_state_filter = null;
+		this.search_term = '';
 		this.current_page = 1;
 		this.page_size = 50;
 		this.setup_page();
@@ -91,8 +92,18 @@ class SalesOrderStatusPage {
 	}
 
 	_get_filtered_orders() {
-		if (!this.active_state_filter) return this.orders;
-		return this.orders.filter(o => o.workflow_state === this.active_state_filter);
+		let orders = this.active_state_filter
+			? this.orders.filter(o => o.workflow_state === this.active_state_filter)
+			: this.orders;
+		if (this.search_term) {
+			const q = this.search_term.toLowerCase();
+			orders = orders.filter(o =>
+				(o.name          || '').toLowerCase().includes(q) ||
+				(o.customer_name || '').toLowerCase().includes(q) ||
+				(o.customer      || '').toLowerCase().includes(q)
+			);
+		}
+		return orders;
 	}
 
 	// ── Rendering ─────────────────────────────────────────────────────────────
@@ -122,6 +133,13 @@ class SalesOrderStatusPage {
 
 		<div class="sos-pipeline">
 			${this._pipeline_html()}
+		</div>
+
+		<div class="sos-search-row">
+			<input type="text" class="form-control sos-search-input"
+			       placeholder="Search by order number or customer…"
+			       value="${frappe.utils.escape_html(this.search_term || '')}">
+			${this.search_term ? `<span class="sos-search-count">${all.length} result${all.length !== 1 ? 's' : ''}</span>` : ''}
 		</div>
 
 		<div class="sos-table-section">
@@ -169,6 +187,16 @@ class SalesOrderStatusPage {
 		return html;
 	}
 
+	_page_label_for_state(workflow_state) {
+		const map = {
+			'Proceed To Order':                      { label: 'Order Manager',    url: '/app/sales-order-manager' },
+			'Pending Finance Approval':              { label: 'Finance Approval', url: '/app/finance-approval-man' },
+			'Pending Customer Order Reconfirmation': { label: 'Order Confirmation', url: '/app/customer-order-confi' },
+			'Order Confirmed':                       { label: 'Truck Assignment', url: '/app/sales-order-truck-as' },
+		};
+		return map[workflow_state] || null;
+	}
+
 	_table_html(orders) {
 		let rows = orders.map(o => {
 			const state_cfg = this._states().find(s => s.key === o.workflow_state) ||
@@ -178,6 +206,7 @@ class SalesOrderStatusPage {
 			const truck    = o.custom_truck_number || '';
 			const hold_badge = o.custom_on_hold
 				? '<span class="sos-hold-badge">ON HOLD</span>' : '';
+			const page_info = this._page_label_for_state(o.workflow_state);
 
 			return `
 			<tr class="sos-row" data-order="${o.name}">
@@ -201,6 +230,11 @@ class SalesOrderStatusPage {
 						${state_cfg.label}
 					</span>
 				</td>
+				<td>
+					${page_info
+						? `<a href="${page_info.url}" class="sos-page-badge" style="border-color:${state_cfg.color};color:${state_cfg.color}" target="_blank">${page_info.label}</a>`
+						: '<span class="sos-muted">—</span>'}
+				</td>
 				<td>${truck
 					? `<span class="sos-truck-badge">${frappe.utils.escape_html(truck)}</span>`
 					: '<span class="sos-muted">—</span>'}</td>
@@ -218,16 +252,17 @@ class SalesOrderStatusPage {
 			<table class="table table-bordered sos-table">
 				<thead>
 					<tr>
-						<th width="12%">Sales Order</th>
-						<th width="16%">Customer</th>
-						<th width="11%">Sales Person</th>
-						<th width="10%">Region</th>
-						<th width="9%">Amount</th>
-						<th width="8%">Date</th>
-						<th width="13%">Stage</th>
-						<th width="9%">Truck</th>
-						<th width="6%">Delivered</th>
-						<th width="6%">Invoiced</th>
+						<th width="11%">Sales Order</th>
+						<th width="14%">Customer</th>
+						<th width="9%">Sales Person</th>
+						<th width="8%">Region</th>
+						<th width="8%">Amount</th>
+						<th width="7%">Date</th>
+						<th width="11%">Stage</th>
+						<th width="10%">Managed In</th>
+						<th width="8%">Truck</th>
+						<th width="7%">Delivered</th>
+						<th width="7%">Invoiced</th>
 					</tr>
 				</thead>
 				<tbody>${rows}</tbody>
@@ -272,6 +307,17 @@ class SalesOrderStatusPage {
 	// ── Events ────────────────────────────────────────────────────────────────
 
 	_attach_events() {
+		// Search bar
+		this.container.find('.sos-search-input').off('input').on('input', (e) => {
+			this.search_term = e.target.value;
+			this.current_page = 1;
+			this.render();
+			const $inp = this.container.find('.sos-search-input');
+			const len  = $inp.val().length;
+			$inp[0] && $inp[0].focus();
+			$inp[0] && $inp[0].setSelectionRange(len, len);
+		});
+
 		this.container.find('.sos-pipe-stage').on('click', (e) => {
 			const state = $(e.currentTarget).data('state');
 			this.active_state_filter = this.active_state_filter === state ? null : state;
@@ -299,6 +345,39 @@ class SalesOrderStatusPage {
 	_styles() {
 		return `<style>
 		.sos-container { margin-top: 16px; }
+
+		/* Search bar */
+		.sos-search-row {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			margin-bottom: 14px;
+		}
+		.sos-search-input {
+			max-width: 340px;
+			height: 34px;
+			font-size: 13px;
+			border-radius: 6px;
+		}
+		.sos-search-count {
+			font-size: 12px;
+			color: #6b7280;
+			white-space: nowrap;
+		}
+
+		/* Page badge */
+		.sos-page-badge {
+			display: inline-block;
+			padding: 2px 8px;
+			border: 1px solid currentColor;
+			border-radius: 4px;
+			font-size: 11px;
+			font-weight: 600;
+			text-decoration: none;
+			white-space: nowrap;
+			transition: opacity .15s;
+		}
+		.sos-page-badge:hover { opacity: .75; text-decoration: none; }
 
 		/* Summary KPIs */
 		.sos-summary-row {

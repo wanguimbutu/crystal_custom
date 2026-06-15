@@ -14,6 +14,7 @@ class TruckAssignmentManager {
 		this.available_trucks = [];
 		this.current_page = 1;
 		this.page_size = 50;
+		this.search_term = '';
 		this.setup_page();
 		this.load_trucks_from_orders();
 	}
@@ -164,7 +165,16 @@ class TruckAssignmentManager {
 
 	get_filtered_orders() {
 		const region = this.page.fields_dict.delivery_region.get_value();
-		return region ? this.orders.filter(o => o.custom_delivery_region === region) : this.orders;
+		let orders = region ? this.orders.filter(o => o.custom_delivery_region === region) : this.orders;
+		if (this.search_term) {
+			const q = this.search_term.toLowerCase();
+			orders = orders.filter(o =>
+				(o.name         || '').toLowerCase().includes(q) ||
+				(o.customer_name|| '').toLowerCase().includes(q) ||
+				(o.customer     || '').toLowerCase().includes(q)
+			);
+		}
+		return orders;
 	}
 
 	// ── Rendering ─────────────────────────────────────────────────────────────
@@ -177,6 +187,13 @@ class TruckAssignmentManager {
 		const trucks_used = new Set(assigned.map(o => o.custom_truck_number)).size;
 
 		let html = `
+		<div class="ta-search-row">
+			<input type="text" class="form-control ta-search-input"
+			       placeholder="Search by order number or customer…"
+			       value="${frappe.utils.escape_html(this.search_term || '')}">
+			${this.search_term ? `<span class="ta-search-count">${orders.length} result${orders.length !== 1 ? 's' : ''}</span>` : ''}
+		</div>
+
 		<div class="ta-kpi-row">
 			${this._kpi('Total Orders',   orders.length,                '#667eea')}
 			${this._kpi('Unassigned',     unassigned.length,            unassigned.length > 0 ? '#ef4444' : '#10b981')}
@@ -402,6 +419,18 @@ class TruckAssignmentManager {
 
 	_attach_events() {
 		const self = this;
+
+		// Search bar
+		this.container.find('.ta-search-input').off('input').on('input', function () {
+			self.search_term = this.value;
+			self.current_page = 1;
+			self.render_view();
+			// Restore focus after DOM replace
+			const $inp = self.container.find('.ta-search-input');
+			const len  = $inp.val().length;
+			$inp[0] && $inp[0].focus();
+			$inp[0] && $inp[0].setSelectionRange(len, len);
+		});
 
 		// Truck assignment via text input (on change / blur)
 		this.container.find('.ta-truck-input').off('change').on('change', function () {
@@ -654,6 +683,25 @@ ${driver_cols}
 	_styles() {
 		return `<style>
 		.ta-container { margin-top: 16px; }
+
+		/* Search bar */
+		.ta-search-row {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			margin-bottom: 16px;
+		}
+		.ta-search-input {
+			max-width: 340px;
+			height: 34px;
+			font-size: 13px;
+			border-radius: 6px;
+		}
+		.ta-search-count {
+			font-size: 12px;
+			color: #6b7280;
+			white-space: nowrap;
+		}
 
 		/* KPI row */
 		.ta-kpi-row {
