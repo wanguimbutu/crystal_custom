@@ -18,6 +18,7 @@ class DeliveryNoteManager {
         this.active_tab = 'pending';
         this.pending_view = 'table'; // 'table' | 'trucks'
         this.truck_meta = {};
+        this.closed_trucks = [];
         this.page_size = 50;
         this.orders_page = 1;
         this.dns_page = 1;
@@ -172,7 +173,8 @@ class DeliveryNoteManager {
         const sp_orders = this.page.fields_dict.sales_person.get_value();
         const fields = ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
                         'custom_delivery_region', 'custom_phone_number', 'delivery_date',
-                        'per_delivered', 'status', 'custom_truck_number', 'total_net_weight'];
+                        'per_delivered', 'status', 'custom_truck_number', 'total_net_weight',
+                        'custom_truck_closed'];
 
         const base_filters = [
             ['Sales Order', 'docstatus', '=', 1],
@@ -181,7 +183,7 @@ class DeliveryNoteManager {
         ];
         if (sp_orders) base_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
 
-        // Truck-assigned orders: always load regardless of date so truck cards stay complete
+        // Truck-assigned orders (active + closed): always load regardless of date
         const truck_filters = [
             ...base_filters,
             ['Sales Order', 'custom_truck_number', '!=', ''],
@@ -193,11 +195,21 @@ class DeliveryNoteManager {
             ['Sales Order', 'transaction_date', 'between', [from_date, to_date]],
         ];
 
-        let truck_rows = [], unassigned_rows = [];
-        let truck_done = false, unassigned_done = false, meta_done = false;
+        let truck_rows = [], unassigned_rows = [], raw_meta = [], raw_closed = [];
+        let truck_done = false, unassigned_done = false, meta_done = false, closed_done = false;
 
         const try_render = () => {
-            if (!truck_done || !unassigned_done || !meta_done) return;
+            if (!truck_done || !unassigned_done || !meta_done || !closed_done) return;
+
+            // Build truck_meta: active trucks first, then fill in closed truck meta
+            this.truck_meta = {};
+            raw_meta.forEach(t => { this.truck_meta[t.truck_number] = t; });
+            raw_closed.forEach(ct => {
+                if (!this.truck_meta[ct.truck_number]) {
+                    this.truck_meta[ct.truck_number] = { driver_name: ct.driver_name, capacity_kg: ct.capacity_kg };
+                }
+            });
+
             const seen = new Set(truck_rows.map(o => o.name));
             this.orders = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
             this.render_pending_orders();
@@ -221,16 +233,21 @@ class DeliveryNoteManager {
 
         frappe.call({
             method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_meta',
-            callback: (r) => {
-                try {
-                    const trucks = JSON.parse(r.message || '[]');
-                    this.truck_meta = {};
-                    trucks.forEach(t => { this.truck_meta[t.truck_number] = t; });
-                } catch(e) { this.truck_meta = {}; }
-                meta_done = true;
-                try_render();
+            callback: r => {
+                try { raw_meta = JSON.parse(r.message || '[]'); } catch(e) { raw_meta = []; }
+                meta_done = true; try_render();
             },
-            error: () => { this.truck_meta = {}; meta_done = true; try_render(); },
+            error: () => { meta_done = true; try_render(); },
+        });
+
+        frappe.call({
+            method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
+            callback: r => {
+                try { raw_closed = JSON.parse(r.message || '[]'); this.closed_trucks = raw_closed; }
+                catch(e) { raw_closed = []; this.closed_trucks = []; }
+                closed_done = true; try_render();
+            },
+            error: () => { raw_closed = []; this.closed_trucks = []; closed_done = true; try_render(); },
         });
     }
 
@@ -592,33 +609,23 @@ class DeliveryNoteManager {
     }
 
     _render_dm_truck_cards(orders) {
+        // Separate active-truck orders from closed-truck orders
         const truck_map = {};
         const no_truck  = [];
         orders.forEach(o => {
-            if (o.custom_truck_number) {
+            if (o.custom_truck_number && !o.custom_truck_closed) {
                 if (!truck_map[o.custom_truck_number]) truck_map[o.custom_truck_number] = [];
                 truck_map[o.custom_truck_number].push(o);
-            } else {
+            } else if (!o.custom_truck_number) {
                 no_truck.push(o);
             }
+            // custom_truck_closed orders are rendered via the closed_trucks section below
         });
 
-        const truck_numbers = Object.keys(truck_map).sort();
-        if (!truck_numbers.length) {
-            return `<div style="padding:30px;text-align:center;color:#6b7280;">
-                No orders with truck assignments in the selected date range.
-                ${no_truck.length ? `<br><br>${no_truck.length} order${no_truck.length !== 1 ? 's' : ''} have no truck assigned.` : ''}
-            </div>`;
-        }
-
-        let html = '<div class="dm-truck-grid">';
-
-        truck_numbers.forEach(truck_num => {
-            const meta      = this.truck_meta[truck_num] || {};
-            const t_orders  = truck_map[truck_num];
+        const _truck_card_html = (truck_num, t_orders, meta, is_closed) => {
             const total_val = t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
             const total_wt  = t_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
-            const capacity  = meta.capacity_kg || 0;
+            const capacity  = (meta && meta.capacity_kg) || 0;
             const cap_pct   = capacity > 0 ? Math.min((total_wt / capacity) * 100, 100).toFixed(0) : null;
 
             const order_rows = t_orders.map(o => {
@@ -640,10 +647,14 @@ class DeliveryNoteManager {
                 </div>`;
             }).join('');
 
-            html += `<div class="dm-truck-card">
-                <div class="dm-tc-head">
+            const head_bg = is_closed ? '#475569' : '#1e293b';
+            return `<div class="dm-truck-card">
+                <div class="dm-tc-head" style="background:${head_bg};">
                     <span class="dm-tc-num">&#128666; ${frappe.utils.escape_html(truck_num)}</span>
-                    ${meta.driver_name ? `<span class="dm-tc-driver">${frappe.utils.escape_html(meta.driver_name)}</span>` : ''}
+                    <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+                        ${(meta && meta.driver_name) ? `<span class="dm-tc-driver">${frappe.utils.escape_html(meta.driver_name)}</span>` : ''}
+                        ${is_closed ? '<span style="font-size:10px;background:#64748b;padding:1px 6px;border-radius:10px;color:#e2e8f0;">Dispatched</span>' : ''}
+                    </span>
                 </div>
                 <div class="dm-tc-stats">
                     <span>${t_orders.length} order${t_orders.length !== 1 ? 's' : ''}</span>
@@ -658,9 +669,57 @@ class DeliveryNoteManager {
                 ` : ''}
                 <div class="dm-tc-orders">${order_rows}</div>
             </div>`;
-        });
+        };
 
-        html += '</div>';
+        // ── Active trucks from live orders ──────────────────────────────────────
+        const truck_numbers = Object.keys(truck_map).sort();
+        let html = '';
+
+        if (truck_numbers.length) {
+            html += '<div class="dm-truck-grid">';
+            truck_numbers.forEach(truck_num => {
+                html += _truck_card_html(truck_num, truck_map[truck_num], this.truck_meta[truck_num], false);
+            });
+            html += '</div>';
+        }
+
+        // ── Dispatched (closed) trucks ──────────────────────────────────────────
+        const closed_trucks = this.closed_trucks || [];
+        if (closed_trucks.length) {
+            html += `<div style="margin-top:24px;">
+                <div style="font-weight:700;font-size:13px;color:#475569;margin-bottom:10px;letter-spacing:.5px;text-transform:uppercase;">
+                    &#128666; Dispatched Trucks (${closed_trucks.length})
+                </div>
+                <div class="dm-truck-grid">`;
+
+            closed_trucks.forEach(ct => {
+                // Use live orders if they loaded, fall back to closure record order list
+                const live_orders = orders.filter(o => o.custom_truck_number === ct.truck_number && o.custom_truck_closed);
+                const display_orders = live_orders.length
+                    ? live_orders
+                    : (ct.orders || []).map(o => ({
+                        name:                o.name,
+                        customer_name:       o.customer_name,
+                        custom_delivery_region: o.delivery_region || '',
+                        grand_total:         0,
+                        total_net_weight:    0,
+                        delivery_date:       null,
+                        transaction_date:    null,
+                    }));
+
+                html += _truck_card_html(ct.truck_number, display_orders,
+                    { driver_name: ct.driver_name, capacity_kg: ct.capacity_kg }, true);
+            });
+
+            html += '</div></div>';
+        }
+
+        if (!truck_numbers.length && !closed_trucks.length) {
+            html = `<div style="padding:30px;text-align:center;color:#6b7280;">
+                No orders with truck assignments in the selected date range.
+                ${no_truck.length ? `<br><br>${no_truck.length} order${no_truck.length !== 1 ? 's' : ''} have no truck assigned.` : ''}
+            </div>`;
+        }
 
         if (no_truck.length) {
             html += `<div class="dm-tv-unassigned">
