@@ -66,7 +66,7 @@ class WeightConsolidationManager {
 				fields: [
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
-					'total_net_weight', 'workflow_state', 'custom_on_hold',
+					'total_net_weight', 'workflow_state',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -183,10 +183,9 @@ class WeightConsolidationManager {
 			</tr>`;
 
 			rd.orders.forEach(o => {
-				const wt   = o.total_net_weight || 0;
-				const held = !!o.custom_on_hold;
+				const wt = o.total_net_weight || 0;
 				html += `
-				<tr class="wc-row${held ? ' wc-row-held' : ''}">
+				<tr class="wc-row">
 					<td><a href="/app/sales-order/${o.name}" target="_blank" class="wc-link">${o.name}</a></td>
 					<td class="wc-customer">${frappe.utils.escape_html(o.customer_name || o.customer)}</td>
 					<td class="wc-date">${frappe.datetime.str_to_user(o.transaction_date)}</td>
@@ -197,10 +196,7 @@ class WeightConsolidationManager {
 					<td class="wc-owner">${frappe.user.full_name(o.owner) || o.owner}</td>
 					<td class="wc-r wc-weight${wt === 0 ? ' wc-zero' : ''}">${wt > 0 ? wt.toFixed(1) : '—'}</td>
 					<td class="wc-r wc-amount">${format_currency(o.grand_total)}</td>
-					<td>${held
-						? '<span class="wc-badge wc-badge-held">On Hold</span>'
-						: '<span class="wc-badge wc-badge-ready">Ready</span>'}
-					</td>
+					<td><span class="wc-badge wc-badge-ready">Ready</span></td>
 				</tr>`;
 			});
 		});
@@ -415,7 +411,6 @@ class WeightConsolidationManager {
 		}
 		.wc-row:last-child td { border-bottom: none; }
 		.wc-row:hover td { background: #f8fafc; }
-		.wc-row-held td  { background: #fffbeb; opacity: .85; }
 
 		/* Grand total row */
 		.wc-total-row td {
@@ -455,7 +450,6 @@ class WeightConsolidationManager {
 			letter-spacing: .4px;
 		}
 		.wc-badge-ready { background: #dcfce7; color: #166534; }
-		.wc-badge-held  { background: #fef3c7; color: #92400e; }
 		</style>`;
 	}
 }

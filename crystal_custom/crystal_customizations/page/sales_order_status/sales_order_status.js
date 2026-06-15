@@ -127,7 +127,6 @@ class SalesOrderStatusPage {
 		);
 
 		const total_value = this.orders.reduce((s, o) => s + (o.grand_total || 0), 0);
-		const on_hold     = this.orders.filter(o => o.custom_on_hold).length;
 		const delivered   = this.orders.filter(o => (o.per_delivered || 0) >= 100).length;
 		const invoiced    = this.orders.filter(o => (o.per_billed    || 0) >= 100).length;
 
@@ -135,7 +134,6 @@ class SalesOrderStatusPage {
 		<div class="sos-summary-row">
 			${this._summary_kpi('Total Orders',   this.orders.length, '#667eea', false)}
 			${this._summary_kpi('Total Value',    format_currency(total_value, null, 0), '#8b5cf6', false)}
-			${this._summary_kpi('On Hold',        on_hold,   on_hold > 0 ? '#ef4444' : '#10b981', false)}
 			${this._summary_kpi('Fully Delivered', delivered, '#10b981', false)}
 			${this._summary_kpi('Invoiced',        invoiced,  '#0ea5e9', false)}
 		</div>
@@ -206,15 +204,12 @@ class SalesOrderStatusPage {
 			const del_pct  = Math.round(o.per_delivered || 0);
 			const bill_pct = Math.round(o.per_billed    || 0);
 			const truck    = o.custom_truck_number || '';
-			const hold_badge = o.custom_on_hold
-				? '<span class="sos-hold-badge">ON HOLD</span>' : '';
 			const page_info = this._page_label_for_state(o.workflow_state);
 
 			return `
 			<tr class="sos-row" data-order="${o.name}">
 				<td>
 					<a href="/app/sales-order/${o.name}" target="_blank" class="sos-link">${o.name}</a>
-					${hold_badge}
 				</td>
 				<td>
 					<div class="sos-cust-name">${frappe.utils.escape_html(o.customer_name || o.customer)}</div>
@@ -469,18 +464,6 @@ class SalesOrderStatusPage {
 			font-size: 11px;
 			font-weight: 600;
 		}
-		.sos-hold-badge {
-			display: inline-block;
-			margin-left: 6px;
-			padding: 1px 6px;
-			background: #ef4444;
-			color: #fff;
-			border-radius: 3px;
-			font-size: 10px;
-			font-weight: 700;
-			vertical-align: middle;
-		}
-
 		/* Progress bars */
 		.sos-prog-wrap {
 			position: relative;

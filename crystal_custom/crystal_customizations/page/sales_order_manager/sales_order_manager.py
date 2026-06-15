@@ -60,24 +60,6 @@ def notify_finance_of_new_orders(order_names):
 
 
 @frappe.whitelist()
-def release_all_holds():
-    """
-    Bulk-reset custom_on_hold = 0 for all draft Sales Orders.
-    Run once to fix orders mistakenly set to on-hold by the string-default bug
-    (fixture had default: "0" instead of 0; JS treated the non-empty string as truthy).
-    """
-    result = frappe.db.sql("""
-        UPDATE `tabSales Order`
-        SET custom_on_hold = 0
-        WHERE docstatus = 0
-          AND custom_on_hold = 1
-    """)
-    frappe.db.commit()
-    count = frappe.db.sql("SELECT ROW_COUNT() AS n", as_dict=1)[0].n
-    return int(count)
-
-
-@frappe.whitelist()
 def send_to_finance(order_names):
     """
     Move draft Sales Orders to 'Pending Finance Approval' using a direct DB write

@@ -52,7 +52,6 @@ class SalesOrderManager {
 			() => this.submit_selected(),
 			'octicon octicon-arrow-right'
 		);
-		this.page.add_button('Release All Holds', () => this._release_all_holds());
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
 
 		this.$wrap = $('<div class="som-wrap"></div>').appendTo(this.page.main);
@@ -78,7 +77,7 @@ class SalesOrderManager {
 				fields: [
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
-					'workflow_state', 'custom_on_hold', 'custom_finance_rejection_note',
+					'workflow_state', 'custom_finance_rejection_note',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -137,14 +136,12 @@ class SalesOrderManager {
 		);
 
 		const total_val  = all_filtered.reduce((s, o) => s + o.grand_total, 0);
-		const on_hold    = all_filtered.filter(o => o.custom_on_hold).length;
 		const selectable = all_filtered.length;
 
 		let html = `
 		${this._styles()}
 		<div class="som-kpi-row">
 			${this._kpi('Orders Ready', selectable,                   '#3b82f6', '📦')}
-			${this._kpi('On Hold',      on_hold,                      '#f59e0b', '⏸')}
 			${this._kpi('Total Value',  format_currency(total_val),   '#10b981', '💰')}
 			${this._kpi('Selected',     this.selected.size,           '#8b5cf6', '✓')}
 		</div>
@@ -173,19 +170,17 @@ class SalesOrderManager {
 						<th>Sales Person</th>
 						<th class="som-th-r">Amount</th>
 						<th>Status</th>
-						<th class="som-th-act">Hold</th>
 					</tr>
 				</thead>
 				<tbody>`;
 
 		orders.forEach(o => {
-			const held     = !!o.custom_on_hold;
-			const rejected = !held && !!o.custom_finance_rejection_note;
+			const rejected = !!o.custom_finance_rejection_note;
 			const checked  = this.selected.has(o.name);
 			const expanded = this.expanded.has(o.name);
 
 			html += `
-				<tr class="som-row ${held ? 'som-row-held' : ''} ${rejected ? 'som-row-rejected' : ''} ${checked ? 'som-row-selected' : ''}"
+				<tr class="som-row ${rejected ? 'som-row-rejected' : ''} ${checked ? 'som-row-selected' : ''}"
 				    data-order="${o.name}">
 					<td class="som-td-chk">
 						<input type="checkbox" class="som-chk" data-order="${o.name}"
@@ -211,19 +206,10 @@ class SalesOrderManager {
 					<td class="som-owner">${frappe.user.full_name(o.owner) || o.owner}</td>
 					<td class="som-th-r som-amount">${format_currency(o.grand_total)}</td>
 					<td>
-						${held
-							? '<span class="som-badge som-badge-held">On Hold</span>'
-							: rejected
-								? `<span class="som-badge som-badge-rejected">Finance Rejected</span>
-								   <div class="som-rejection-preview">${frappe.utils.escape_html((o.custom_finance_rejection_note || '').slice(0, 80))}${(o.custom_finance_rejection_note || '').length > 80 ? '…' : ''}</div>`
-								: '<span class="som-badge som-badge-ready">Ready</span>'}
-					</td>
-					<td class="som-th-act">
-						<button class="som-hold-btn ${held ? 'som-hold-btn-release' : 'som-hold-btn-hold'}"
-						        data-order="${o.name}" data-held="${held ? 1 : 0}"
-						        title="${held ? 'Release hold' : 'Put on hold'}">
-							${held ? '▶' : '⏸'}
-						</button>
+						${rejected
+							? `<span class="som-badge som-badge-rejected">Finance Rejected</span>
+							   <div class="som-rejection-preview">${frappe.utils.escape_html((o.custom_finance_rejection_note || '').slice(0, 80))}${(o.custom_finance_rejection_note || '').length > 80 ? '…' : ''}</div>`
+							: '<span class="som-badge som-badge-ready">Ready</span>'}
 					</td>
 				</tr>`;
 
@@ -232,7 +218,7 @@ class SalesOrderManager {
 				const additional_info = o.custom_additional_information;
 				html += `
 				<tr class="som-items-row" data-order="${o.name}">
-					<td colspan="10">
+					<td colspan="9">
 						<div class="som-items-wrap">
 							${rejection_note ? `
 							<div class="som-rejection-alert">
@@ -421,7 +407,7 @@ class SalesOrderManager {
 			const name = $(this).data('order');
 			$(this).is(':checked') ? self.selected.add(name) : self.selected.delete(name);
 			// update KPI count in place
-			self.$wrap.find('.som-kpi-row .som-kpi-val').eq(3).text(self.selected.size);
+			self.$wrap.find('.som-kpi-row .som-kpi-val').eq(2).text(self.selected.size);
 			$(this).closest('tr').toggleClass('som-row-selected', $(this).is(':checked'));
 		});
 
@@ -443,13 +429,6 @@ class SalesOrderManager {
 		this.$wrap.find('.som-pg-next').on('click', () => {
 			const tp = Math.ceil(this.filtered_orders().length / this.page_size);
 			if (this.current_page < tp) { this.current_page++; this.render(); }
-		});
-
-		// Hold toggle
-		this.$wrap.find('.som-hold-btn').on('click', function () {
-			const name   = $(this).data('order');
-			const is_held = parseInt($(this).data('held')) === 1;
-			self._toggle_hold(name, !is_held);
 		});
 
 		// Item editing — delegated so they work after async fetch
@@ -481,24 +460,6 @@ class SalesOrderManager {
 			delete self.doc_cache[order_name];
 			const $wrap = $(`#som-items-${order_name}`);
 			if ($wrap.length) $wrap.html(self._render_items(order_name));
-		});
-	}
-
-	_toggle_hold(order_name, hold) {
-		frappe.call({
-			method: 'frappe.client.set_value',
-			args: { doctype: 'Sales Order', name: order_name, fieldname: 'custom_on_hold', value: hold ? 1 : 0 },
-			callback: (r) => {
-				if (r.message) {
-					const o = this.orders.find(x => x.name === order_name);
-					if (o) o.custom_on_hold = hold ? 1 : 0;
-					frappe.show_alert({
-						message: __(hold ? '{0} put on hold' : '{0} hold released', [order_name]),
-						indicator: hold ? 'orange' : 'green',
-					});
-					this.render();
-				}
-			},
 		});
 	}
 
@@ -558,32 +519,6 @@ class SalesOrderManager {
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
-
-	_release_all_holds() {
-		const held_count = this.orders.filter(o => o.custom_on_hold).length;
-		if (!held_count) {
-			frappe.show_alert({ message: __('No orders are currently on hold'), indicator: 'blue' });
-			return;
-		}
-		frappe.confirm(
-			__('Release hold on all {0} held orders?', [held_count]),
-			() => {
-				frappe.call({
-					method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.release_all_holds',
-					freeze: true,
-					freeze_message: __('Releasing holds…'),
-					callback: (r) => {
-						frappe.show_alert({
-							message: __('Holds released — reloading…'),
-							indicator: 'green',
-						});
-						this.load_data();
-					},
-					error: () => frappe.msgprint({ title: __('Error'), message: __('Failed to release holds'), indicator: 'red' }),
-				});
-			}
-		);
-	}
 
 	_kpi(label, value, color, icon) {
 		return `<div class="som-kpi">
@@ -691,7 +626,6 @@ class SalesOrderManager {
 		.som-row:last-child td { border-bottom: none; }
 		.som-row:hover td { background: #f8fafc; }
 		.som-row-selected td { background: #eff6ff !important; }
-		.som-row-held td     { background: #fffbeb; opacity: .85; }
 		.som-row-rejected td { background: #fff5f5; border-left: 3px solid #ef4444 !important; }
 
 		.som-chk { width:16px; height:16px; accent-color:#3b82f6; cursor:pointer; }
@@ -724,7 +658,6 @@ class SalesOrderManager {
 			letter-spacing: .4px;
 		}
 		.som-badge-ready    { background:#dcfce7; color:#166534; }
-		.som-badge-held     { background:#fef3c7; color:#92400e; }
 		.som-badge-rejected { background:#fee2e2; color:#991b1b; }
 
 		/* Expand button */
@@ -739,20 +672,6 @@ class SalesOrderManager {
 			transition: color .15s;
 		}
 		.som-expand-btn:hover { color: #3b82f6; }
-
-		/* Hold button */
-		.som-hold-btn {
-			border: none;
-			border-radius: 6px;
-			width: 32px;
-			height: 28px;
-			cursor: pointer;
-			font-size: 14px;
-			transition: opacity .15s;
-		}
-		.som-hold-btn:hover { opacity: .8; }
-		.som-hold-btn-hold    { background: #fef3c7; color: #92400e; }
-		.som-hold-btn-release { background: #dcfce7; color: #166534; }
 
 		/* Expanded items */
 		.som-items-row td {

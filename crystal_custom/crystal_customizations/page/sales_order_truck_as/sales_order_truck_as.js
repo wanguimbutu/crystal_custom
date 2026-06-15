@@ -114,7 +114,6 @@ class TruckAssignmentManager {
 			['Sales Order', 'docstatus', 'in', [0, 1]],
 			['Sales Order', 'workflow_state', 'in', ['Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed']],
 			['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
-			['Sales Order', 'custom_on_hold', '!=', 1],
 			['Sales Order', 'custom_truck_closed', '!=', 1],
 		];
 		if (from && to) filters.push(['Sales Order', 'transaction_date', 'between', [from, to]]);
