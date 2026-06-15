@@ -170,38 +170,53 @@ class DeliveryNoteManager {
         $('#dm-tab-pending').html(this.loading_html('orders'));
 
         const sp_orders = this.page.fields_dict.sales_person.get_value();
-        const so_filters = [
-            ['Sales Order', 'docstatus', '=', 1],
-            ['Sales Order', 'transaction_date', 'between', [from_date, to_date]],
-            ['Sales Order', 'per_delivered', '<', 100],
-            ['Sales Order', 'status', '!=', 'Closed']
-        ];
-        if (sp_orders) so_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
+        const fields = ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
+                        'custom_delivery_region', 'custom_phone_number', 'delivery_date',
+                        'per_delivered', 'status', 'custom_truck_number', 'total_net_weight'];
 
-        let orders_done = false, meta_done = false;
-        const try_render = () => { if (orders_done && meta_done) this.render_pending_orders(); };
+        const base_filters = [
+            ['Sales Order', 'docstatus', '=', 1],
+            ['Sales Order', 'per_delivered', '<', 100],
+            ['Sales Order', 'status', '!=', 'Closed'],
+        ];
+        if (sp_orders) base_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
+
+        // Truck-assigned orders: always load regardless of date so truck cards stay complete
+        const truck_filters = [
+            ...base_filters,
+            ['Sales Order', 'custom_truck_number', '!=', ''],
+        ];
+
+        // Unassigned orders: respect the date filter
+        const unassigned_filters = [
+            ...base_filters,
+            ['Sales Order', 'transaction_date', 'between', [from_date, to_date]],
+        ];
+
+        let truck_rows = [], unassigned_rows = [];
+        let truck_done = false, unassigned_done = false, meta_done = false;
+
+        const try_render = () => {
+            if (!truck_done || !unassigned_done || !meta_done) return;
+            const seen = new Set(truck_rows.map(o => o.name));
+            this.orders = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
+            this.render_pending_orders();
+        };
 
         frappe.call({
             method: 'frappe.client.get_list',
-            args: {
-                doctype: 'Sales Order',
-                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
-                         'custom_delivery_region', 'custom_phone_number', 'delivery_date',
-                         'per_delivered', 'status', 'custom_truck_number', 'total_net_weight'],
-                filters: so_filters,
-                order_by: 'transaction_date desc',
-                limit_page_length: 500
-            },
-            callback: (r) => {
-                this.orders = r.message || [];
-                orders_done = true;
-                try_render();
-            },
-            error: () => {
-                this.orders = [];
-                orders_done = true;
-                try_render();
-            }
+            args: { doctype: 'Sales Order', fields, filters: truck_filters,
+                    order_by: 'transaction_date desc', limit_page_length: 500 },
+            callback: r => { truck_rows = r.message || []; truck_done = true; try_render(); },
+            error:    () => { truck_done = true; try_render(); },
+        });
+
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: { doctype: 'Sales Order', fields, filters: unassigned_filters,
+                    order_by: 'transaction_date desc', limit_page_length: 500 },
+            callback: r => { unassigned_rows = r.message || []; unassigned_done = true; try_render(); },
+            error:    () => { unassigned_done = true; try_render(); },
         });
 
         frappe.call({
