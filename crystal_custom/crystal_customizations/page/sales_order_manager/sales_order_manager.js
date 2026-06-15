@@ -78,7 +78,7 @@ class SalesOrderManager {
 				fields: [
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
-					'workflow_state', 'custom_on_hold',
+					'workflow_state', 'custom_on_hold', 'custom_finance_rejection_note',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -214,7 +214,8 @@ class SalesOrderManager {
 						${held
 							? '<span class="som-badge som-badge-held">On Hold</span>'
 							: rejected
-								? '<span class="som-badge som-badge-rejected">Finance Rejected</span>'
+								? `<span class="som-badge som-badge-rejected">Finance Rejected</span>
+								   <div class="som-rejection-preview">${frappe.utils.escape_html((o.custom_finance_rejection_note || '').slice(0, 80))}${(o.custom_finance_rejection_note || '').length > 80 ? '…' : ''}</div>`
 								: '<span class="som-badge som-badge-ready">Ready</span>'}
 					</td>
 					<td class="som-th-act">
@@ -526,6 +527,14 @@ class SalesOrderManager {
 				const updated = result.updated || [];
 				const skipped = result.skipped || [];
 
+				if (updated.length) {
+					// Notify finance users of the new pending orders
+					frappe.call({
+						method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.notify_finance_of_new_orders',
+						args: { order_names: JSON.stringify(updated) },
+					});
+				}
+
 				if (skipped.length) {
 					frappe.msgprint({
 						title: __('Some orders skipped'),
@@ -796,6 +805,13 @@ class SalesOrderManager {
 			padding: 10px 0 2px;
 			border-top: 1px solid #e2e8f0;
 			margin-top: 8px;
+		}
+		.som-rejection-preview {
+			font-size: 11px;
+			color: #991b1b;
+			font-style: italic;
+			margin-top: 3px;
+			line-height: 1.4;
 		}
 		.som-rejection-alert {
 			background: #fff5f5;
