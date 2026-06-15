@@ -514,11 +514,14 @@ class TruckAssignmentManager {
 				<div class="ta-truck-head" style="background:#475569;">
 					<div>
 						<div class="ta-truck-num">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</div>
-						${ct.driver_name ? `<div class="ta-truck-driver">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
+						${ct.driver_name ? `<div class="ta-truck-driver" style="color:#cbd5e1;">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
 					</div>
-					<div style="text-align:right;font-size:11px;color:#94a3b8;">
-						<div>Dispatched</div>
-						<div style="color:#cbd5e1;font-weight:600;">${frappe.utils.escape_html(closed_label)}</div>
+					<div style="text-align:right;">
+						<div style="font-size:11px;color:#94a3b8;">Dispatched ${frappe.utils.escape_html(closed_label)}</div>
+						<div style="margin-top:6px;display:flex;gap:4px;justify-content:flex-end;">
+							<button class="btn btn-xs btn-default btn-edit-closed-truck" data-idx="${idx}" title="Edit driver / capacity">&#9998;</button>
+							<button class="btn btn-xs btn-primary btn-reopen-truck" data-idx="${idx}">Reopen</button>
+						</div>
 					</div>
 				</div>
 
@@ -676,6 +679,14 @@ class TruckAssignmentManager {
 			const ct = self.closed_trucks[idx] || {};
 			const n  = (ct.orders || []).length;
 			$(this).html(`${open ? '&#9658;' : '&#9660;'} View ${n} order${n !== 1 ? 's' : ''}`);
+		});
+
+		this.container.find('.btn-reopen-truck').off('click').on('click', function () {
+			self.reopen_truck(parseInt($(this).data('idx'), 10));
+		});
+
+		this.container.find('.btn-edit-closed-truck').off('click').on('click', function () {
+			self.edit_closed_truck(parseInt($(this).data('idx'), 10));
 		});
 	}
 
@@ -874,6 +885,71 @@ class TruckAssignmentManager {
 		next();
 	}
 
+
+	reopen_truck(idx) {
+		const ct = this.closed_trucks[idx];
+		if (!ct) return;
+
+		frappe.confirm(
+			__('Reopen truck {0}? All {1} orders will be restored to active.', [ct.truck_number, ct.order_count]),
+			() => {
+				const orders = ct.orders || [];
+				let done = 0;
+				const next = () => {
+					if (done >= orders.length) {
+						// Remove from closed history and persist
+						this.closed_trucks.splice(idx, 1);
+						frappe.call({
+							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
+							args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
+						});
+
+						// Restore to active truck list and persist meta
+						if (!this.available_trucks.find(t => t.truck_number === ct.truck_number)) {
+							this.available_trucks.push({
+								truck_number: ct.truck_number,
+								driver_name:  ct.driver_name  || '',
+								capacity_kg:  ct.capacity_kg  || 5000,
+							});
+							this._save_truck_meta();
+						}
+
+						frappe.show_alert({ message: __('Truck {0} reopened', [ct.truck_number]), indicator: 'green' });
+						this.load_data();
+						return;
+					}
+					frappe.call({
+						method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_closed',
+						args: { order_name: orders[done].name, value: 0 },
+						callback: () => { done++; next(); },
+						error:    () => { done++; next(); },
+					});
+				};
+				next();
+			}
+		);
+	}
+
+	edit_closed_truck(idx) {
+		const ct = this.closed_trucks[idx];
+		if (!ct) return;
+
+		frappe.prompt([
+			{ label: 'Driver Name',   fieldname: 'driver_name', fieldtype: 'Data',  default: ct.driver_name || '' },
+			{ label: 'Capacity (kg)', fieldname: 'capacity_kg', fieldtype: 'Float', default: ct.capacity_kg  || 5000 },
+		], (vals) => {
+			ct.driver_name = vals.driver_name;
+			ct.capacity_kg = vals.capacity_kg;
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
+				args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
+				callback: () => {
+					frappe.show_alert({ message: __('Truck {0} updated', [ct.truck_number]), indicator: 'green' });
+					this.render_view();
+				},
+			});
+		}, __('Edit Truck {0}', [ct.truck_number]), __('Save'));
+	}
 
 	download_manifest(truck_number) {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
