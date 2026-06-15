@@ -15,6 +15,7 @@ class TruckAssignmentManager {
 		this.current_page = 1;
 		this.page_size = 50;
 		this.search_term = '';
+		this.selected_orders = new Set();
 		this.setup_page();
 		this.load_trucks_from_orders();
 	}
@@ -105,6 +106,7 @@ class TruckAssignmentManager {
 	}
 
 	load_data() {
+		this.selected_orders.clear();
 		this.container.html(this._loading_html());
 		const from = this.page.fields_dict.from_date.get_value();
 		const to   = this.page.fields_dict.to_date.get_value();
@@ -249,14 +251,14 @@ class TruckAssignmentManager {
 
 		const total_pages = Math.ceil(all_orders.length / this.page_size) || 1;
 		if (this.current_page > total_pages) this.current_page = total_pages;
-		const orders = all_orders.slice(
+		const page_orders = all_orders.slice(
 			(this.current_page - 1) * this.page_size,
 			this.current_page * this.page_size
 		);
 
 		// Group by delivery region, sorted A-Z, unspecified last
 		const groups = {};
-		orders.forEach(o => {
+		page_orders.forEach(o => {
 			const key = o.custom_delivery_region || '__none__';
 			if (!groups[key]) groups[key] = [];
 			groups[key].push(o);
@@ -271,29 +273,53 @@ class TruckAssignmentManager {
 			`<option value="${frappe.utils.escape_html(t.truck_number)}">`
 		).join('');
 
+		// Count selected orders visible in the full filtered list (all pages)
+		const sel_count   = all_orders.filter(o => this.selected_orders.has(o.name)).length;
+		const all_checked = all_orders.length > 0 && sel_count === all_orders.length;
+
 		let html = `
 		<datalist id="ta-trucks-list">${truck_opts}</datalist>
+
+		<div class="ta-bulk-bar">
+			<label class="ta-bulk-select-label">
+				<input type="checkbox" class="ta-select-all-chk" ${all_checked ? 'checked' : ''}>
+				Select all
+			</label>
+			<span class="ta-bulk-sep"></span>
+			<span class="ta-bulk-count">${sel_count} of ${all_orders.length} selected</span>
+			<div class="ta-bulk-actions">
+				<input type="text" class="ta-bulk-truck-input form-control form-control-sm"
+				       list="ta-trucks-list" placeholder="Assign to truck…"
+				       ${!sel_count ? 'disabled' : ''}>
+				<button class="btn btn-sm btn-primary ta-bulk-assign-btn" ${!sel_count ? 'disabled' : ''}>
+					Assign
+				</button>
+				${sel_count ? `<button class="btn btn-sm btn-default ta-bulk-clear-btn">Clear</button>` : ''}
+			</div>
+		</div>
+
 		<div class="ta-table-wrap">
 		<table class="table table-bordered ta-table">
 			<thead><tr>
-				<th width="12%">Sales Order</th>
-				<th width="15%">Customer</th>
-				<th width="12%">Location</th>
-				<th width="9%">Region</th>
+				<th width="3%"></th>
+				<th width="11%">Sales Order</th>
+				<th width="14%">Customer</th>
+				<th width="11%">Location</th>
+				<th width="8%">Region</th>
 				<th width="8%">Value</th>
-				<th width="7%">Weight</th>
-				<th width="10%">Status</th>
-				<th width="14%">Assign Truck</th>
+				<th width="6%">Weight</th>
+				<th width="9%">Status</th>
+				<th width="13%">Assign Truck</th>
 			</tr></thead>
 			<tbody>`;
 
 		sorted_keys.forEach(key => {
-			const label  = key === '__none__' ? 'No Region' : key;
-			const grp    = groups[key];
+			const label   = key === '__none__' ? 'No Region' : key;
+			const grp     = groups[key];
 			const grp_val = grp.reduce((s, o) => s + (o.grand_total || 0), 0);
 
 			html += `<tr class="ta-group-row">
-				<td colspan="8">
+				<td colspan="9">
 					<strong>${label}</strong>
 					<span class="ta-group-meta">${grp.length} order${grp.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${format_currency(grp_val)}</span>
 				</td>
@@ -301,8 +327,12 @@ class TruckAssignmentManager {
 
 			grp.forEach(o => {
 				const not_picked = o.custom_call_not_picked === 1;
+				const checked    = this.selected_orders.has(o.name);
 				html += `
-				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}" data-order="${o.name}">
+				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${checked ? ' ta-row-selected' : ''}" data-order="${o.name}">
+					<td class="ta-td-chk">
+						<input type="checkbox" class="ta-order-chk" data-order="${o.name}" ${checked ? 'checked' : ''}>
+					</td>
 					<td>
 						<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
 						${not_picked ? '<span class="ta-warn-badge" title="Call not picked">!</span>' : ''}
@@ -424,6 +454,71 @@ class TruckAssignmentManager {
 	_attach_events() {
 		const self = this;
 
+		// ── Bulk selection ────────────────────────────────────────────────────────
+
+		// Select all (across all pages of filtered unassigned orders)
+		this.container.find('.ta-select-all-chk').on('change', function () {
+			const checked    = $(this).is(':checked');
+			const unassigned = self.get_filtered_orders().filter(o => !o.custom_truck_number);
+			unassigned.forEach(o => checked ? self.selected_orders.add(o.name) : self.selected_orders.delete(o.name));
+			self.render_view();
+		});
+
+		// Individual row checkbox — update in place, no full re-render
+		this.container.find('.ta-order-chk').on('change', function () {
+			const name    = $(this).data('order');
+			const checked = $(this).is(':checked');
+			checked ? self.selected_orders.add(name) : self.selected_orders.delete(name);
+
+			$(this).closest('tr').toggleClass('ta-row-selected', checked);
+
+			// Update count label and button state
+			const unassigned  = self.get_filtered_orders().filter(o => !o.custom_truck_number);
+			const sel_count   = unassigned.filter(o => self.selected_orders.has(o.name)).length;
+			const all_checked = sel_count === unassigned.length && unassigned.length > 0;
+
+			self.container.find('.ta-select-all-chk').prop('checked', all_checked);
+			self.container.find('.ta-bulk-count').text(`${sel_count} of ${unassigned.length} selected`);
+			self.container.find('.ta-bulk-assign-btn').prop('disabled', sel_count === 0);
+			self.container.find('.ta-bulk-truck-input').prop('disabled', sel_count === 0);
+
+			// Show/hide Clear button
+			if (sel_count > 0 && !self.container.find('.ta-bulk-clear-btn').length) {
+				self.container.find('.ta-bulk-assign-btn').after(
+					'<button class="btn btn-sm btn-default ta-bulk-clear-btn" style="margin-left:6px">Clear</button>'
+				);
+				self.container.find('.ta-bulk-clear-btn').on('click', () => {
+					self.selected_orders.clear();
+					self.render_view();
+				});
+			} else if (sel_count === 0) {
+				self.container.find('.ta-bulk-clear-btn').remove();
+			}
+		});
+
+		// Bulk assign button
+		this.container.find('.ta-bulk-assign-btn').on('click', function () {
+			const truck_number = self.container.find('.ta-bulk-truck-input').val().trim();
+			if (!truck_number) {
+				frappe.msgprint(__('Enter a truck number to assign to.'));
+				return;
+			}
+			self._bulk_assign(truck_number);
+		});
+
+		// Bulk truck input: also trigger assign on Enter
+		this.container.find('.ta-bulk-truck-input').on('keydown', function (e) {
+			if (e.key === 'Enter') self.container.find('.ta-bulk-assign-btn').trigger('click');
+		});
+
+		// Clear button (rendered when sel_count > 0 at render time)
+		this.container.find('.ta-bulk-clear-btn').on('click', function () {
+			self.selected_orders.clear();
+			self.render_view();
+		});
+
+		// ── Per-row truck assignment ───────────────────────────────────────────────
+
 		// Truck assignment via text input (on change / blur)
 		this.container.find('.ta-truck-input').off('change').on('change', function () {
 			const order_name   = $(this).data('order');
@@ -472,6 +567,36 @@ class TruckAssignmentManager {
 		this.container.find('.btn-dl-manifest').off('click').on('click', function () {
 			self.download_manifest($(this).data('truck'));
 		});
+	}
+
+	// ── Bulk assignment ───────────────────────────────────────────────────────
+
+	_bulk_assign(truck_number) {
+		const unassigned = this.get_filtered_orders().filter(o => !o.custom_truck_number);
+		const to_assign  = unassigned.filter(o => this.selected_orders.has(o.name));
+
+		if (!to_assign.length) {
+			frappe.msgprint(__('No selected orders to assign.'));
+			return;
+		}
+
+		if (!this.available_trucks.find(t => t.truck_number === truck_number)) {
+			this.available_trucks.push({ truck_number, driver_name: '', capacity_kg: 5000 });
+		}
+
+		frappe.confirm(
+			__('Assign {0} order(s) to truck {1}?', [to_assign.length, truck_number]),
+			() => {
+				this._set_truck_batch(to_assign, truck_number, () => {
+					this.selected_orders.clear();
+					frappe.show_alert({
+						message: __('✓ {0} orders assigned to {1}', [to_assign.length, truck_number]),
+						indicator: 'green',
+					});
+					this.load_data();
+				});
+			}
+		);
 	}
 
 	// ── Backend calls ─────────────────────────────────────────────────────────
@@ -738,6 +863,37 @@ ${driver_cols}
 			font-size: 12px;
 			font-weight: 600;
 		}
+
+		/* Bulk assignment bar */
+		.ta-bulk-bar {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			padding: 10px 14px;
+			background: #f8fafc;
+			border: 1px solid #e2e8f0;
+			border-radius: 6px;
+			margin-bottom: 10px;
+			flex-wrap: wrap;
+		}
+		.ta-bulk-select-label {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			font-weight: 600;
+			font-size: 13px;
+			color: #374151;
+			cursor: pointer;
+			margin: 0;
+			white-space: nowrap;
+		}
+		.ta-bulk-select-label input { width:15px; height:15px; accent-color:#667eea; cursor:pointer; }
+		.ta-bulk-sep { flex: 1; }
+		.ta-bulk-count { font-size: 13px; color: #6b7280; white-space: nowrap; }
+		.ta-bulk-actions { display: flex; align-items: center; gap: 6px; }
+		.ta-bulk-truck-input { width: 160px !important; height: 30px !important; font-size: 12px !important; }
+		.ta-td-chk { width: 36px; text-align: center; }
+		.ta-row-selected td { background: #eff6ff !important; }
 
 		/* Awaiting table */
 		.ta-table-wrap { overflow-x: auto; }
