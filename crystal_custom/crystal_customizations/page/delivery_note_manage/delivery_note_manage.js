@@ -173,33 +173,41 @@ class DeliveryNoteManager {
         const sp_orders = this.page.fields_dict.sales_person.get_value();
         const fields = ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
                         'custom_delivery_region', 'custom_phone_number', 'delivery_date',
-                        'per_delivered', 'status', 'custom_truck_number', 'total_net_weight',
-                        'custom_truck_closed'];
+                        'per_delivered', 'status', 'workflow_state', 'docstatus',
+                        'custom_truck_number', 'total_net_weight', 'custom_truck_closed'];
 
-        const base_filters = [
+        const submitted_base = [
             ['Sales Order', 'docstatus', '=', 1],
             ['Sales Order', 'per_delivered', '<', 100],
             ['Sales Order', 'status', '!=', 'Closed'],
         ];
-        if (sp_orders) base_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
+        if (sp_orders) submitted_base.push(['Sales Team', 'sales_person', '=', sp_orders]);
 
-        // Truck-assigned orders (active + closed): always load regardless of date
+        // Submitted truck-assigned orders: no date filter so they always appear
         const truck_filters = [
-            ...base_filters,
+            ...submitted_base,
             ['Sales Order', 'custom_truck_number', '!=', ''],
         ];
 
-        // Unassigned orders: respect the date filter
+        // Submitted unassigned orders: respect the date filter (for table view)
         const unassigned_filters = [
-            ...base_filters,
+            ...submitted_base,
             ['Sales Order', 'transaction_date', 'between', [from_date, to_date]],
         ];
 
-        let truck_rows = [], unassigned_rows = [], raw_meta = [], raw_closed = [];
-        let truck_done = false, unassigned_done = false, meta_done = false, closed_done = false;
+        // Draft (pending) truck-assigned orders: show in truck view as "Pending"
+        const draft_truck_filters = [
+            ['Sales Order', 'docstatus', '=', 0],
+            ['Sales Order', 'custom_truck_number', '!=', ''],
+            ['Sales Order', 'custom_truck_closed', '!=', 1],
+        ];
+        if (sp_orders) draft_truck_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
+
+        let truck_rows = [], unassigned_rows = [], draft_truck_rows = [], raw_meta = [], raw_closed = [];
+        let truck_done = false, unassigned_done = false, draft_done = false, meta_done = false, closed_done = false;
 
         const try_render = () => {
-            if (!truck_done || !unassigned_done || !meta_done || !closed_done) return;
+            if (!truck_done || !unassigned_done || !draft_done || !meta_done || !closed_done) return;
 
             // Build truck_meta: active trucks first, then fill in closed truck meta
             this.truck_meta = {};
@@ -210,8 +218,12 @@ class DeliveryNoteManager {
                 }
             });
 
+            // Merge: submitted truck + submitted unassigned + draft truck (deduplicate by name)
             const seen = new Set(truck_rows.map(o => o.name));
-            this.orders = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
+            const unassigned_new = unassigned_rows.filter(o => !seen.has(o.name));
+            unassigned_new.forEach(o => seen.add(o.name));
+            const draft_new = draft_truck_rows.filter(o => !seen.has(o.name));
+            this.orders = [...truck_rows, ...unassigned_new, ...draft_new];
             this.render_pending_orders();
         };
 
@@ -229,6 +241,14 @@ class DeliveryNoteManager {
                     order_by: 'transaction_date desc', limit_page_length: 500 },
             callback: r => { unassigned_rows = r.message || []; unassigned_done = true; try_render(); },
             error:    () => { unassigned_done = true; try_render(); },
+        });
+
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: { doctype: 'Sales Order', fields, filters: draft_truck_filters,
+                    order_by: 'transaction_date desc', limit_page_length: 500 },
+            callback: r => { draft_truck_rows = r.message || []; draft_done = true; try_render(); },
+            error:    () => { draft_done = true; try_render(); },
         });
 
         frappe.call({
@@ -631,18 +651,21 @@ class DeliveryNoteManager {
             const order_rows = t_orders.map(o => {
                 const delivery_date = o.delivery_date || o.transaction_date;
                 const is_overdue    = delivery_date && frappe.datetime.get_diff(frappe.datetime.get_today(), delivery_date) > 0;
-                return `<div class="dm-tc-order">
+                const is_draft      = o.docstatus === 0;
+                const state_label   = o.workflow_state || (is_draft ? 'Draft' : '');
+                return `<div class="dm-tc-order${is_draft ? ' dm-tc-order-draft' : ''}">
                     <div class="dm-tc-order-main">
                         <a href="/app/sales-order/${o.name}" target="_blank" class="order-link">${frappe.utils.escape_html(o.name)}</a>
                         <span class="dm-tc-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
                         ${o.custom_delivery_region ? `<span class="region-tag" style="font-size:10px;">${frappe.utils.escape_html(o.custom_delivery_region)}</span>` : ''}
                     </div>
                     <div class="dm-tc-order-right">
-                        <span class="amount-badge" style="font-size:11px;">${format_currency(o.grand_total, null, 0)}</span>
+                        ${o.grand_total ? `<span class="amount-badge" style="font-size:11px;">${format_currency(o.grand_total, null, 0)}</span>` : ''}
                         ${is_overdue ? '<span class="overdue-badge">OVERDUE</span>' : ''}
-                        <button class="btn btn-xs btn-primary btn-create-dn" data-order="${o.name}" style="margin-left:6px;">
-                            Create DN
-                        </button>
+                        ${is_draft
+                            ? `<span class="dm-tc-pending-badge" title="${frappe.utils.escape_html(state_label)}">Pending</span>`
+                            : `<button class="btn btn-xs btn-primary btn-create-dn" data-order="${o.name}" style="margin-left:6px;">Create DN</button>`
+                        }
                     </div>
                 </div>`;
             }).join('');
@@ -742,6 +765,8 @@ class DeliveryNoteManager {
             .dm-tc-order-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
             .dm-tc-cust { font-size: 11px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
             .dm-tc-order-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+            .dm-tc-order-draft { background: #fffbeb; border-left: 3px solid #f59e0b; padding-left: 6px; }
+            .dm-tc-pending-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; border-radius: 10px; white-space: nowrap; }
             .dm-tv-unassigned { margin-top: 16px; padding: 10px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; color: #6b7280; }
             .dm-view-toggle { display: flex; gap: 6px; margin-bottom: 16px; }
             .dm-view-btn { background: #fff; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 16px; font-size: 13px; font-weight: 600; color: #374151; cursor: pointer; }
