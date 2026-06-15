@@ -140,72 +140,98 @@ class TruckAssignmentManager {
 		const to   = this.page.fields_dict.to_date.get_value();
 		const sp   = this.page.fields_dict.sales_person.get_value();
 
-		const filters = [
+		const fields = [
+			'name', 'customer', 'customer_name', 'transaction_date',
+			'grand_total', 'custom_delivery_region', 'owner', 'custom_truck_number',
+			'total_net_weight', 'custom_call_not_picked', 'custom_call_notes',
+			'workflow_state', 'docstatus',
+		];
+
+		const base_filters = [
 			['Sales Order', 'docstatus', 'in', [0, 1]],
 			['Sales Order', 'workflow_state', 'in', ['Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed']],
 			['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
 			['Sales Order', 'custom_truck_closed', '!=', 1],
 		];
-		if (from && to) filters.push(['Sales Order', 'transaction_date', 'between', [from, to]]);
-		else if (from)  filters.push(['Sales Order', 'transaction_date', '>=', from]);
-		else if (to)    filters.push(['Sales Order', 'transaction_date', '<=', to]);
-		if (sp)         filters.push(['Sales Team', 'sales_person', '=', sp]);
+		if (sp) base_filters.push(['Sales Team', 'sales_person', '=', sp]);
+
+		// Truck-assigned orders: ignore date filter so they always remain visible
+		const truck_filters = [
+			...base_filters,
+			['Sales Order', 'custom_truck_number', '!=', ''],
+		];
+
+		// Unassigned orders: respect the date filter
+		const unassigned_filters = [...base_filters];
+		if (from && to) unassigned_filters.push(['Sales Order', 'transaction_date', 'between', [from, to]]);
+		else if (from)  unassigned_filters.push(['Sales Order', 'transaction_date', '>=', from]);
+		else if (to)    unassigned_filters.push(['Sales Order', 'transaction_date', '<=', to]);
+
+		let truck_rows = [], unassigned_rows = [];
+		let truck_done = false, unassigned_done = false;
+
+		const on_both_done = () => {
+			if (!truck_done || !unassigned_done) return;
+
+			// Merge: truck-assigned always win; add unassigned that aren't already present
+			const seen = new Set(truck_rows.map(o => o.name));
+			const merged = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
+
+			// Exclude Order Confirmed orders with no truck (they're done being planned)
+			this.orders = merged.filter(o =>
+				o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
+			);
+
+			// Seed any newly-seen truck numbers, restoring saved metadata
+			this.orders.forEach(o => {
+				if (o.custom_truck_number && !this.available_trucks.find(t => t.truck_number === o.custom_truck_number)) {
+					const m = this.saved_meta[o.custom_truck_number] || {};
+					this.available_trucks.push({
+						truck_number: o.custom_truck_number,
+						driver_name:  m.driver_name  || '',
+						capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
+					});
+				}
+			});
+
+			// Fetch customer locations then render
+			const customers = [...new Set(this.orders.map(o => o.customer).filter(Boolean))];
+			if (!customers.length) {
+				this.current_page = 1;
+				this.render_view();
+				return;
+			}
+			frappe.call({
+				method: 'frappe.client.get_list',
+				args: {
+					doctype: 'Customer',
+					fields: ['name', 'custom_location'],
+					filters: [['name', 'in', customers]],
+					limit_page_length: customers.length,
+				},
+				callback: (rc) => {
+					const loc_map = {};
+					(rc.message || []).forEach(c => { loc_map[c.name] = c.custom_location || ''; });
+					this.orders.forEach(o => { o.custom_location = loc_map[o.customer] || ''; });
+					this.current_page = 1;
+					this.render_view();
+				},
+				error: () => { this.current_page = 1; this.render_view(); },
+			});
+		};
 
 		frappe.call({
 			method: 'frappe.client.get_list',
-			args: {
-				doctype: 'Sales Order',
-				fields: [
-					'name', 'customer', 'customer_name', 'transaction_date',
-					'grand_total', 'custom_delivery_region', 'owner', 'custom_truck_number',
-					'total_net_weight', 'custom_call_not_picked', 'custom_call_notes',
-					'workflow_state', 'docstatus',
-				],
-				filters,
-				limit_page_length: 500,
-			},
-			callback: (r) => {
-				// Exclude "Order Confirmed" orders that have no truck — they're done being planned
-				this.orders = (r.message || []).filter(o =>
-					o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
-				);
-				// Seed any newly-seen truck numbers, restoring saved metadata
-				this.orders.forEach(o => {
-					if (o.custom_truck_number && !this.available_trucks.find(t => t.truck_number === o.custom_truck_number)) {
-						const m = this.saved_meta[o.custom_truck_number] || {};
-						this.available_trucks.push({
-							truck_number: o.custom_truck_number,
-							driver_name:  m.driver_name  || '',
-							capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
-						});
-					}
-				});
+			args: { doctype: 'Sales Order', fields, filters: truck_filters, limit_page_length: 500 },
+			callback: r => { truck_rows = r.message || []; truck_done = true; on_both_done(); },
+			error:    () => { truck_done = true; on_both_done(); },
+		});
 
-				// Fetch customer locations then render
-				const customers = [...new Set(this.orders.map(o => o.customer).filter(Boolean))];
-				if (!customers.length) {
-					this.current_page = 1;
-					this.render_view();
-					return;
-				}
-				frappe.call({
-					method: 'frappe.client.get_list',
-					args: {
-						doctype: 'Customer',
-						fields: ['name', 'custom_location'],
-						filters: [['name', 'in', customers]],
-						limit_page_length: customers.length,
-					},
-					callback: (rc) => {
-						const loc_map = {};
-						(rc.message || []).forEach(c => { loc_map[c.name] = c.custom_location || ''; });
-						this.orders.forEach(o => { o.custom_location = loc_map[o.customer] || ''; });
-						this.current_page = 1;
-						this.render_view();
-					},
-					error: () => { this.current_page = 1; this.render_view(); },
-				});
-			},
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: { doctype: 'Sales Order', fields, filters: unassigned_filters, limit_page_length: 500 },
+			callback: r => { unassigned_rows = r.message || []; unassigned_done = true; on_both_done(); },
+			error:    () => { unassigned_done = true; on_both_done(); },
 		});
 	}
 
