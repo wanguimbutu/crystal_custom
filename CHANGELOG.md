@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.3.0...v1.4.0) (2026-06-15)
+
+
+### Features
+
+* show pending (draft) truck orders in DN Manager truck view ([59d0011](https://github.com/wanguimbutu/crystal_custom/commit/59d00119429ee37676deb55bd30fcf77083aeaf9))
+
 # [1.3.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.2.2...v1.3.0) (2026-06-15)
 
 
