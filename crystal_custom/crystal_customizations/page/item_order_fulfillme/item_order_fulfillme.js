@@ -13,6 +13,7 @@ class OrderFulfillmentManager {
 		this.active_tab  = 'trucks';
 		this.summary_data  = [];
 		this.truck_data    = { trucks: [], stock: {} };
+		this.customer_data = { trucks: [], stock: {} };
 		this.allocations   = {};   // { item_code: { truck_number: qty } }
 		this.closed_trucks = [];
 		this.search_term   = '';
@@ -66,6 +67,8 @@ class OrderFulfillmentManager {
 				this.search_term = this.page.fields_dict.search_query.get_value() || '';
 				if (this.active_tab === 'trucks') {
 					this.container.find('#tf-trucks-pane').html(this._render_trucks_tab());
+				} else if (this.active_tab === 'customers') {
+					this.container.find('#tf-customers-pane').html(this._render_customers_tab());
 				} else {
 					this.container.find('#tf-summary-pane').html(this._render_summary_tab());
 				}
@@ -112,6 +115,12 @@ class OrderFulfillmentManager {
 				},
 				error: () => { this.closed_trucks = []; resolve(); },
 			})),
+			new Promise(resolve => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_truck_customer_data',
+				args: { from_date, to_date },
+				callback: r => { this.customer_data = r.message || { trucks: [], stock: {} }; resolve(); },
+				error: () => resolve(),
+			})),
 		]).then(() => {
 			// Detect stock changes and notify
 			const changed = Object.keys(this.truck_data.stock).filter(ic => {
@@ -135,22 +144,31 @@ class OrderFulfillmentManager {
 		const trucks_badge = this.truck_data.trucks.length;
 		const items_badge  = this.summary_data.length;
 
+		const cust_badge = this.customer_data.trucks.reduce((s, t) => s + t.orders.length, 0);
+
 		let html = `${this._styles()}
 		<div class="tf-tabs">
-			<button class="tf-tab-btn ${this.active_tab === 'trucks'  ? 'active' : ''}" data-tab="trucks">
+			<button class="tf-tab-btn ${this.active_tab === 'trucks'   ? 'active' : ''}" data-tab="trucks">
 				Truck Fulfillment
 				${trucks_badge ? `<span class="tf-tab-badge">${trucks_badge}</span>` : ''}
 			</button>
-			<button class="tf-tab-btn ${this.active_tab === 'summary' ? 'active' : ''}" data-tab="summary">
+			<button class="tf-tab-btn ${this.active_tab === 'customers' ? 'active' : ''}" data-tab="customers">
+				Customer View
+				${cust_badge ? `<span class="tf-tab-badge">${cust_badge}</span>` : ''}
+			</button>
+			<button class="tf-tab-btn ${this.active_tab === 'summary'  ? 'active' : ''}" data-tab="summary">
 				Item Summary
 				${items_badge ? `<span class="tf-tab-badge">${items_badge}</span>` : ''}
 			</button>
 		</div>
 		<div class="tf-tab-content">
-			<div class="tf-tab-pane ${this.active_tab === 'trucks'  ? 'active' : ''}" id="tf-trucks-pane">
+			<div class="tf-tab-pane ${this.active_tab === 'trucks'    ? 'active' : ''}" id="tf-trucks-pane">
 				${this._render_trucks_tab()}
 			</div>
-			<div class="tf-tab-pane ${this.active_tab === 'summary' ? 'active' : ''}" id="tf-summary-pane">
+			<div class="tf-tab-pane ${this.active_tab === 'customers' ? 'active' : ''}" id="tf-customers-pane">
+				${this._render_customers_tab()}
+			</div>
+			<div class="tf-tab-pane ${this.active_tab === 'summary'   ? 'active' : ''}" id="tf-summary-pane">
 				${this._render_summary_tab()}
 			</div>
 		</div>`;
@@ -499,6 +517,147 @@ class OrderFulfillmentManager {
 		a.click();
 		document.body.removeChild(a);
 		frappe.show_alert({ message: __('Downloaded report for dispatched truck {0}', [ct.truck_number]), indicator: 'green' });
+	}
+
+	// ── Customer View Tab ─────────────────────────────────────────────────────
+
+	_render_customers_tab() {
+		let trucks = this.customer_data.trucks || [];
+		const stock = this.customer_data.stock || {};
+
+		if (this.search_term) {
+			const q = this.search_term.toLowerCase();
+			trucks = trucks.map(t => ({
+				...t,
+				orders: t.orders.filter(o =>
+					(o.name          || '').toLowerCase().includes(q) ||
+					(o.customer_name || '').toLowerCase().includes(q) ||
+					(o.customer      || '').toLowerCase().includes(q) ||
+					(o.items || []).some(i =>
+						(i.item_code || '').toLowerCase().includes(q) ||
+						(i.item_name || '').toLowerCase().includes(q)
+					)
+				),
+			})).filter(t => t.orders.length);
+		}
+
+		if (!trucks.length) {
+			return `<div class="alert alert-info" style="margin-top:20px;">
+				<strong>${this.search_term ? 'No customers match your search.' : 'No truck-assigned orders at Pending Confirmation.'}</strong>
+			</div>`;
+		}
+
+		const total_orders = trucks.reduce((s, t) => s + t.orders.length, 0);
+		let html = `
+		<div class="tf-kpi-row">
+			${this._kpi('Trucks', trucks.length, '#8b5cf6')}
+			${this._kpi('Customers', total_orders, '#667eea')}
+		</div>`;
+
+		trucks.forEach(truck => {
+			// Compute truck-level allocation for each item from this.allocations
+			const tn = truck.truck_number;
+
+			html += `
+			<div class="tf-section tf-cv-truck-section">
+				<div class="tf-section-header tf-cv-truck-header">
+					<span>&#128666; ${frappe.utils.escape_html(tn)}</span>
+					<span class="tf-cv-truck-sub">${truck.orders.length} customer${truck.orders.length !== 1 ? 's' : ''}</span>
+				</div>
+				<div class="tf-cv-customers">`;
+
+			truck.orders.forEach(order => {
+				const order_total_wt = order.items.reduce((s, i) => s + (i.required_qty * 0), 0); // weight not in data
+				const sid = this._sid(order.name);
+
+				const item_rows = order.items.map(item => {
+					const ic           = item.item_code;
+					const truck_alloc  = (this.allocations[ic] || {})[tn] || 0;
+					const in_stock     = stock[ic] || 0;
+					// Within this truck, how much does this order need vs truck allocation
+					const covered      = Math.min(item.required_qty, truck_alloc);
+					const short        = Math.max(0, item.required_qty - truck_alloc);
+					const stock_short  = Math.max(0, item.required_qty - in_stock);
+					const pct_covered  = truck_alloc > 0
+						? Math.min(100, Math.round((covered / item.required_qty) * 100))
+						: 0;
+
+					return `<tr>
+						<td><strong>${frappe.utils.escape_html(ic)}</strong></td>
+						<td class="tf-item-name">${frappe.utils.escape_html(item.item_name)}</td>
+						<td class="tf-r">${item.required_qty.toFixed(2)} ${item.uom}</td>
+						<td class="tf-r ${stock_short > 0 ? 'tf-warn' : 'tf-ok'}">${in_stock.toFixed(2)}</td>
+						<td class="tf-r">${truck_alloc.toFixed(2)}</td>
+						<td class="tf-r ${short > 0 ? 'tf-short' : 'tf-ok'}">
+							${short > 0 ? `<strong>${short.toFixed(2)}</strong>` : '—'}
+						</td>
+						<td class="tf-r">
+							<div class="tf-cv-bar-wrap">
+								<div class="tf-cv-bar-fill" style="width:${pct_covered}%;background:${short > 0 ? '#f59e0b' : '#10b981'}"></div>
+							</div>
+							<span style="font-size:10px;color:#6b7280;">${pct_covered}%</span>
+						</td>
+					</tr>`;
+				}).join('');
+
+				const all_covered = order.items.every(i => {
+					const alloc = (this.allocations[i.item_code] || {})[tn] || 0;
+					return alloc >= i.required_qty;
+				});
+
+				html += `
+				<div class="tf-cv-customer-card">
+					<div class="tf-cv-cust-head">
+						<div>
+							<a href="/app/sales-order/${order.name}" target="_blank" class="tf-cv-order-link">
+								${frappe.utils.escape_html(order.name)}
+							</a>
+							<span class="tf-cv-cust-name">${frappe.utils.escape_html(order.customer_name)}</span>
+						</div>
+						<div style="display:flex;align-items:center;gap:10px;">
+							<span class="tf-cv-total">${format_currency(order.grand_total, null, 0)}</span>
+							<span class="tf-status-badge" style="background:${all_covered ? '#10b981' : '#f59e0b'};font-size:10px;">
+								${all_covered ? 'Covered' : 'Partial / Short'}
+							</span>
+						</div>
+					</div>
+					<table class="tf-card-table tf-cv-table">
+						<thead><tr>
+							<th>Item</th><th>Description</th>
+							<th class="tf-r">Required</th>
+							<th class="tf-r">In Stock</th>
+							<th class="tf-r">Truck Alloc.</th>
+							<th class="tf-r">Short</th>
+							<th class="tf-r">Coverage</th>
+						</tr></thead>
+						<tbody>${item_rows}</tbody>
+					</table>
+				</div>`;
+			});
+
+			html += `</div></div>`;
+		});
+
+		html += `<style>
+			.tf-cv-truck-section { margin-bottom: 24px; }
+			.tf-cv-truck-header { justify-content: space-between; }
+			.tf-cv-truck-sub { font-size: 12px; font-weight: 400; color: #6b7280; }
+			.tf-cv-customers { display: flex; flex-direction: column; gap: 14px; }
+			.tf-cv-customer-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+			.tf-cv-cust-head {
+				display: flex; justify-content: space-between; align-items: center;
+				padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0;
+			}
+			.tf-cv-order-link { font-weight: 700; color: #667eea; text-decoration: none; font-size: 13px; }
+			.tf-cv-order-link:hover { color: #764ba2; text-decoration: underline; }
+			.tf-cv-cust-name { display: block; font-size: 12px; color: #6b7280; margin-top: 2px; }
+			.tf-cv-total { font-weight: 600; color: #374151; font-size: 13px; }
+			.tf-cv-table { margin: 0 !important; }
+			.tf-cv-bar-wrap { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; min-width: 60px; margin-bottom: 2px; }
+			.tf-cv-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+		</style>`;
+
+		return html;
 	}
 
 	// ── Summary Tab (existing per-item view) ──────────────────────────────────

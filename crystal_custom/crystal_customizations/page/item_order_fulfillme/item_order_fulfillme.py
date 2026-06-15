@@ -195,6 +195,100 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
 
 
 @frappe.whitelist()
+def get_truck_customer_data(from_date=None, to_date=None):
+    """
+    Return per-order item breakdown grouped by truck.
+    Each truck has a list of orders; each order has its pending items.
+    Also returns stock levels for every unique item.
+    Used by the Customer View tab.
+    """
+    conditions = [
+        "so.docstatus = 0",
+        "so.workflow_state = 'Pending Customer Order Reconfirmation'",
+        "so.status NOT IN ('Completed', 'Closed')",
+        "so.custom_truck_number IS NOT NULL",
+        "so.custom_truck_number != ''",
+        "IFNULL(so.custom_truck_closed, 0) != 1",
+        "soi.qty > IFNULL(soi.delivered_qty, 0)",
+    ]
+    params = {}
+    if from_date:
+        conditions.append("so.transaction_date >= %(from_date)s")
+        params['from_date'] = from_date
+    if to_date:
+        conditions.append("so.transaction_date <= %(to_date)s")
+        params['to_date'] = to_date
+
+    where = " AND ".join(conditions)
+
+    rows = frappe.db.sql(f"""
+        SELECT
+            so.custom_truck_number                              AS truck_number,
+            so.name                                             AS sales_order,
+            so.customer,
+            so.customer_name,
+            so.grand_total,
+            so.total_net_weight,
+            soi.item_code,
+            soi.item_name,
+            SUM(soi.qty - IFNULL(soi.delivered_qty, 0))        AS required_qty,
+            soi.uom
+        FROM `tabSales Order` so
+        INNER JOIN `tabSales Order Item` soi ON soi.parent = so.name
+        WHERE {where}
+        GROUP BY so.custom_truck_number, so.name, soi.item_code
+        ORDER BY so.custom_truck_number, so.customer_name, so.name, soi.item_code
+    """, params, as_dict=1)
+
+    if not rows:
+        return {'trucks': [], 'stock': {}}
+
+    # Unique items for stock lookup
+    unique_items = list({r.item_code for r in rows})
+    item_ph = ', '.join(['%s'] * len(unique_items))
+    stock_rows = frappe.db.sql(
+        f"SELECT item_code, IFNULL(SUM(actual_qty), 0) AS available_qty "
+        f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
+        unique_items, as_dict=1,
+    )
+    stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
+
+    # Group truck → order → items
+    from collections import defaultdict, OrderedDict
+    trucks_map = OrderedDict()
+    for r in rows:
+        tn = r.truck_number
+        on = r.sales_order
+        if tn not in trucks_map:
+            trucks_map[tn] = OrderedDict()
+        if on not in trucks_map[tn]:
+            trucks_map[tn][on] = {
+                'name':            on,
+                'customer':        r.customer,
+                'customer_name':   r.customer_name or on,
+                'grand_total':     float(r.grand_total or 0),
+                'total_net_weight': float(r.total_net_weight or 0),
+                'items':           [],
+            }
+        trucks_map[tn][on]['items'].append({
+            'item_code':    r.item_code,
+            'item_name':    r.item_name,
+            'required_qty': float(r.required_qty),
+            'uom':          r.uom,
+        })
+
+    trucks = []
+    for tn, orders_dict in trucks_map.items():
+        trucks.append({
+            'truck_number': tn,
+            'orders':       list(orders_dict.values()),
+        })
+
+    stock = {ic: float(stock_map.get(ic, 0)) for ic in unique_items}
+    return {'trucks': trucks, 'stock': stock}
+
+
+@frappe.whitelist()
 def save_allocations(allocations_json):
     """Persist truck-item allocation map across page loads."""
     frappe.db.set_default('crystal_fulfillment_alloc', allocations_json)
