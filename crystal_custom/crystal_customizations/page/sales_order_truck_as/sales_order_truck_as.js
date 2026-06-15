@@ -136,7 +136,10 @@ class TruckAssignmentManager {
 				limit_page_length: 500,
 			},
 			callback: (r) => {
-				this.orders = r.message || [];
+				// Exclude "Order Confirmed" orders that have no truck — they're done being planned
+				this.orders = (r.message || []).filter(o =>
+					o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
+				);
 				// Seed any newly-seen truck numbers
 				this.orders.forEach(o => {
 					if (o.custom_truck_number && !this.available_trucks.find(t => t.truck_number === o.custom_truck_number)) {
