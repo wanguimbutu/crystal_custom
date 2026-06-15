@@ -15,6 +15,8 @@ class SalesOrderStatusPage {
 		this.search_term = '';
 		this.current_page = 1;
 		this.page_size = 50;
+		this.view_mode = 'orders'; // 'orders' | 'trucks'
+		this.truck_meta = {};      // keyed by truck_number → {driver_name, capacity_kg}
 		this.setup_page();
 		this.set_default_dates();
 		this.load_data();
@@ -69,6 +71,14 @@ class SalesOrderStatusPage {
 
 		this.container.html(this._loading_html());
 
+		let orders_done = false, meta_done = false;
+		const try_render = () => {
+			if (orders_done && meta_done) {
+				this.current_page = 1;
+				this.render();
+			}
+		};
+
 		frappe.call({
 			method: 'crystal_custom.crystal_customizations.page.sales_order_status.sales_order_status.get_daily_orders',
 			args: {
@@ -79,13 +89,29 @@ class SalesOrderStatusPage {
 			},
 			callback: (r) => {
 				this.orders = r.message || [];
-				this.current_page = 1;
-				this.render();
+				orders_done = true;
+				try_render();
 			},
 			error: () => {
 				this.orders = [];
-				this.render();
+				orders_done = true;
+				try_render();
 			}
+		});
+
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_meta',
+			callback: (r) => {
+				this.truck_meta = {};
+				try {
+					(JSON.parse(r.message || '[]') || []).forEach(t => {
+						this.truck_meta[t.truck_number] = t;
+					});
+				} catch(e) {}
+				meta_done = true;
+				try_render();
+			},
+			error: () => { meta_done = true; try_render(); }
 		});
 	}
 
@@ -142,9 +168,20 @@ class SalesOrderStatusPage {
 			${this._pipeline_html()}
 		</div>
 
+		<div class="sos-view-toggle-bar">
+			<button class="sos-view-btn ${this.view_mode === 'orders' ? 'sos-view-btn-active' : ''}" data-view="orders">
+				&#9776; Order List
+			</button>
+			<button class="sos-view-btn ${this.view_mode === 'trucks' ? 'sos-view-btn-active' : ''}" data-view="trucks">
+				&#128666; Truck View
+			</button>
+		</div>
+
 		<div class="sos-table-section">
-			${all.length === 0 ? this._empty_html() : this._table_html(page_orders)}
-			${this._pagination_html(all.length)}
+			${this.view_mode === 'trucks'
+				? this._render_truck_view()
+				: (all.length === 0 ? this._empty_html() : this._table_html(page_orders))}
+			${this.view_mode === 'orders' ? this._pagination_html(all.length) : ''}
 		</div>
 
 		${this._styles()}`;
@@ -267,6 +304,89 @@ class SalesOrderStatusPage {
 		</div>`;
 	}
 
+	_render_truck_view() {
+		// Show all orders grouped by truck, ignoring the pipeline stage filter
+		// so each truck card reflects its full current load.
+		let orders = this.orders;
+		if (this.search_term) {
+			const q = this.search_term.toLowerCase();
+			orders = orders.filter(o =>
+				(o.name          || '').toLowerCase().includes(q) ||
+				(o.customer_name || '').toLowerCase().includes(q) ||
+				(o.customer      || '').toLowerCase().includes(q)
+			);
+		}
+
+		const truck_map = {};
+		const no_truck  = [];
+		orders.forEach(o => {
+			if (o.custom_truck_number) {
+				if (!truck_map[o.custom_truck_number]) truck_map[o.custom_truck_number] = [];
+				truck_map[o.custom_truck_number].push(o);
+			} else {
+				no_truck.push(o);
+			}
+		});
+
+		const truck_numbers = Object.keys(truck_map).sort();
+		if (!truck_numbers.length) {
+			return `<div style="padding:30px;text-align:center;color:#6b7280;">
+				No orders with truck assignments in the selected date range.
+			</div>`;
+		}
+
+		let html = '<div class="sos-truck-grid">';
+
+		truck_numbers.forEach(truck_num => {
+			const meta     = this.truck_meta[truck_num] || {};
+			const t_orders = truck_map[truck_num];
+			const total_val = t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+
+			const order_rows = t_orders.map(o => {
+				const state_cfg = this._states().find(s => s.key === o.workflow_state) ||
+				                  { color: '#9ca3af', label: o.workflow_state || '—' };
+				const del_pct   = Math.round(o.per_delivered || 0);
+				return `
+				<div class="sos-tv-order">
+					<div class="sos-tv-order-main">
+						<a href="/app/sales-order/${o.name}" target="_blank" class="sos-link">${frappe.utils.escape_html(o.name)}</a>
+						<span class="sos-tv-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
+					</div>
+					<div class="sos-tv-order-right">
+						<span class="sos-state-badge" style="background:${state_cfg.color};font-size:10px;padding:2px 7px;">${state_cfg.label}</span>
+						${del_pct >= 100
+							? '<span class="sos-tv-done">&#10003; Delivered</span>'
+							: `<span class="sos-tv-pct">${del_pct}% del.</span>`}
+					</div>
+				</div>`;
+			}).join('');
+
+			html += `
+			<div class="sos-truck-card">
+				<div class="sos-tc-head">
+					<span class="sos-tc-num">&#128666; ${frappe.utils.escape_html(truck_num)}</span>
+					${meta.driver_name ? `<span class="sos-tc-driver">${frappe.utils.escape_html(meta.driver_name)}</span>` : ''}
+				</div>
+				<div class="sos-tc-stats">
+					<span>${t_orders.length} order${t_orders.length !== 1 ? 's' : ''}</span>
+					<span class="sos-tc-val">${format_currency(total_val, null, 0)}</span>
+					${meta.capacity_kg ? `<span class="sos-tc-cap">${meta.capacity_kg.toLocaleString()} kg cap.</span>` : ''}
+				</div>
+				<div class="sos-tc-orders">${order_rows}</div>
+			</div>`;
+		});
+
+		html += '</div>';
+
+		if (no_truck.length) {
+			html += `<div class="sos-tv-unassigned">
+				${no_truck.length} order${no_truck.length !== 1 ? 's' : ''} without truck assignment
+			</div>`;
+		}
+
+		return html;
+	}
+
 	_progress_bar(pct, color) {
 		return `<div class="sos-prog-wrap" title="${pct}%">
 			<div class="sos-prog-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div>
@@ -304,6 +424,14 @@ class SalesOrderStatusPage {
 	// ── Events ────────────────────────────────────────────────────────────────
 
 	_attach_events() {
+		this.container.find('.sos-view-btn').on('click', (e) => {
+			const view = $(e.currentTarget).data('view');
+			if (this.view_mode !== view) {
+				this.view_mode = view;
+				this.render();
+			}
+		});
+
 		this.container.find('.sos-pipe-stage').on('click', (e) => {
 			const state = $(e.currentTarget).data('state');
 			this.active_state_filter = this.active_state_filter === state ? null : state;
@@ -488,6 +616,82 @@ class SalesOrderStatusPage {
 			color: #fff;
 			line-height: 16px;
 			text-shadow: 0 0 3px rgba(0,0,0,.4);
+		}
+
+		/* View toggle bar */
+		.sos-view-toggle-bar {
+			display: flex;
+			gap: 6px;
+			margin-bottom: 12px;
+		}
+		.sos-view-btn {
+			padding: 5px 16px;
+			border: 1px solid #d1d5db;
+			border-radius: 6px;
+			background: #fff;
+			color: #374151;
+			font-size: 12px;
+			font-weight: 600;
+			cursor: pointer;
+			transition: all .15s;
+		}
+		.sos-view-btn:hover { background: #f3f4f6; }
+		.sos-view-btn-active { background: #1e293b; color: #fff; border-color: #1e293b; }
+
+		/* Truck grid */
+		.sos-truck-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+			gap: 16px;
+			padding: 16px;
+		}
+		.sos-truck-card {
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
+			overflow: hidden;
+		}
+		.sos-tc-head {
+			background: #1e293b;
+			color: #fff;
+			padding: 10px 14px;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+		}
+		.sos-tc-num { font-weight: 700; font-size: 13px; }
+		.sos-tc-driver { font-size: 11px; color: #94a3b8; }
+		.sos-tc-stats {
+			padding: 7px 14px;
+			background: #f8fafc;
+			border-bottom: 1px solid #e5e7eb;
+			display: flex;
+			gap: 14px;
+			font-size: 11px;
+			color: #6b7280;
+		}
+		.sos-tc-val { font-weight: 600; color: #374151; }
+		.sos-tc-cap { color: #9ca3af; }
+		.sos-tc-orders { }
+		.sos-tv-order {
+			display: flex;
+			align-items: flex-start;
+			justify-content: space-between;
+			padding: 7px 14px;
+			border-bottom: 1px solid #f1f5f9;
+			gap: 8px;
+		}
+		.sos-tv-order:last-child { border-bottom: none; }
+		.sos-tv-order-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+		.sos-tv-cust { font-size: 11px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+		.sos-tv-order-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
+		.sos-tv-done { font-size: 10px; color: #10b981; font-weight: 600; }
+		.sos-tv-pct { font-size: 10px; color: #9ca3af; }
+		.sos-tv-unassigned {
+			text-align: center;
+			padding: 10px 16px 16px;
+			font-size: 12px;
+			color: #9ca3af;
 		}
 
 		/* Pagination */

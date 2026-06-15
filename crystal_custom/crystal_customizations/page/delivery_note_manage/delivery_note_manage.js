@@ -854,19 +854,43 @@ ${customer_blocks}
     }
 
     create_delivery_note(order_name) {
+        const order       = this.orders.find(o => o.name === order_name);
+        const truck_num   = order ? (order.custom_truck_number || '') : '';
+
         frappe.call({
             method: 'erpnext.selling.doctype.sales_order.sales_order.make_delivery_note',
             args: { source_name: order_name },
             freeze: true,
             freeze_message: __('Preparing Delivery Note…'),
             callback: (r) => {
-                if (r.message) {
-                    // Sync the pre-filled doc to Frappe's local model store and open the
-                    // form so the user can fill in mandatory fields (Vehicle No, Driver Name)
-                    // before saving — auto-inserting would fail those validations.
-                    frappe.model.sync(r.message);
-                    frappe.set_route('Form', 'Delivery Note', r.message.name);
-                }
+                if (!r.message) return;
+                const doc = r.message;
+
+                const open_form = () => {
+                    frappe.model.sync(doc);
+                    frappe.set_route('Form', 'Delivery Note', doc.name);
+                };
+
+                if (!truck_num) { open_form(); return; }
+
+                // Pre-fill vehicle number from truck assignment
+                doc.vehicle_no = truck_num;
+
+                // Fetch saved truck metadata to get driver name
+                frappe.call({
+                    method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_meta',
+                    callback: (meta_r) => {
+                        try {
+                            const trucks = JSON.parse(meta_r.message || '[]');
+                            const truck  = trucks.find(t => t.truck_number === truck_num);
+                            if (truck && truck.driver_name) {
+                                doc.driver_name = truck.driver_name;
+                            }
+                        } catch(e) {}
+                        open_form();
+                    },
+                    error: open_form,
+                });
             }
         });
     }
