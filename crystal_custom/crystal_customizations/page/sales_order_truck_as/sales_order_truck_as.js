@@ -16,6 +16,7 @@ class TruckAssignmentManager {
 		this.page_size = 50;
 		this.search_term = '';
 		this.selected_orders = new Set();
+		this.saved_meta = {};
 		this.setup_page();
 		this.load_trucks_from_orders();
 	}
@@ -72,6 +73,7 @@ class TruckAssignmentManager {
 				return;
 			}
 			this.available_trucks.push(vals);
+			this._save_truck_meta();
 			frappe.show_alert({ message: __('Truck {0} added', [vals.truck_number]), indicator: 'green' });
 			this.render_view();
 		}, __('Add New Truck'), __('Add'));
@@ -80,27 +82,44 @@ class TruckAssignmentManager {
 	// ── Data loading ──────────────────────────────────────────────────────────
 
 	load_trucks_from_orders() {
+		// Load saved truck metadata first, then discover truck numbers from orders
 		frappe.call({
-			method: 'frappe.client.get_list',
-			args: {
-				doctype: 'Sales Order',
-				fields: ['custom_truck_number'],
-				filters: [
-					['Sales Order', 'docstatus', 'in', [0, 1]],
-					['Sales Order', 'custom_truck_number', '!=', ''],
-					['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
-				],
-				limit_page_length: 500,
-			},
-			callback: (r) => {
-				if (r.message) {
-					[...new Set(r.message.map(o => o.custom_truck_number).filter(Boolean))].forEach(t => {
-						if (!this.available_trucks.find(x => x.truck_number === t)) {
-							this.available_trucks.push({ truck_number: t, driver_name: '', capacity_kg: 5000 });
-						}
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_meta',
+			callback: (meta_r) => {
+				try {
+					(JSON.parse(meta_r.message || '[]') || []).forEach(t => {
+						this.saved_meta[t.truck_number] = t;
 					});
-				}
-				this.load_data();
+				} catch(e) {}
+
+				frappe.call({
+					method: 'frappe.client.get_list',
+					args: {
+						doctype: 'Sales Order',
+						fields: ['custom_truck_number'],
+						filters: [
+							['Sales Order', 'docstatus', 'in', [0, 1]],
+							['Sales Order', 'custom_truck_number', '!=', ''],
+							['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
+						],
+						limit_page_length: 500,
+					},
+					callback: (r) => {
+						if (r.message) {
+							[...new Set(r.message.map(o => o.custom_truck_number).filter(Boolean))].forEach(t => {
+								if (!this.available_trucks.find(x => x.truck_number === t)) {
+									const m = this.saved_meta[t] || {};
+									this.available_trucks.push({
+										truck_number: t,
+										driver_name:  m.driver_name  || '',
+										capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
+									});
+								}
+							});
+						}
+						this.load_data();
+					},
+				});
 			},
 		});
 	}
@@ -141,10 +160,15 @@ class TruckAssignmentManager {
 				this.orders = (r.message || []).filter(o =>
 					o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
 				);
-				// Seed any newly-seen truck numbers
+				// Seed any newly-seen truck numbers, restoring saved metadata
 				this.orders.forEach(o => {
 					if (o.custom_truck_number && !this.available_trucks.find(t => t.truck_number === o.custom_truck_number)) {
-						this.available_trucks.push({ truck_number: o.custom_truck_number, driver_name: '', capacity_kg: 5000 });
+						const m = this.saved_meta[o.custom_truck_number] || {};
+						this.available_trucks.push({
+							truck_number: o.custom_truck_number,
+							driver_name:  m.driver_name  || '',
+							capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
+						});
 					}
 				});
 
@@ -229,6 +253,22 @@ class TruckAssignmentManager {
 
 		this.container.html(html);
 		this._attach_events();
+	}
+
+	_save_truck_meta() {
+		const data = this.available_trucks.map(t => ({
+			truck_number: t.truck_number,
+			driver_name:  t.driver_name  || '',
+			capacity_kg:  t.capacity_kg  != null ? t.capacity_kg : 5000,
+		}));
+		// Update in-memory saved_meta so subsequent seeds in load_data() use fresh values
+		this.saved_meta = {};
+		data.forEach(t => { this.saved_meta[t.truck_number] = t; });
+
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_truck_meta',
+			args: { trucks_json: JSON.stringify(data) },
+		});
 	}
 
 	_kpi(label, value, color) {
@@ -524,7 +564,12 @@ class TruckAssignmentManager {
 			const order_name   = $(this).data('order');
 			const truck_number = $(this).val().trim();
 			if (truck_number && !self.available_trucks.find(t => t.truck_number === truck_number)) {
-				self.available_trucks.push({ truck_number, driver_name: '', capacity_kg: 5000 });
+				const m = self.saved_meta[truck_number] || {};
+				self.available_trucks.push({
+					truck_number,
+					driver_name: m.driver_name || '',
+					capacity_kg: m.capacity_kg != null ? m.capacity_kg : 5000,
+				});
 			}
 			self._set_truck(order_name, truck_number);
 		});
@@ -581,7 +626,12 @@ class TruckAssignmentManager {
 		}
 
 		if (!this.available_trucks.find(t => t.truck_number === truck_number)) {
-			this.available_trucks.push({ truck_number, driver_name: '', capacity_kg: 5000 });
+			const m = this.saved_meta[truck_number] || {};
+			this.available_trucks.push({
+				truck_number,
+				driver_name: m.driver_name || '',
+				capacity_kg: m.capacity_kg != null ? m.capacity_kg : 5000,
+			});
 		}
 
 		frappe.confirm(
@@ -649,6 +699,7 @@ class TruckAssignmentManager {
 			truck.truck_number = vals.truck_number;
 			truck.driver_name  = vals.driver_name;
 			truck.capacity_kg  = vals.capacity_kg;
+			this._save_truck_meta();
 			if (old_num !== vals.truck_number) {
 				const to_update = this.orders.filter(o => o.custom_truck_number === old_num);
 				if (to_update.length) {
@@ -686,6 +737,7 @@ class TruckAssignmentManager {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
 		if (!truck_orders.length) {
 			this.available_trucks = this.available_trucks.filter(t => t.truck_number !== truck_number);
+			this._save_truck_meta();
 			frappe.show_alert({ message: __('Truck removed'), indicator: 'green' });
 			this.render_view();
 		} else {
