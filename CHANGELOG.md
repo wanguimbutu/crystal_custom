@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.2.0...v1.2.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* truck-assigned orders persist in truck cards regardless of date filter ([98c6d29](https://github.com/wanguimbutu/crystal_custom/commit/98c6d2920829661cb9f2ac5ebd6dd1f4b373d7a9))
+
 # [1.2.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.1.0...v1.2.0) (2026-06-15)
 
 
