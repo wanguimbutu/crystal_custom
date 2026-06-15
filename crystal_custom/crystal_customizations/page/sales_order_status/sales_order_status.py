@@ -37,6 +37,7 @@ def get_daily_orders(from_date, to_date, sales_person=None, delivery_region=None
             so.docstatus,
             so.status,
             so.custom_truck_number,
+            so.total_net_weight,
             so.per_delivered,
             so.per_billed,
             (

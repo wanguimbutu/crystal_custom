@@ -211,8 +211,8 @@ class FinanceApprovalManager {
 				<td class="fa-amt">${format_currency(fin.credit_limit || 0)}</td>
 				<td><span class="fa-tag">${fin.payment_terms || '—'}</span></td>
 				<td>${has_pdc
-					? `<span class="fa-pdc-badge" title="${format_currency(fin.pdc_amount)} in draft payments">
-						${fin.pdc_count} payment${fin.pdc_count > 1 ? 's' : ''}
+					? `<span class="fa-pdc-badge" title="${fin.pdc_count} draft payment${fin.pdc_count > 1 ? 's' : ''}">
+						${format_currency(fin.pdc_amount)}
 					   </span>`
 					: '<span class="text-muted">—</span>'}
 				</td>

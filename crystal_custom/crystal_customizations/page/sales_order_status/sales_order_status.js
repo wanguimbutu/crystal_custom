@@ -338,9 +338,12 @@ class SalesOrderStatusPage {
 		let html = '<div class="sos-truck-grid">';
 
 		truck_numbers.forEach(truck_num => {
-			const meta     = this.truck_meta[truck_num] || {};
-			const t_orders = truck_map[truck_num];
-			const total_val = t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+			const meta       = this.truck_meta[truck_num] || {};
+			const t_orders   = truck_map[truck_num];
+			const total_val  = t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+			const total_wt   = t_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+			const capacity   = meta.capacity_kg || 0;
+			const cap_pct    = capacity > 0 ? Math.min((total_wt / capacity) * 100, 100).toFixed(0) : null;
 
 			const order_rows = t_orders.map(o => {
 				const state_cfg = this._states().find(s => s.key === o.workflow_state) ||
@@ -370,8 +373,14 @@ class SalesOrderStatusPage {
 				<div class="sos-tc-stats">
 					<span>${t_orders.length} order${t_orders.length !== 1 ? 's' : ''}</span>
 					<span class="sos-tc-val">${format_currency(total_val, null, 0)}</span>
-					${meta.capacity_kg ? `<span class="sos-tc-cap">${meta.capacity_kg.toLocaleString()} kg cap.</span>` : ''}
+					<span class="sos-tc-wt">${total_wt.toFixed(0)} kg</span>
 				</div>
+				${cap_pct !== null ? `
+				<div class="sos-tc-cap-bar">
+					<div class="sos-tc-cap-fill" style="width:${cap_pct}%;background:${cap_pct > 90 ? '#ef4444' : '#10b981'}"></div>
+				</div>
+				<div class="sos-tc-cap-label">${cap_pct}% of ${capacity.toLocaleString()} kg</div>
+				` : ''}
 				<div class="sos-tc-orders">${order_rows}</div>
 			</div>`;
 		});
@@ -671,7 +680,16 @@ class SalesOrderStatusPage {
 			color: #6b7280;
 		}
 		.sos-tc-val { font-weight: 600; color: #374151; }
-		.sos-tc-cap { color: #9ca3af; }
+		.sos-tc-wt  { color: #6b7280; }
+		.sos-tc-cap-bar {
+			margin: 0 14px 3px;
+			background: #e5e7eb;
+			border-radius: 3px;
+			height: 5px;
+			overflow: hidden;
+		}
+		.sos-tc-cap-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+		.sos-tc-cap-label { font-size: 10px; color: #9ca3af; padding: 0 14px 6px; }
 		.sos-tc-orders { }
 		.sos-tv-order {
 			display: flex;

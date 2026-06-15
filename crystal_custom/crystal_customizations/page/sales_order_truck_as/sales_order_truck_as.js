@@ -238,7 +238,7 @@ class TruckAssignmentManager {
 				Assigned Trucks
 				<span class="ta-count-badge">${trucks_used} of ${this.available_trucks.length}</span>
 			</div>
-			${this._render_trucks(orders)}
+			${this._render_trucks(this.orders)}
 		</div>` : ''}
 
 		<div class="ta-section">
