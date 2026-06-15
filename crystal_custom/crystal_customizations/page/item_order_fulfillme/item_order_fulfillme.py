@@ -66,6 +66,7 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
     conditions = [
         "so.docstatus = 0",
         "so.workflow_state = 'Pending Customer Order Reconfirmation'",
+        "so.status NOT IN ('Completed', 'Closed')",
         "so.custom_truck_number IS NOT NULL",
         "so.custom_truck_number != ''",
         "IFNULL(so.custom_truck_closed, 0) != 1",
@@ -135,6 +136,7 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
         FROM `tabSales Order` so
         WHERE so.docstatus = 0
           AND so.workflow_state = 'Pending Customer Order Reconfirmation'
+          AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
           AND IFNULL(so.custom_truck_closed, 0) != 1
@@ -148,6 +150,7 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
         FROM `tabSales Order` so
         WHERE so.docstatus = 0
           AND so.workflow_state = 'Pending Customer Order Reconfirmation'
+          AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
           AND IFNULL(so.custom_truck_closed, 0) != 1

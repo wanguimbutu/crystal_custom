@@ -74,7 +74,11 @@ class TruckAssignmentManager {
 			args: {
 				doctype: 'Sales Order',
 				fields: ['custom_truck_number'],
-				filters: { docstatus: ['in', [0, 1]], custom_truck_number: ['!=', ''] },
+				filters: [
+					['Sales Order', 'docstatus', 'in', [0, 1]],
+					['Sales Order', 'custom_truck_number', '!=', ''],
+					['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
+				],
 				limit_page_length: 500,
 			},
 			callback: (r) => {
@@ -99,6 +103,7 @@ class TruckAssignmentManager {
 		const filters = [
 			['Sales Order', 'docstatus', 'in', [0, 1]],
 			['Sales Order', 'workflow_state', 'in', ['Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed']],
+			['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
 			['Sales Order', 'custom_on_hold', '!=', 1],
 			['Sales Order', 'custom_truck_closed', '!=', 1],
 		];
