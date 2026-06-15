@@ -891,41 +891,64 @@ class TruckAssignmentManager {
 		if (!ct) return;
 
 		frappe.confirm(
-			__('Reopen truck {0}? All {1} orders will be restored to active.', [ct.truck_number, ct.order_count]),
+			__('Reopen truck {0}? Orders will be restored to active.', [ct.truck_number]),
 			() => {
-				const orders = ct.orders || [];
-				let done = 0;
-				const next = () => {
-					if (done >= orders.length) {
-						// Remove from closed history and persist
-						this.closed_trucks.splice(idx, 1);
-						frappe.call({
-							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
-							args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
-						});
-
-						// Restore to active truck list and persist meta
-						if (!this.available_trucks.find(t => t.truck_number === ct.truck_number)) {
-							this.available_trucks.push({
-								truck_number: ct.truck_number,
-								driver_name:  ct.driver_name  || '',
-								capacity_kg:  ct.capacity_kg  || 5000,
+				// Always look up by truck number in the DB — works even for trucks
+				// closed before the orders array was stored in the closure record.
+				frappe.call({
+					method: 'frappe.client.get_list',
+					args: {
+						doctype: 'Sales Order',
+						fields: ['name'],
+						filters: [
+							['Sales Order', 'custom_truck_number', '=', ct.truck_number],
+							['Sales Order', 'custom_truck_closed', '=', 1],
+						],
+						limit_page_length: 500,
+					},
+					callback: (r) => {
+						const orders = r.message || [];
+						let done = 0;
+						const finish = () => {
+							// Remove from closed history and persist
+							this.closed_trucks.splice(idx, 1);
+							frappe.call({
+								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
+								args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
 							});
-							this._save_truck_meta();
-						}
 
-						frappe.show_alert({ message: __('Truck {0} reopened', [ct.truck_number]), indicator: 'green' });
-						this.load_data();
-						return;
-					}
-					frappe.call({
-						method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_closed',
-						args: { order_name: orders[done].name, value: 0 },
-						callback: () => { done++; next(); },
-						error:    () => { done++; next(); },
-					});
-				};
-				next();
+							// Restore to active truck list and persist meta
+							if (!this.available_trucks.find(t => t.truck_number === ct.truck_number)) {
+								this.available_trucks.push({
+									truck_number: ct.truck_number,
+									driver_name:  ct.driver_name  || '',
+									capacity_kg:  ct.capacity_kg  || 5000,
+								});
+								this._save_truck_meta();
+							}
+
+							frappe.show_alert({
+								message: __('Truck {0} reopened — {1} order(s) restored', [ct.truck_number, orders.length]),
+								indicator: 'green',
+							});
+							this.load_data();
+						};
+
+						if (!orders.length) { finish(); return; }
+
+						const next = () => {
+							if (done >= orders.length) { finish(); return; }
+							frappe.call({
+								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_closed',
+								args: { order_name: orders[done].name, value: 0 },
+								callback: () => { done++; next(); },
+								error:    () => { done++; next(); },
+							});
+						};
+						next();
+					},
+					error: () => frappe.msgprint(__('Could not load orders for truck {0}', [ct.truck_number])),
+				});
 			}
 		);
 	}
