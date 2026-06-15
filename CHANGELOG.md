@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.2.1...v1.2.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* truck-assigned orders always visible in DN Manager truck view ([6e09f97](https://github.com/wanguimbutu/crystal_custom/commit/6e09f970aaa2c57502be2c897c2500ba8761e127))
+
 ## [1.2.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.2.0...v1.2.1) (2026-06-15)
 
 
