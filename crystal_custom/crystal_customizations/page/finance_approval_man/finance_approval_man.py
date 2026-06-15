@@ -66,7 +66,7 @@ def get_customer_financial_summary(customers):
 	)
 	terms_map = {r.name: r.payment_terms or "" for r in terms_rows}
 
-	# ── PDC Cheques (Payment Entries with future posting_date) ───────────────
+	# ── Draft Payment Entries (not yet submitted, posting_date not in the past) ─
 	pdc_rows = frappe.db.sql(
 		f"""
 		SELECT
@@ -76,9 +76,8 @@ def get_customer_financial_summary(customers):
 		FROM `tabPayment Entry`
 		WHERE party_type  = 'Customer'
 		  AND party IN ({placeholders})
-		  AND docstatus   IN (0, 1)
+		  AND docstatus   = 0
 		  AND posting_date >= %s
-		  AND (mode_of_payment LIKE '%%Cheque%%' OR mode_of_payment LIKE '%%PDC%%')
 		GROUP BY party
 		""",
 		customers + [today],

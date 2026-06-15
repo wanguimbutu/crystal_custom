@@ -140,7 +140,7 @@ class FinanceApprovalManager {
 			${this._kpi('Pending',       orders.length,                  '#667eea')}
 			${this._kpi('Total Value',   format_currency(total_value),   '#10b981')}
 			${this._kpi('Total Overdue', format_currency(total_overdue), '#ef4444')}
-			${this._kpi('PDC Customers', pdc_customers,                  '#f59e0b')}
+			${this._kpi('Draft Payments', pdc_customers,                  '#f59e0b')}
 		</div>
 
 		<div class="fa-table-wrap">
@@ -164,7 +164,7 @@ class FinanceApprovalManager {
 				<th width="8%">Overdue</th>
 				<th width="8%">Credit Limit</th>
 				<th width="8%">Terms</th>
-				<th width="7%">PDC Today</th>
+				<th width="7%">Draft Payments</th>
 				<th width="7%">Region</th>
 				<th width="7%">Date</th>
 			</tr></thead>
@@ -211,8 +211,8 @@ class FinanceApprovalManager {
 				<td class="fa-amt">${format_currency(fin.credit_limit || 0)}</td>
 				<td><span class="fa-tag">${fin.payment_terms || '—'}</span></td>
 				<td>${has_pdc
-					? `<span class="fa-pdc-badge" title="${format_currency(fin.pdc_amount)} in PDC cheques">
-						${fin.pdc_count} cheque${fin.pdc_count > 1 ? 's' : ''}
+					? `<span class="fa-pdc-badge" title="${format_currency(fin.pdc_amount)} in draft payments">
+						${fin.pdc_count} payment${fin.pdc_count > 1 ? 's' : ''}
 					   </span>`
 					: '<span class="text-muted">—</span>'}
 				</td>
