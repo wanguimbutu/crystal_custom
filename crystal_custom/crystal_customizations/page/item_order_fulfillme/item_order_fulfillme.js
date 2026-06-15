@@ -15,8 +15,31 @@ class OrderFulfillmentManager {
 		this.truck_data    = { trucks: [], stock: {} };
 		this.allocations   = {};   // { item_code: { truck_number: qty } }
 		this.search_term   = '';
+		this._alloc_save_timer = null;
 		this.setup_page();
-		this.load_data();
+		this._load_allocations_then_data();
+	}
+
+	// Load persisted allocations from server first, then fetch order/stock data
+	_load_allocations_then_data() {
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_allocations',
+			callback: (r) => {
+				try { this.allocations = JSON.parse(r.message || '{}') || {}; } catch(e) {}
+				this.load_data();
+			},
+			error: () => this.load_data(),
+		});
+	}
+
+	_save_allocations() {
+		clearTimeout(this._alloc_save_timer);
+		this._alloc_save_timer = setTimeout(() => {
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.save_allocations',
+				args: { allocations_json: JSON.stringify(this.allocations) },
+			});
+		}, 800);
 	}
 
 	// ── Toolbar ───────────────────────────────────────────────────────────────
@@ -64,6 +87,8 @@ class OrderFulfillmentManager {
 		const from_date = this.page.fields_dict.from_date.get_value();
 		const to_date   = this.page.fields_dict.to_date.get_value();
 
+		const prev_stock = this.truck_data ? { ...this.truck_data.stock } : {};
+
 		// Load both tabs in parallel
 		Promise.all([
 			new Promise(resolve => frappe.call({
@@ -78,7 +103,21 @@ class OrderFulfillmentManager {
 				callback: r => { this.truck_data = r.message || { trucks: [], stock: {} }; resolve(); },
 				error: () => resolve(),
 			})),
-		]).then(() => this.render());
+		]).then(() => {
+			// Detect stock changes and notify
+			const changed = Object.keys(this.truck_data.stock).filter(ic => {
+				const old_qty = (prev_stock[ic] || {}).available_qty;
+				const new_qty = (this.truck_data.stock[ic] || {}).available_qty;
+				return old_qty !== undefined && old_qty !== new_qty;
+			});
+			if (changed.length) {
+				frappe.show_alert({
+					message: __('Stock levels changed for {0} item(s) — shortages recalculated', [changed.length]),
+					indicator: 'orange',
+				}, 6);
+			}
+			this.render();
+		});
 	}
 
 	// ── Rendering ─────────────────────────────────────────────────────────────
@@ -113,6 +152,13 @@ class OrderFulfillmentManager {
 
 	// ── Trucks Tab ────────────────────────────────────────────────────────────
 
+	_truck_has_shortage(truck) {
+		return truck.items.some(item => {
+			const alloc = (this.allocations[item.item_code] || {})[truck.truck_number] || 0;
+			return item.required_qty > alloc;
+		});
+	}
+
 	_render_trucks_tab() {
 		let trucks = this.truck_data.trucks;
 
@@ -133,6 +179,14 @@ class OrderFulfillmentManager {
 				${!this.search_term ? ' — assign orders to trucks in the Truck Assignment page first.' : ''}
 			</div>`;
 		}
+
+		// Trucks with shortages first, then fully allocated, then empty
+		trucks = [...trucks].sort((a, b) => {
+			const a_short = a.items.length > 0 && this._truck_has_shortage(a);
+			const b_short = b.items.length > 0 && this._truck_has_shortage(b);
+			if (a_short !== b_short) return b_short ? 1 : -1;
+			return (a.truck_number || '').localeCompare(b.truck_number || '');
+		});
 
 		const item_summary = this._compute_item_summary();
 		const has_any_short = Object.values(item_summary).some(s => s.total_short > 0);
@@ -439,6 +493,7 @@ class OrderFulfillmentManager {
 			self.allocations[ic][tn] = value;
 
 			self._update_allocations_in_place(ic, tn);
+			self._save_allocations();
 		});
 
 		// Orders list toggle
@@ -569,7 +624,8 @@ class OrderFulfillmentManager {
 			});
 		});
 
-		// Full re-render of trucks tab to show updated inputs
+		// Persist and re-render
+		this._save_allocations();
 		this.container.find('#tf-trucks-pane').html(this._render_trucks_tab());
 		this._attach_events();
 		frappe.show_alert({ message: __('Stock auto-allocated to trucks'), indicator: 'green' });

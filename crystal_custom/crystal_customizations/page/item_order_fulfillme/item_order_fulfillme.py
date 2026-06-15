@@ -195,6 +195,20 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
 
 
 @frappe.whitelist()
+def save_allocations(allocations_json):
+    """Persist truck-item allocation map across page loads."""
+    frappe.db.set_default('crystal_fulfillment_alloc', allocations_json)
+    frappe.db.commit()
+    return True
+
+
+@frappe.whitelist()
+def get_allocations():
+    """Return previously saved allocation map."""
+    return frappe.db.get_default('crystal_fulfillment_alloc') or '{}'
+
+
+@frappe.whitelist()
 def create_requisition_from_shortage_items(shortage_items):
     """
     Create a draft Manufacture Material Request from a list of shortage items.
