@@ -388,10 +388,12 @@ class OrderFulfillmentManager {
 
 		// Orders list inside the card
 		const orders_html = (truck.orders || []).map(o => `
-			<div class="tf-order-row">
-				<div>
+			<div class="tf-order-row${o.paint_notes ? ' tf-order-row-paint' : ''}">
+				<div style="flex:1;min-width:0;">
 					<a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${o.name}</a>
 					<span class="tf-order-cust">${frappe.utils.escape_html(o.customer_name)}</span>
+					${o.paint_notes ? `<span class="tf-paint-warn-badge">&#9888; Paint Note</span>` : ''}
+					${o.paint_notes ? `<div class="tf-paint-notes-banner">&#127758; <strong>Colour / Paint:</strong> ${frappe.utils.escape_html(o.paint_notes)}</div>` : ''}
 				</div>
 				<button class="btn btn-xs btn-danger btn-remove-order"
 				        data-order="${o.name}" data-truck="${frappe.utils.escape_html(tn)}"
@@ -482,7 +484,7 @@ class OrderFulfillmentManager {
 				});
 
 				cust_blocks += `
-				<div class="cv-cust-block">
+				<div class="cv-cust-block${order.paint_notes ? ' cv-cust-block-paint' : ''}">
 					<div class="cv-cust-head">
 						<span class="cv-cust-name">${frappe.utils.escape_html(order.customer_name)}</span>
 						<span class="cv-cust-meta">
@@ -493,6 +495,10 @@ class OrderFulfillmentManager {
 							</strong>
 						</span>
 					</div>
+					${order.paint_notes ? `
+					<div class="cv-paint-alert">
+						&#9888;&nbsp;<strong>PAINT / COLOUR NOTE:</strong>&nbsp;${frappe.utils.escape_html(order.paint_notes)}
+					</div>` : ''}
 					<table>
 						<thead><tr>
 							<th>#</th><th>Item Code</th><th>Description</th>
@@ -532,9 +538,11 @@ class OrderFulfillmentManager {
   .cv-truck-block{margin-bottom:28px;page-break-before:auto;}
   .cv-truck-head{background:#334155;color:#f1f5f9;padding:10px 14px;font-size:15px;font-weight:700;border-radius:4px 4px 0 0;margin-bottom:0;}
   .cv-cust-block{margin-bottom:20px;border:1px solid #e2e8f0;border-radius:0 0 4px 4px;page-break-inside:avoid;}
+  .cv-cust-block-paint{border-color:#f59e0b !important;}
   .cv-cust-head{background:#f8fafc;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;}
   .cv-cust-name{font-size:14px;font-weight:700;}
   .cv-cust-meta{font-size:11px;color:#475569;}
+  .cv-paint-alert{background:#fef3c7;border-bottom:1px solid #fcd34d;padding:8px 12px;font-size:12px;color:#78350f;font-weight:600;}
   .cv-sig{padding:8px 12px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;margin-top:4px;}
   @media print{.no-print{display:none}body{margin:10px}.cv-truck-block{page-break-before:always;}.cv-truck-block:first-child{page-break-before:auto;}}
 </style>
@@ -1472,6 +1480,17 @@ ${truck_blocks}
 		.tf-order-link { font-weight: 600; color: #3b82f6; text-decoration: none; }
 		.tf-order-link:hover { text-decoration: underline; }
 		.tf-order-cust { display: block; color: #94a3b8; font-size: 11px; margin-top: 1px; }
+
+		/* Paint / Colour Notes */
+		.tf-order-row-paint { background: #fffbeb; border-left: 3px solid #f59e0b; padding-left: 9px !important; }
+		.tf-paint-warn-badge { display: inline-block; font-size: 10px; font-weight: 700;
+			background: #fef3c7; color: #92400e; border: 1px solid #fcd34d;
+			border-radius: 10px; padding: 1px 7px; margin-left: 6px; }
+		.tf-paint-notes-banner { margin-top: 5px; padding: 5px 10px; background: #fef3c7;
+			border: 1px solid #fcd34d; border-radius: 4px; font-size: 12px; color: #78350f; }
+		.cv-paint-alert { background: #fef3c7; border-bottom: 1px solid #fcd34d;
+			padding: 8px 14px; font-size: 13px; color: #78350f; font-weight: 600; }
+		.cv-cust-block-paint { border-color: #f59e0b !important; border-width: 2px !important; }
 		</style>`;
 	}
 }

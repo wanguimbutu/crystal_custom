@@ -47,7 +47,7 @@ class ProductionOverview {
     // ── Render ────────────────────────────────────────────────────────────────
 
     render() {
-        const { mrs, mr_items, work_orders } = this.data;
+        const { mrs, mr_items, work_orders, paint_orders = [] } = this.data;
 
         // KPIs
         const pending_mrs  = mrs.filter(m => m.status !== 'Stopped' && m.status !== 'Cancelled');
@@ -56,15 +56,15 @@ class ProductionOverview {
         const total_items  = mr_items.reduce((s, i) => s + (i.qty || 0), 0);
 
         const kpi = this._kpi_row([
-            { label: 'Pending Requests', value: pending_mrs.length,  color: '#667eea, #764ba2' },
-            { label: 'Active Work Orders', value: active_wos.length, color: '#43e97b, #38f9d7' },
-            { label: 'Items to Produce',  value: total_items.toFixed(0), color: '#f093fb, #f5576c' },
-            { label: 'Short on Materials', value: short_wos.length,  color: '#f59e0b, #d97706' },
+            { label: 'Pending Requests',   value: pending_mrs.length,     color: '#667eea, #764ba2' },
+            { label: 'Active Work Orders', value: active_wos.length,      color: '#43e97b, #38f9d7' },
+            { label: 'Items to Produce',   value: total_items.toFixed(0), color: '#f093fb, #f5576c' },
+            { label: 'Colour Specs',       value: paint_orders.length,    color: '#f59e0b, #d97706' },
         ]);
 
         const tabs = `
             <div class="po-tabs">
-                <button class="po-tab-btn ${this.active_tab === 'requests'  ? 'po-tab-active' : ''}" data-tab="requests">
+                <button class="po-tab-btn ${this.active_tab === 'requests'   ? 'po-tab-active' : ''}" data-tab="requests">
                     &#128203; Production Requests
                     <span class="po-tab-badge">${pending_mrs.length}</span>
                 </button>
@@ -74,7 +74,11 @@ class ProductionOverview {
                 </button>
                 <button class="po-tab-btn ${this.active_tab === 'materials'  ? 'po-tab-active' : ''}" data-tab="materials">
                     &#128230; Material Readiness
-                    <span class="po-tab-badge po-tab-badge-warn">${short_wos.length}</span>
+                    <span class="po-tab-badge ${short_wos.length ? 'po-tab-badge-warn' : ''}">${short_wos.length}</span>
+                </button>
+                <button class="po-tab-btn ${this.active_tab === 'colours'    ? 'po-tab-active' : ''}" data-tab="colours">
+                    &#127758; Colour Specs
+                    ${paint_orders.length ? `<span class="po-tab-badge po-tab-badge-warn">${paint_orders.length}</span>` : ''}
                 </button>
             </div>
             <div class="po-tab-content" id="po-tab-content"></div>`;
@@ -89,6 +93,7 @@ class ProductionOverview {
         if (this.active_tab === 'requests')   $content.html(this._render_requests_tab());
         if (this.active_tab === 'workorders') $content.html(this._render_workorders_tab());
         if (this.active_tab === 'materials')  $content.html(this._render_materials_tab());
+        if (this.active_tab === 'colours')    $content.html(this._render_colours_tab());
         this._attach_tab_events();
     }
 
@@ -341,6 +346,47 @@ class ProductionOverview {
         </div>`;
     }
 
+    // ── Colour Specs tab ─────────────────────────────────────────────────────
+
+    _render_colours_tab() {
+        const paint_orders = this.data.paint_orders || [];
+        if (!paint_orders.length) {
+            return `<div class="po-empty">No active orders have paint / colour notes at the moment.</div>`;
+        }
+
+        const cards = paint_orders.map(o => {
+            const truck = o.custom_truck_number
+                ? `<span class="po-colour-tag">&#128666; ${frappe.utils.escape_html(o.custom_truck_number)}</span>` : '';
+            const region = o.custom_delivery_region
+                ? `<span class="po-colour-tag">${frappe.utils.escape_html(o.custom_delivery_region)}</span>` : '';
+            return `<div class="po-colour-card">
+                <div class="po-colour-card-head">
+                    <span>
+                        <a href="/app/sales-order/${o.name}" target="_blank" class="po-mr-link">
+                            ${frappe.utils.escape_html(o.name)}
+                        </a>
+                        <span class="po-colour-customer">${frappe.utils.escape_html(o.customer_name || '')}</span>
+                    </span>
+                    <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        ${truck}${region}
+                        <span style="font-size:11px;color:#92400e;">${frappe.datetime.str_to_user(o.transaction_date)}</span>
+                        <span class="po-colour-state">${frappe.utils.escape_html(o.workflow_state || '')}</span>
+                    </span>
+                </div>
+                <div class="po-colour-note">
+                    &#9888;&nbsp;${frappe.utils.escape_html(o.custom_paint_notes)}
+                </div>
+            </div>`;
+        }).join('');
+
+        return `<div>
+            <div style="margin-bottom:14px;font-size:13px;color:#78350f;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 16px;">
+                &#9888; <strong>${paint_orders.length} active order${paint_orders.length !== 1 ? 's' : ''}</strong> have paint or colour specifications. Ensure production team reads these before mixing.
+            </div>
+            <div class="po-colour-list">${cards}</div>
+        </div>`;
+    }
+
     // ── Events ────────────────────────────────────────────────────────────────
 
     _attach_events() {
@@ -498,6 +544,15 @@ class ProductionOverview {
             .po-mat-ok        { background: #dcfce7; color: #166534; }
             .po-mat-short     { background: #fef2f2; color: #991b1b; }
             .po-empty         { padding: 40px; text-align: center; color: #9ca3af; font-size: 14px; }
+
+            /* Colour Specs tab */
+            .po-colour-list { display: flex; flex-direction: column; gap: 12px; }
+            .po-colour-card { border: 2px solid #f59e0b; border-radius: 8px; overflow: hidden; background: #fff; box-shadow: 0 2px 6px rgba(245,158,11,.15); }
+            .po-colour-card-head { background: #fef3c7; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #fcd34d; }
+            .po-colour-customer { font-size: 13px; color: #78350f; margin-left: 10px; font-weight: 600; }
+            .po-colour-note { padding: 12px 16px; font-size: 14px; color: #78350f; font-weight: 600; background: #fffbeb; line-height: 1.6; white-space: pre-wrap; }
+            .po-colour-tag  { font-size: 10px; background: #f59e0b; color: #fff; border-radius: 10px; padding: 2px 8px; font-weight: 600; }
+            .po-colour-state { font-size: 10px; background: #e2e8f0; color: #374151; border-radius: 10px; padding: 2px 8px; }
 
             @media (max-width: 768px) { .po-kpi-row { grid-template-columns: repeat(2, 1fr); } }
         </style>`;

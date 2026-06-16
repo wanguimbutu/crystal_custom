@@ -88,6 +88,7 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
             so.custom_truck_number                              AS truck_number,
             so.name                                             AS sales_order,
             so.customer_name,
+            so.custom_paint_notes,
             soi.item_code,
             soi.item_name,
             SUM(soi.qty - IFNULL(soi.delivered_qty, 0))        AS required_qty,
@@ -123,6 +124,7 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
         trucks_map[tn]['orders'][r.sales_order] = {
             'name': r.sales_order,
             'customer_name': r.customer_name or r.sales_order,
+            'paint_notes':   r.custom_paint_notes or '',
         }
         trucks_map[tn]['items'][r.item_code] += float(r.required_qty)
 
@@ -229,6 +231,7 @@ def get_truck_customer_data(from_date=None, to_date=None):
             so.customer_name,
             so.grand_total,
             so.total_net_weight,
+            so.custom_paint_notes,
             soi.item_code,
             soi.item_name,
             SUM(soi.qty - IFNULL(soi.delivered_qty, 0))        AS required_qty,
@@ -268,6 +271,7 @@ def get_truck_customer_data(from_date=None, to_date=None):
                 'customer_name':   r.customer_name or on,
                 'grand_total':     float(r.grand_total or 0),
                 'total_net_weight': float(r.total_net_weight or 0),
+                'paint_notes':     r.custom_paint_notes or '',
                 'items':           [],
             }
         trucks_map[tn][on]['items'].append({

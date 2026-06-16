@@ -84,6 +84,17 @@
   {
     "doctype": "Custom Field",
     "dt": "Sales Order",
+    "name": "Sales Order-custom_paint_notes",
+    "fieldname": "custom_paint_notes",
+    "label": "Paint / Colour Notes",
+    "fieldtype": "Small Text",
+    "insert_after": "custom_call_notes",
+    "allow_on_submit": 1,
+    "permlevel": 0
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Sales Order",
     "name": "Sales Order-custom_finance_rejection_note",
     "fieldname": "custom_finance_rejection_note",
     "label": "Finance Rejection Note",

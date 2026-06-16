@@ -150,10 +150,29 @@ def get_production_data():
             'bom_items':    bom_reqs,
         })
 
+    # ── Sales Orders with paint / colour notes (active, not closed) ──────────
+    paint_orders = frappe.db.sql("""
+        SELECT
+            name,
+            customer_name,
+            transaction_date,
+            custom_delivery_region,
+            custom_truck_number,
+            custom_paint_notes,
+            workflow_state
+        FROM `tabSales Order`
+        WHERE docstatus != 2
+          AND status NOT IN ('Completed', 'Closed')
+          AND IFNULL(custom_paint_notes, '') != ''
+        ORDER BY transaction_date DESC
+        LIMIT 200
+    """, as_dict=1)
+
     return {
-        'mrs':        [dict(r) for r in mrs],
-        'mr_items':   [dict(r) for r in mr_items],
-        'work_orders': wo_data,
+        'mrs':          [dict(r) for r in mrs],
+        'mr_items':     [dict(r) for r in mr_items],
+        'work_orders':   wo_data,
+        'paint_orders': [dict(r) for r in paint_orders],
     }
 
 

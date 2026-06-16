@@ -88,6 +88,7 @@ class SalesOrderManager {
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
 					'workflow_state', 'custom_finance_rejection_note',
+					'custom_paint_notes',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -192,9 +193,10 @@ class SalesOrderManager {
 				<tbody>`;
 
 		orders.forEach(o => {
-			const rejected = !!o.custom_finance_rejection_note;
-			const checked  = this.selected.has(o.name);
-			const expanded = this.expanded.has(o.name);
+			const rejected    = !!o.custom_finance_rejection_note;
+			const has_paint   = !!o.custom_paint_notes;
+			const checked     = this.selected.has(o.name);
+			const expanded    = this.expanded.has(o.name);
 
 			html += `
 				<tr class="som-row ${rejected ? 'som-row-rejected' : ''} ${checked ? 'som-row-selected' : ''}"
@@ -213,6 +215,7 @@ class SalesOrderManager {
 						<a class="som-link" href="/app/sales-order/${o.name}" target="_blank">
 							${o.name}
 						</a>
+						${has_paint ? `<span class="som-paint-warn" title="${frappe.utils.escape_html(o.custom_paint_notes)}">&#9888; Paint Note</span>` : ''}
 					</td>
 					<td class="som-customer">${o.customer_name || o.customer}</td>
 					<td class="som-date">${frappe.datetime.str_to_user(o.transaction_date)}</td>
@@ -233,6 +236,7 @@ class SalesOrderManager {
 			if (expanded) {
 				const rejection_note  = o.custom_finance_rejection_note;
 				const additional_info = o.custom_additional_information;
+				const paint_notes     = o.custom_paint_notes || '';
 				html += `
 				<tr class="som-items-row" data-order="${o.name}">
 					<td colspan="9">
@@ -242,6 +246,18 @@ class SalesOrderManager {
 								<strong>⚠ Finance Rejection Note:</strong>
 								${frappe.utils.escape_html(rejection_note)}
 							</div>` : ''}
+							<div class="som-paint-notes-editor">
+								<div class="som-paint-notes-label">
+									&#127758; Paint / Colour Notes
+									<span style="font-size:11px;color:#92400e;font-weight:400;">(visible to production &amp; all pages)</span>
+								</div>
+								<textarea class="som-paint-notes-input" data-order="${o.name}"
+								          rows="3" placeholder="Enter colour specs, paint codes, mixing instructions…">${frappe.utils.escape_html(paint_notes)}</textarea>
+								<div style="display:flex;gap:8px;margin-top:6px;">
+									<button class="btn btn-xs btn-warning som-save-paint-btn" data-order="${o.name}">Save Paint Notes</button>
+									${paint_notes ? `<button class="btn btn-xs btn-default som-clear-paint-btn" data-order="${o.name}">Clear</button>` : ''}
+								</div>
+							</div>
 							${additional_info ? `
 							<div class="som-info-note">
 								<strong>Additional Information:</strong>
@@ -437,6 +453,36 @@ class SalesOrderManager {
 				self.expanded.add(name);
 			}
 			self.render();
+		});
+
+		// Save paint notes
+		this.$wrap.find('.som-save-paint-btn').on('click', function () {
+			const name  = $(this).data('order');
+			const notes = self.$wrap.find(`.som-paint-notes-input[data-order="${name}"]`).val().trim();
+			frappe.db.set_value('Sales Order', name, 'custom_paint_notes', notes).then(() => {
+				// Update local cache
+				const o = self.orders.find(x => x.name === name);
+				if (o) o.custom_paint_notes = notes;
+				frappe.show_alert({ message: __('Paint notes saved for {0}', [name]), indicator: 'green' });
+				// Refresh badge on the order row without full re-render
+				const $row = self.$wrap.find(`.som-row[data-order="${name}"] td:nth-child(3)`);
+				if (notes) {
+					if (!$row.find('.som-paint-warn').length) {
+						$row.append(`<span class="som-paint-warn" title="${frappe.utils.escape_html(notes)}">&#9888; Paint Note</span>`);
+					} else {
+						$row.find('.som-paint-warn').attr('title', frappe.utils.escape_html(notes));
+					}
+				} else {
+					$row.find('.som-paint-warn').remove();
+				}
+			});
+		});
+
+		// Clear paint notes
+		this.$wrap.find('.som-clear-paint-btn').on('click', function () {
+			const name = $(this).data('order');
+			self.$wrap.find(`.som-paint-notes-input[data-order="${name}"]`).val('');
+			$(this).hide();
 		});
 
 		// Pagination
@@ -797,6 +843,46 @@ Add a note explaining what has changed — Finance will see this alongside the o
 			color: #1e3a5f;
 			margin-bottom: 12px;
 		}
+
+		/* Paint notes */
+		.som-paint-warn {
+			display: inline-block;
+			margin-left: 8px;
+			font-size: 10px;
+			font-weight: 700;
+			background: #fef3c7;
+			color: #92400e;
+			border: 1px solid #fcd34d;
+			border-radius: 10px;
+			padding: 1px 7px;
+			cursor: default;
+			white-space: nowrap;
+		}
+		.som-paint-notes-editor {
+			background: #fffbeb;
+			border: 1px solid #fcd34d;
+			border-left: 4px solid #f59e0b;
+			border-radius: 6px;
+			padding: 12px 16px;
+			margin-bottom: 12px;
+		}
+		.som-paint-notes-label {
+			font-size: 12px;
+			font-weight: 700;
+			color: #92400e;
+			margin-bottom: 8px;
+		}
+		.som-paint-notes-input {
+			width: 100%;
+			border: 1px solid #fcd34d;
+			border-radius: 4px;
+			padding: 8px 10px;
+			font-size: 13px;
+			background: #fff;
+			resize: vertical;
+			font-family: inherit;
+		}
+		.som-paint-notes-input:focus { outline: none; border-color: #f59e0b; box-shadow: 0 0 0 2px #fef3c7; }
 
 		/* Pagination */
 		.som-pg-bar {
