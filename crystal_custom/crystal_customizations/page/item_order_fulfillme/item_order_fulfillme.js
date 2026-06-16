@@ -404,15 +404,15 @@ class OrderFulfillmentManager {
 				        title="Remove from truck">Remove</button>
 			</div>`).join('');
 
-		const closed_html = truck.is_closed ? `
-			<span class="tf-closed-badge">&#10006; CLOSED</span>
-			<button class="btn btn-xs btn-success tf-reopen-truck-btn" data-truck="${frappe.utils.escape_html(tn)}"
-			        style="margin-left:8px;">
-				&#8635; Reopen
-			</button>` : '';
+		const closed_badge = truck.is_closed
+			? `<span class="tf-closed-badge" style="margin-left:8px;">&#10004; SORTED</span>`
+			: `<button class="btn btn-xs btn-warning tf-close-truck-btn" data-truck="${frappe.utils.escape_html(tn)}"
+			          style="margin-left:8px;">
+				&#10003; Close &amp; Mark Sorted
+			</button>`;
 
 		return `
-		<div class="tf-truck-card${truck.is_closed ? ' tf-truck-card-closed' : ''}">
+		<div class="tf-truck-card">
 			<div class="tf-truck-head">
 				<div>
 					<span class="tf-truck-num">${frappe.utils.escape_html(tn)}</span>
@@ -421,7 +421,7 @@ class OrderFulfillmentManager {
 						${truck.total_weight ? ` &nbsp;·&nbsp; ${truck.total_weight.toFixed(0)} kg` : ''}
 					</span>
 					${truck.delivery_regions ? `<span class="tf-truck-region-tag">&#128205; ${frappe.utils.escape_html(truck.delivery_regions)}</span>` : ''}
-					${closed_html}
+					${closed_badge}
 				</div>
 				<span class="tf-status-badge" id="tf-status-${sid}" style="background:${status_color}">
 					${status_label}
@@ -1056,17 +1056,17 @@ ${truck_blocks}
 			if (ct) self._download_closed_truck(ct);
 		});
 
-		// Reopen closed truck
-		this.container.off('click.tf-reopen').on('click.tf-reopen', '.tf-reopen-truck-btn', function () {
+		// Close & Mark Sorted
+		this.container.off('click.tf-close').on('click.tf-close', '.tf-close-truck-btn', function () {
 			const tn = $(this).data('truck');
 			frappe.confirm(
-				__('Reopen truck {0}? This will unmark all its orders as closed and return it to active status.', [tn]),
+				__('Close truck {0} and mark as sorted? Stock allocation will remain visible but the truck will be flagged as sorted.', [tn]),
 				() => {
 					frappe.call({
-						method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.reopen_truck',
+						method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.close_truck',
 						args: { truck_number: tn },
 						callback: () => {
-							frappe.show_alert({ message: __('Truck {0} reopened', [tn]), indicator: 'green' });
+							frappe.show_alert({ message: __('Truck {0} marked as sorted', [tn]), indicator: 'green' });
 							self.load_data();
 						},
 					});
@@ -1452,19 +1452,14 @@ ${truck_blocks}
 			background: #fff;
 			box-shadow: 0 1px 4px rgba(0,0,0,.05);
 		}
-		.tf-truck-card-closed {
-			border-color: #f59e0b;
-			opacity: 0.85;
-		}
 		.tf-closed-badge {
 			display: inline-block;
-			background: #f59e0b;
+			background: #10b981;
 			color: #fff;
 			font-size: 10px;
 			font-weight: 700;
 			border-radius: 10px;
 			padding: 2px 8px;
-			margin-left: 8px;
 			vertical-align: middle;
 		}
 		.tf-truck-head {

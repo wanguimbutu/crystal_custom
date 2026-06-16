@@ -272,6 +272,53 @@ def get_truck_customer_data():
 
 
 @frappe.whitelist()
+def close_truck(truck_number):
+    """
+    Manually close a truck from the Order Fulfillment page:
+    set custom_truck_closed=1 on all its orders and record it in
+    crystal_closed_trucks.
+    """
+    import json as _json
+
+    orders = frappe.db.sql(
+        """SELECT name, customer_name, custom_delivery_region, total_net_weight, grand_total
+           FROM `tabSales Order`
+           WHERE custom_truck_number = %s AND docstatus != 2""",
+        truck_number, as_dict=1
+    )
+    for o in orders:
+        frappe.db.set_value('Sales Order', o.name, 'custom_truck_closed', 1, update_modified=False)
+
+    existing_closed = _json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
+    existing_meta   = _json.loads(frappe.db.get_default('crystal_truck_meta')    or '[]')
+
+    # Avoid duplicate entries
+    existing_closed = [ct for ct in existing_closed if ct.get('truck_number') != truck_number]
+    meta = next((m for m in existing_meta if m.get('truck_number') == truck_number), {})
+
+    existing_closed.insert(0, {
+        'truck_number': truck_number,
+        'driver_name':  meta.get('driver_name', ''),
+        'capacity_kg':  meta.get('capacity_kg', 0),
+        'closed_at':    str(frappe.utils.now_datetime()),
+        'order_count':  len(orders),
+        'total_weight': sum(float(o.total_net_weight or 0) for o in orders),
+        'total_value':  sum(float(o.grand_total or 0)      for o in orders),
+        'orders': [
+            {
+                'name':            o.name,
+                'customer_name':   o.customer_name or '',
+                'delivery_region': o.custom_delivery_region or '',
+            }
+            for o in orders
+        ],
+    })
+    frappe.db.set_default('crystal_closed_trucks', _json.dumps(existing_closed))
+    frappe.db.commit()
+    return 'ok'
+
+
+@frappe.whitelist()
 def reopen_truck(truck_number):
     """
     Reopen a closed truck: set custom_truck_closed=0 on all its orders
