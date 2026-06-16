@@ -688,9 +688,9 @@ class DeliveryNoteManager {
             const order_rows = t_orders.map(o => {
                 const delivery_date = o.delivery_date || o.transaction_date;
                 const is_overdue    = delivery_date && frappe.datetime.get_diff(frappe.datetime.get_today(), delivery_date) > 0;
-                const is_draft      = o.docstatus === 0;
-                const state_label   = o.workflow_state || (is_draft ? 'Draft' : '');
-                return `<div class="dm-tc-order${is_draft ? ' dm-tc-order-draft' : ''}">
+                const is_submitted  = o.docstatus === 1;
+                const state_label   = o.workflow_state || (!is_submitted ? 'Pending' : '');
+                return `<div class="dm-tc-order${!is_submitted ? ' dm-tc-order-draft' : ''}">
                     <div class="dm-tc-order-main">
                         <a href="/app/sales-order/${o.name}" target="_blank" class="order-link">${frappe.utils.escape_html(o.name)}</a>
                         <span class="dm-tc-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
@@ -699,9 +699,9 @@ class DeliveryNoteManager {
                     <div class="dm-tc-order-right">
                         ${o.grand_total ? `<span class="amount-badge" style="font-size:11px;">${format_currency(o.grand_total, null, 0)}</span>` : ''}
                         ${is_overdue ? '<span class="overdue-badge">OVERDUE</span>' : ''}
-                        ${is_draft
-                            ? `<span class="dm-tc-pending-badge" title="${frappe.utils.escape_html(state_label)}">Pending</span>`
-                            : `<button class="btn btn-xs btn-primary btn-create-dn" data-order="${o.name}" style="margin-left:6px;">Create DN</button>`
+                        ${is_submitted
+                            ? `<button class="btn btn-xs btn-primary btn-create-dn" data-order="${o.name}" style="margin-left:6px;">Create DN</button>`
+                            : `<span class="dm-tc-pending-badge" title="${frappe.utils.escape_html(state_label)}">Pending</span>`
                         }
                     </div>
                 </div>`;
