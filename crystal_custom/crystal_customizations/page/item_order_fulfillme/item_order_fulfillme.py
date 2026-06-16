@@ -65,8 +65,8 @@ def get_truck_fulfillment_data():
     Stock is always current (from tabBin at call time).
     """
     conditions = [
-        "so.docstatus = 0",
-        "so.workflow_state = 'Pending Customer Order Reconfirmation'",
+        "so.docstatus IN (0, 1)",
+        "so.workflow_state IN ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')",
         "so.status NOT IN ('Completed', 'Closed')",
         "so.custom_truck_number IS NOT NULL",
         "so.custom_truck_number != ''",
@@ -135,8 +135,8 @@ def get_truck_fulfillment_data():
                          ORDER BY so.custom_delivery_region
                          SEPARATOR ', ')            AS delivery_regions
         FROM `tabSales Order` so
-        WHERE so.docstatus = 0
-          AND so.workflow_state = 'Pending Customer Order Reconfirmation'
+        WHERE so.docstatus IN (0, 1)
+          AND so.workflow_state IN ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')
           AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
@@ -187,8 +187,8 @@ def get_truck_customer_data():
     Used by the Customer View tab.
     """
     conditions = [
-        "so.docstatus = 0",
-        "so.workflow_state = 'Pending Customer Order Reconfirmation'",
+        "so.docstatus IN (0, 1)",
+        "so.workflow_state IN ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')",
         "so.status NOT IN ('Completed', 'Closed')",
         "so.custom_truck_number IS NOT NULL",
         "so.custom_truck_number != ''",
