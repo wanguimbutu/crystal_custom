@@ -1,3 +1,10 @@
+## [1.15.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.1...v1.15.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* detect paint notes column name dynamically to avoid crash ([fc683d7](https://github.com/wanguimbutu/crystal_custom/commit/fc683d744d46e13c14f88f9c92ac2f5d857d0615))
+
 ## [1.15.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.0...v1.15.1) (2026-06-16)
 
 
