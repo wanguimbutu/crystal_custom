@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.12.0...v1.13.0) (2026-06-16)
+
+
+### Features
+
+* close & mark sorted button on fulfillment trucks; closed trucks fully functional ([49e3d62](https://github.com/wanguimbutu/crystal_custom/commit/49e3d62a9e3322a34b77d123acb5f8aa961177c9))
+
 # [1.12.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.11.0...v1.12.0) (2026-06-16)
 
 
