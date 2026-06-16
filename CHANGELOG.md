@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.5.0...v1.6.0) (2026-06-16)
+
+
+### Features
+
+* print and download buttons for Customer View in Order Fulfillment ([08a3861](https://github.com/wanguimbutu/crystal_custom/commit/08a38613c9612377666143b4008714f70ae16ae4))
+
 # [1.5.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.4.0...v1.5.0) (2026-06-16)
 
 
