@@ -529,7 +529,22 @@ class TruckAssignmentManager {
 			</div>`;
 		});
 
-		// Append closed/dispatched trucks to the same grid
+		html += '</div>';
+
+		if (!this.closed_trucks.length) return html;
+
+		// ── Dispatched trucks in a separate section below the active grid ────────
+		html += `<div style="margin-top:28px;">
+			<div style="font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.6px;
+			            margin-bottom:12px;padding:6px 12px;background:#f1f5f9;border-radius:6px;
+			            border-left:4px solid #64748b;">
+				&#128666; Dispatched Trucks (${this.closed_trucks.length})
+				<span style="font-size:11px;font-weight:400;color:#94a3b8;margin-left:8px;">
+					Closed &mdash; click Reopen to move orders back to active
+				</span>
+			</div>
+			<div class="ta-trucks-grid">`;
+
 		this.closed_trucks.forEach((ct, idx) => {
 			const closed_label = ct.closed_at
 				? frappe.datetime.str_to_user(ct.closed_at.split(' ')[0]) + ' ' + (ct.closed_at.split(' ')[1] || '').slice(0, 5)
@@ -577,7 +592,7 @@ class TruckAssignmentManager {
 			</div>`;
 		});
 
-		html += '</div>';
+		html += '</div></div>'; // close ta-trucks-grid + dispatched section wrapper
 		return html;
 	}
 
