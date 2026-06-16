@@ -1,3 +1,10 @@
+## [1.14.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.0...v1.14.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* align order fulfillment queries with truck assignment filters ([9119934](https://github.com/wanguimbutu/crystal_custom/commit/911993485c161c9ef60d6203d1fd7cdf10725758))
+
 # [1.14.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.13.0...v1.14.0) (2026-06-16)
 
 
