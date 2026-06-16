@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.9.0...v1.10.0) (2026-06-16)
+
+
+### Features
+
+* Paint/Colour Notes field — visible across all pages and production ([0b628d5](https://github.com/wanguimbutu/crystal_custom/commit/0b628d54f40982444c77c8338e2216dfc069f839))
+
 # [1.9.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.8.2...v1.9.0) (2026-06-16)
 
 
