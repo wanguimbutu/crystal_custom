@@ -187,22 +187,31 @@ def get_production_data(from_date=None, to_date=None):
     """, date_params, as_dict=1)
 
     # ── Sales Orders with paint / colour notes ────────────────────────────────
-    paint_orders = frappe.db.sql("""
-        SELECT
-            name,
-            customer_name,
-            transaction_date,
-            custom_delivery_region,
-            custom_truck_number,
-            custom_additonal_notes AS custom_paint_notes,
-            workflow_state
-        FROM `tabSales Order`
-        WHERE docstatus != 2
-          AND status NOT IN ('Completed', 'Closed')
-          AND IFNULL(custom_additonal_notes, '') != ''
-        ORDER BY transaction_date DESC
-        LIMIT 200
-    """, as_dict=1)
+    _notes_col = None
+    for _candidate in ('custom_additonal_notes', 'custom_additional_notes', 'custom_paint_notes'):
+        if frappe.db.has_column('Sales Order', _candidate):
+            _notes_col = _candidate
+            break
+
+    if _notes_col:
+        paint_orders = frappe.db.sql(f"""
+            SELECT
+                name,
+                customer_name,
+                transaction_date,
+                custom_delivery_region,
+                custom_truck_number,
+                `{_notes_col}` AS custom_paint_notes,
+                workflow_state
+            FROM `tabSales Order`
+            WHERE docstatus != 2
+              AND status NOT IN ('Completed', 'Closed')
+              AND IFNULL(`{_notes_col}`, '') != ''
+            ORDER BY transaction_date DESC
+            LIMIT 200
+        """, as_dict=1)
+    else:
+        paint_orders = []
 
     return {
         'mrs':          [dict(r) for r in mrs],

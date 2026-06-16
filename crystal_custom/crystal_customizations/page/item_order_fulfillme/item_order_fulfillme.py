@@ -3,6 +3,20 @@ from frappe import _
 
 FINANCE_APPROVED_STATES = ('Pending Customer Order Reconfirmation', 'Order Confirmed')
 
+_NOTES_COL_CACHE = None
+
+def _get_notes_col():
+    """Return the SO column used for paint/colour notes, or None if absent."""
+    global _NOTES_COL_CACHE
+    if _NOTES_COL_CACHE is not None:
+        return _NOTES_COL_CACHE or None
+    for candidate in ('custom_additonal_notes', 'custom_additional_notes', 'custom_paint_notes'):
+        if frappe.db.has_column('Sales Order', candidate):
+            _NOTES_COL_CACHE = candidate
+            return candidate
+    _NOTES_COL_CACHE = ''
+    return None
+
 
 @frappe.whitelist()
 def get_sales_order_fulfillment(from_date=None, to_date=None):
@@ -70,12 +84,15 @@ def get_truck_fulfillment_data():
                        'Pending Customer Order Reconfirmation',
                        'Order Confirmed')
 
-    rows = frappe.db.sql("""
+    _notes_col = _get_notes_col()
+    _notes_expr = f'so.`{_notes_col}`' if _notes_col else "''"
+
+    rows = frappe.db.sql(f"""
         SELECT
             so.custom_truck_number                                          AS truck_number,
             so.name                                                         AS sales_order,
             so.customer_name,
-            so.custom_additonal_notes                                       AS custom_paint_notes,
+            {_notes_expr}                                                   AS custom_paint_notes,
             so.custom_delivery_region,
             (SELECT GROUP_CONCAT(DISTINCT st.sales_person ORDER BY st.sales_person SEPARATOR ', ')
              FROM `tabSales Team` st WHERE st.parent = so.name)            AS sales_persons,
@@ -191,7 +208,10 @@ def get_truck_customer_data():
                        'Pending Customer Order Reconfirmation',
                        'Order Confirmed')
 
-    rows = frappe.db.sql("""
+    _notes_col = _get_notes_col()
+    _notes_expr = f'so.`{_notes_col}`' if _notes_col else "''"
+
+    rows = frappe.db.sql(f"""
         SELECT
             so.custom_truck_number                                          AS truck_number,
             so.name                                                         AS sales_order,
@@ -199,7 +219,7 @@ def get_truck_customer_data():
             so.customer_name,
             so.grand_total,
             so.total_net_weight,
-            so.custom_additonal_notes AS custom_paint_notes,
+            {_notes_expr}                                                   AS custom_paint_notes,
             soi.item_code,
             soi.item_name,
             GREATEST(0, SUM(soi.qty - IFNULL(soi.delivered_qty, 0)))       AS required_qty,
