@@ -1,3 +1,10 @@
+## [1.14.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.2...v1.14.3) (2026-06-16)
+
+
+### Bug Fixes
+
+* order fulfillment shows all truck-assigned orders regardless of status ([06517b1](https://github.com/wanguimbutu/crystal_custom/commit/06517b19462f083ecbf04269c562fd9b27de8f91))
+
 ## [1.14.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.1...v1.14.2) (2026-06-16)
 
 
