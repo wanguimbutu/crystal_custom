@@ -1,3 +1,10 @@
+## [1.14.4](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.3...v1.14.4) (2026-06-16)
+
+
+### Bug Fixes
+
+* derive truck is_closed from KV store not custom_truck_closed field ([8a0dd06](https://github.com/wanguimbutu/crystal_custom/commit/8a0dd063b63c439708f31d1d6b1a5f18ee233902))
+
 ## [1.14.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.2...v1.14.3) (2026-06-16)
 
 
