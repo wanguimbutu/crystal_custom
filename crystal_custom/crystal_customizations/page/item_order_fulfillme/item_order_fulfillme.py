@@ -64,32 +64,25 @@ def get_truck_fulfillment_data():
     matches truck assignment. Includes closed trucks (is_closed=True).
     Stock is always current (from tabBin at call time).
     """
-    conditions = [
-        "so.docstatus != 2",
-        "so.status NOT IN ('Completed', 'Closed')",
-        "so.custom_truck_number IS NOT NULL",
-        "so.custom_truck_number != ''",
-        "soi.qty > IFNULL(soi.delivered_qty, 0)",
-    ]
-    # No workflow state filter — show every non-cancelled truck-assigned order
-
-    where = " AND ".join(conditions)
-
-    rows = frappe.db.sql(f"""
+    # Show ALL truck-assigned orders regardless of status, workflow state, or docstatus
+    # Only exclude cancelled (docstatus=2) orders
+    rows = frappe.db.sql("""
         SELECT
-            so.custom_truck_number                              AS truck_number,
-            so.name                                             AS sales_order,
+            so.custom_truck_number                                          AS truck_number,
+            so.name                                                         AS sales_order,
             so.customer_name,
             so.custom_paint_notes,
-            MAX(IFNULL(so.custom_truck_closed, 0))              AS is_closed,
+            MAX(IFNULL(so.custom_truck_closed, 0))                          AS is_closed,
             soi.item_code,
             soi.item_name,
-            SUM(soi.qty - IFNULL(soi.delivered_qty, 0))        AS required_qty,
+            GREATEST(0, SUM(soi.qty - IFNULL(soi.delivered_qty, 0)))       AS required_qty,
             soi.uom,
-            IFNULL(soi.weight_per_unit, 0)                     AS weight_per_unit
+            IFNULL(soi.weight_per_unit, 0)                                  AS weight_per_unit
         FROM `tabSales Order` so
         INNER JOIN `tabSales Order Item` soi ON soi.parent = so.name
-        WHERE {where}
+        WHERE so.docstatus != 2
+          AND so.custom_truck_number IS NOT NULL
+          AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number, so.name, soi.item_code
         ORDER BY so.custom_truck_number, soi.item_code
     """, as_dict=1)
@@ -97,15 +90,17 @@ def get_truck_fulfillment_data():
     if not rows:
         return {'trucks': [], 'stock': {}}
 
-    # Unique items for one stock lookup (always current)
-    unique_items = list({r.item_code for r in rows})
-    item_ph = ', '.join(['%s'] * len(unique_items))
-    stock_rows = frappe.db.sql(
-        f"SELECT item_code, IFNULL(SUM(actual_qty),0) AS available_qty "
-        f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
-        unique_items, as_dict=1,
-    )
-    stock_map  = {s.item_code: float(s.available_qty) for s in stock_rows}
+    # Unique items still needing stock (required_qty > 0) for stock lookup
+    unique_items = list({r.item_code for r in rows if float(r.required_qty) > 0})
+    stock_map  = {}
+    if unique_items:
+        item_ph = ', '.join(['%s'] * len(unique_items))
+        stock_rows = frappe.db.sql(
+            f"SELECT item_code, IFNULL(SUM(actual_qty),0) AS available_qty "
+            f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
+            unique_items, as_dict=1,
+        )
+        stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
     item_names = {r.item_code: r.item_name for r in rows}
     item_uoms  = {r.item_code: r.uom       for r in rows}
 
@@ -113,12 +108,15 @@ def get_truck_fulfillment_data():
     trucks_map = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float), 'is_closed': False})
     for r in rows:
         tn = r.truck_number
+        # Always add the order (even if all items delivered) so order count matches truck assignment
         trucks_map[tn]['orders'][r.sales_order] = {
             'name':          r.sales_order,
             'customer_name': r.customer_name or r.sales_order,
             'paint_notes':   r.custom_paint_notes or '',
         }
-        trucks_map[tn]['items'][r.item_code] += float(r.required_qty)
+        # Only accumulate items that still need to be fulfilled
+        if float(r.required_qty) > 0:
+            trucks_map[tn]['items'][r.item_code] += float(r.required_qty)
         if r.is_closed:
             trucks_map[tn]['is_closed'] = True
 
@@ -135,7 +133,6 @@ def get_truck_fulfillment_data():
                          SEPARATOR ', ')            AS delivery_regions
         FROM `tabSales Order` so
         WHERE so.docstatus != 2
-          AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number
@@ -184,34 +181,27 @@ def get_truck_customer_data():
     Includes closed trucks. Stock is always current.
     Used by the Customer View tab.
     """
-    conditions = [
-        "so.docstatus != 2",
-        "so.status NOT IN ('Completed', 'Closed')",
-        "so.custom_truck_number IS NOT NULL",
-        "so.custom_truck_number != ''",
-        "soi.qty > IFNULL(soi.delivered_qty, 0)",
-    ]
-    # No workflow state or date filter
-
-    where = " AND ".join(conditions)
-
-    rows = frappe.db.sql(f"""
+    # Show ALL truck-assigned orders regardless of status or workflow state
+    # Only exclude cancelled (docstatus=2) orders
+    rows = frappe.db.sql("""
         SELECT
-            so.custom_truck_number                              AS truck_number,
-            so.name                                             AS sales_order,
+            so.custom_truck_number                                          AS truck_number,
+            so.name                                                         AS sales_order,
             so.customer,
             so.customer_name,
             so.grand_total,
             so.total_net_weight,
             so.custom_paint_notes,
-            IFNULL(so.custom_truck_closed, 0)                  AS is_closed,
+            IFNULL(so.custom_truck_closed, 0)                               AS is_closed,
             soi.item_code,
             soi.item_name,
-            SUM(soi.qty - IFNULL(soi.delivered_qty, 0))        AS required_qty,
+            GREATEST(0, SUM(soi.qty - IFNULL(soi.delivered_qty, 0)))       AS required_qty,
             soi.uom
         FROM `tabSales Order` so
         INNER JOIN `tabSales Order Item` soi ON soi.parent = so.name
-        WHERE {where}
+        WHERE so.docstatus != 2
+          AND so.custom_truck_number IS NOT NULL
+          AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number, so.name, soi.item_code
         ORDER BY so.custom_truck_number, so.customer_name, so.name, soi.item_code
     """, as_dict=1)
@@ -219,18 +209,20 @@ def get_truck_customer_data():
     if not rows:
         return {'trucks': [], 'stock': {}}
 
-    # Unique items for stock lookup
-    unique_items = list({r.item_code for r in rows})
-    item_ph = ', '.join(['%s'] * len(unique_items))
-    stock_rows = frappe.db.sql(
-        f"SELECT item_code, IFNULL(SUM(actual_qty), 0) AS available_qty "
-        f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
-        unique_items, as_dict=1,
-    )
-    stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
+    # Unique items still needing fulfillment for stock lookup
+    unique_items = list({r.item_code for r in rows if float(r.required_qty) > 0})
+    stock_map = {}
+    if unique_items:
+        item_ph = ', '.join(['%s'] * len(unique_items))
+        stock_rows = frappe.db.sql(
+            f"SELECT item_code, IFNULL(SUM(actual_qty), 0) AS available_qty "
+            f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
+            unique_items, as_dict=1,
+        )
+        stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
 
-    # Group truck → order → items
-    from collections import defaultdict, OrderedDict
+    # Group truck → order → items (only items with pending qty)
+    from collections import OrderedDict
     trucks_map = OrderedDict()
     for r in rows:
         tn = r.truck_number
@@ -239,21 +231,23 @@ def get_truck_customer_data():
             trucks_map[tn] = OrderedDict()
         if on not in trucks_map[tn]:
             trucks_map[tn][on] = {
-                'name':            on,
-                'customer':        r.customer,
-                'customer_name':   r.customer_name or on,
-                'grand_total':     float(r.grand_total or 0),
+                'name':             on,
+                'customer':         r.customer,
+                'customer_name':    r.customer_name or on,
+                'grand_total':      float(r.grand_total or 0),
                 'total_net_weight': float(r.total_net_weight or 0),
-                'paint_notes':     r.custom_paint_notes or '',
-                'is_closed':       bool(r.is_closed),
-                'items':           [],
+                'paint_notes':      r.custom_paint_notes or '',
+                'is_closed':        bool(r.is_closed),
+                'items':            [],
             }
-        trucks_map[tn][on]['items'].append({
-            'item_code':    r.item_code,
-            'item_name':    r.item_name,
-            'required_qty': float(r.required_qty),
-            'uom':          r.uom,
-        })
+        # Only include items with outstanding quantity
+        if float(r.required_qty) > 0:
+            trucks_map[tn][on]['items'].append({
+                'item_code':    r.item_code,
+                'item_name':    r.item_name,
+                'required_qty': float(r.required_qty),
+                'uom':          r.uom,
+            })
 
     trucks = []
     for tn, orders_dict in trucks_map.items():
