@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.13.0...v1.14.0) (2026-06-16)
+
+
+### Features
+
+* separate Sorted Trucks into own tab in order fulfillment ([a4a8b81](https://github.com/wanguimbutu/crystal_custom/commit/a4a8b81843417b293f73866bb4da8a0a8ca74683))
+
 # [1.13.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.12.0...v1.13.0) (2026-06-16)
 
 
