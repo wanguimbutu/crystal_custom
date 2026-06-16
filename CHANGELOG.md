@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.7.0...v1.8.0) (2026-06-16)
+
+
+### Features
+
+* Loading Sheet and Packing List buttons on each truck card in DN Manager ([1121b62](https://github.com/wanguimbutu/crystal_custom/commit/1121b62fea46b9dce356304a6e61e46b632dbc95))
+
 # [1.7.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.6.0...v1.7.0) (2026-06-16)
 
 
