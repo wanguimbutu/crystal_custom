@@ -1,3 +1,10 @@
+## [1.10.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.2...v1.10.3) (2026-06-16)
+
+
+### Bug Fixes
+
+* dedup dispatched trucks, show worksheets tab, phone numbers from customer, pdc totals ([7590906](https://github.com/wanguimbutu/crystal_custom/commit/75909063c301fe005cb02d7afde653adfb9ad7bd))
+
 ## [1.10.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.1...v1.10.2) (2026-06-16)
 
 
