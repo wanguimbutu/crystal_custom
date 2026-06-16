@@ -194,6 +194,11 @@ def get_production_data(from_date=None, to_date=None):
             break
 
     if _notes_col:
+        so_date_conds = ""
+        if from_date:
+            so_date_conds += " AND transaction_date >= %(from_date)s"
+        if to_date:
+            so_date_conds += " AND transaction_date <= %(to_date)s"
         paint_orders = frappe.db.sql(f"""
             SELECT
                 name,
@@ -207,9 +212,10 @@ def get_production_data(from_date=None, to_date=None):
             WHERE docstatus != 2
               AND status NOT IN ('Completed', 'Closed')
               AND IFNULL(`{_notes_col}`, '') != ''
+              {so_date_conds}
             ORDER BY transaction_date DESC
             LIMIT 200
-        """, as_dict=1)
+        """, date_params, as_dict=1)
     else:
         paint_orders = []
 
