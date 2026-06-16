@@ -736,6 +736,24 @@ class TruckAssignmentManager {
 			});
 		}
 
+		const over = this._check_capacity(truck_number, to_assign);
+		if (over) {
+			frappe.msgprint({
+				title: __('Truck Over Capacity'),
+				message: __(
+					'Cannot assign {0} order(s) to truck <strong>{1}</strong>.<br>' +
+					'Current load: <strong>{2} kg</strong><br>' +
+					'These orders add: <strong>{3} kg</strong><br>' +
+					'Total would be: <strong>{4} kg</strong> — exceeds capacity of <strong>{5} kg</strong>.',
+					[to_assign.length, truck_number,
+					 over.current.toFixed(0), over.adding.toFixed(0),
+					 over.total.toFixed(0), over.capacity.toFixed(0)]
+				),
+				indicator: 'red',
+			});
+			return;
+		}
+
 		frappe.confirm(
 			__('Assign {0} order(s) to truck {1}?', [to_assign.length, truck_number]),
 			() => {
@@ -753,7 +771,50 @@ class TruckAssignmentManager {
 
 	// ── Backend calls ─────────────────────────────────────────────────────────
 
+	_check_capacity(truck_number, orders_to_add) {
+		const truck    = this.available_trucks.find(t => t.truck_number === truck_number);
+		const capacity = truck ? (truck.capacity_kg || 0) : 0;
+		if (!capacity) return null; // no limit configured
+
+		const names_to_add = new Set(orders_to_add.map(o => (typeof o === 'string' ? o : o.name)));
+		const current_weight = this.orders
+			.filter(o => o.custom_truck_number === truck_number && !names_to_add.has(o.name))
+			.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+		const adding_weight = orders_to_add.reduce((s, o) => {
+			if (typeof o === 'string') {
+				const found = this.orders.find(x => x.name === o);
+				return s + ((found && found.total_net_weight) || 0);
+			}
+			return s + (o.total_net_weight || 0);
+		}, 0);
+		const total = current_weight + adding_weight;
+		if (total > capacity) {
+			return { current: current_weight, adding: adding_weight, total, capacity };
+		}
+		return null;
+	}
+
 	_set_truck(order_name, truck_number) {
+		if (truck_number) {
+			const over = this._check_capacity(truck_number, [order_name]);
+			if (over) {
+				frappe.msgprint({
+					title: __('Truck Over Capacity'),
+					message: __(
+						'Cannot assign order to truck <strong>{0}</strong>.<br>' +
+						'Current load: <strong>{1} kg</strong><br>' +
+						'This order adds: <strong>{2} kg</strong><br>' +
+						'Total would be: <strong>{3} kg</strong> — exceeds capacity of <strong>{4} kg</strong>.',
+						[truck_number,
+						 over.current.toFixed(0), over.adding.toFixed(0),
+						 over.total.toFixed(0), over.capacity.toFixed(0)]
+					),
+					indicator: 'red',
+				});
+				this.render_view(); // reset the input dropdown
+				return;
+			}
+		}
 		frappe.call({
 			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_number',
 			args: { order_name, truck_number },

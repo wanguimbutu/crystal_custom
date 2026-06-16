@@ -837,14 +837,14 @@ class DeliveryNoteManager {
                 if (doc_type === 'loading_sheet') {
                     const agg = {};
                     raw_items.forEach(i => {
-                        const pending = (i.qty || 0) - (i.delivered_qty || 0);
-                        if (pending <= 0) return;
+                        const qty = i.qty || 0;
+                        if (qty <= 0) return;
                         if (!agg[i.item_code]) {
                             agg[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom, weight: 0, amount: 0 };
                         }
-                        agg[i.item_code].qty    += pending;
-                        agg[i.item_code].weight += pending * (i.weight_per_unit || 0);
-                        agg[i.item_code].amount += pending * (i.rate || 0);
+                        agg[i.item_code].qty    += qty;
+                        agg[i.item_code].weight += qty * (i.weight_per_unit || 0);
+                        agg[i.item_code].amount += qty * (i.rate || 0);
                     });
                     const items = Object.values(agg).sort((a, b) => a.item_code.localeCompare(b.item_code));
                     this._print_loading_sheet_for_truck(truck_num, order_names, items);
