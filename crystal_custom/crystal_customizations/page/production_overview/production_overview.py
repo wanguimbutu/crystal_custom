@@ -1,0 +1,205 @@
+import frappe
+from frappe.utils import flt
+
+
+@frappe.whitelist()
+def get_production_data():
+    """
+    Returns everything the production page needs in one call:
+    - Manufacture Material Requests (not cancelled)
+    - Work Orders linked to those MRs
+    - BOM-level raw material requirements + current bin stock for each WO
+    """
+    # ── Material Requests (Manufacture) ───────────────────────────────────────
+    mrs = frappe.db.sql("""
+        SELECT
+            mr.name,
+            mr.transaction_date,
+            mr.schedule_date,
+            mr.status,
+            mr.custom_source_page
+        FROM `tabMaterial Request` mr
+        WHERE mr.material_request_type = 'Manufacture'
+          AND mr.docstatus != 2
+        ORDER BY mr.transaction_date DESC
+        LIMIT 200
+    """, as_dict=1)
+
+    mr_names = [r.name for r in mrs]
+
+    mr_items = []
+    if mr_names:
+        mr_items = frappe.db.sql("""
+            SELECT
+                mri.name,
+                mri.parent       AS mr_name,
+                mri.item_code,
+                mri.item_name,
+                mri.qty,
+                mri.uom,
+                mri.warehouse
+            FROM `tabMaterial Request Item` mri
+            WHERE mri.parent IN %(names)s
+            ORDER BY mri.parent, mri.idx
+        """, {'names': mr_names}, as_dict=1)
+
+    # ── Work Orders linked to those MRs ───────────────────────────────────────
+    work_orders = []
+    if mr_names:
+        work_orders = frappe.db.sql("""
+            SELECT
+                wo.name,
+                wo.production_item,
+                wo.item_name,
+                wo.qty,
+                wo.produced_qty,
+                wo.status,
+                wo.planned_start_date,
+                wo.planned_end_date,
+                wo.actual_start_date,
+                wo.bom_no,
+                wo.material_request   AS mr_name,
+                wo.wip_warehouse,
+                wo.fg_warehouse,
+                IFNULL(wo.pm_is_paint_order, 0) AS is_paint_order
+            FROM `tabWork Order` wo
+            WHERE wo.material_request IN %(names)s
+              AND wo.docstatus != 2
+            ORDER BY wo.creation DESC
+        """, {'names': mr_names}, as_dict=1)
+
+    wo_names = [w.name for w in work_orders]
+
+    # ── BOM raw material requirements per Work Order ──────────────────────────
+    bom_items = []
+    if work_orders:
+        boms = list({w.bom_no for w in work_orders if w.bom_no})
+        if boms:
+            bom_items = frappe.db.sql("""
+                SELECT
+                    bi.parent  AS bom_no,
+                    bi.item_code,
+                    bi.item_name,
+                    bi.qty     AS qty_per_unit,
+                    bi.uom,
+                    bi.source_warehouse
+                FROM `tabBOM Item` bi
+                WHERE bi.parent IN %(boms)s
+                  AND bi.docstatus = 1
+            """, {'boms': boms}, as_dict=1)
+
+    # For each BOM item, scale qty to the WO qty and fetch bin stock
+    # Build: { bom_no: [items...] }
+    bom_map = {}
+    for bi in bom_items:
+        bom_map.setdefault(bi.bom_no, []).append(bi)
+
+    # Collect all item_codes we need stock for
+    all_item_codes = list({bi.item_code for bi in bom_items})
+    stock_map = {}
+    if all_item_codes:
+        bins = frappe.db.sql("""
+            SELECT item_code, SUM(actual_qty) AS actual_qty
+            FROM `tabBin`
+            WHERE item_code IN %(codes)s
+            GROUP BY item_code
+        """, {'codes': all_item_codes}, as_dict=1)
+        stock_map = {b.item_code: flt(b.actual_qty) for b in bins}
+
+    # Build full WO data with scaled BOM requirements
+    wo_data = []
+    for wo in work_orders:
+        scale = flt(wo.qty)
+        bom_reqs = []
+        for bi in bom_map.get(wo.bom_no, []):
+            needed   = flt(bi.qty_per_unit) * scale
+            in_stock = stock_map.get(bi.item_code, 0)
+            bom_reqs.append({
+                'item_code':  bi.item_code,
+                'item_name':  bi.item_name,
+                'needed':     needed,
+                'in_stock':   in_stock,
+                'shortfall':  max(0, needed - in_stock),
+                'uom':        bi.uom,
+            })
+        # Additional paint materials (pm_additional_materials child table)
+        extra = []
+        if wo.is_paint_order:
+            extra = frappe.db.sql("""
+                SELECT item_code, item_name, qty, uom
+                FROM `tabPM Additional Material`
+                WHERE parent = %(wo)s
+            """, {'wo': wo.name}, as_dict=1)
+            for e in extra:
+                in_stock = stock_map.get(e.item_code, 0)
+                bom_reqs.append({
+                    'item_code':  e.item_code,
+                    'item_name':  e.item_name,
+                    'needed':     flt(e.qty),
+                    'in_stock':   in_stock,
+                    'shortfall':  max(0, flt(e.qty) - in_stock),
+                    'uom':        e.uom,
+                    'is_extra':   True,
+                })
+
+        pct = round((flt(wo.produced_qty) / scale * 100), 1) if scale else 0
+        wo_data.append({
+            **{k: v for k, v in wo.items()},
+            'pct_complete': pct,
+            'can_start':    all(r['shortfall'] == 0 for r in bom_reqs),
+            'bom_items':    bom_reqs,
+        })
+
+    return {
+        'mrs':        [dict(r) for r in mrs],
+        'mr_items':   [dict(r) for r in mr_items],
+        'work_orders': wo_data,
+    }
+
+
+@frappe.whitelist()
+def create_work_order(mr_name, item_code, qty, bom_no=None):
+    """Create a Work Order from a Material Request item."""
+    if not bom_no:
+        bom_no = frappe.db.get_value('BOM', {'item': item_code, 'is_active': 1, 'is_default': 1}, 'name')
+    if not bom_no:
+        bom_no = frappe.db.get_value('BOM', {'item': item_code, 'is_active': 1}, 'name',
+                                     order_by='creation desc')
+    if not bom_no:
+        frappe.throw(f'No active BOM found for item {item_code}')
+
+    bom = frappe.get_doc('BOM', bom_no)
+    company = frappe.defaults.get_user_default('Company') or frappe.db.get_single_value('Global Defaults', 'default_company')
+
+    wo = frappe.new_doc('Work Order')
+    wo.production_item   = item_code
+    wo.bom_no            = bom_no
+    wo.qty               = flt(qty)
+    wo.company           = company
+    wo.material_request  = mr_name
+    wo.planned_start_date = frappe.utils.today()
+    wo.fg_warehouse      = (frappe.db.get_value('Item Default',
+                                {'parent': item_code, 'company': company}, 'default_warehouse')
+                            or bom.fg_warehouse or '')
+    wo.wip_warehouse     = bom.with_operations and bom.fg_warehouse or ''
+    wo.insert(ignore_permissions=True)
+    return wo.name
+
+
+@frappe.whitelist()
+def submit_work_order(wo_name):
+    wo = frappe.get_doc('Work Order', wo_name)
+    wo.submit()
+    return wo.name
+
+
+@frappe.whitelist()
+def get_bom_list(item_code):
+    """Return all active BOMs for an item so the user can pick one."""
+    boms = frappe.db.get_all(
+        'BOM',
+        filters={'item': item_code, 'is_active': 1, 'docstatus': 1},
+        fields=['name', 'item_name', 'is_default'],
+        order_by='is_default desc, creation desc',
+    )
+    return boms

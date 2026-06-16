@@ -1,0 +1,505 @@
+frappe.pages['production-overview'].on_page_load = function (wrapper) {
+    var page = frappe.ui.make_app_page({
+        parent: wrapper,
+        title: 'Production Overview',
+        single_column: true,
+    });
+    new ProductionOverview(page);
+};
+
+class ProductionOverview {
+    constructor(page) {
+        this.page = page;
+        this.data  = { mrs: [], mr_items: [], work_orders: [] };
+        this.active_tab = 'requests';
+        this._setup_page();
+        this.load();
+    }
+
+    _setup_page() {
+        this.page.add_button(__('Refresh'), () => this.load(), 'octicon octicon-sync');
+        this.container = $('<div class="po-container"></div>').appendTo(this.page.main);
+    }
+
+    // ── Data ─────────────────────────────────────────────────────────────────
+
+    load() {
+        this.container.html(this._loading_html());
+        frappe.call({
+            method: 'crystal_custom.crystal_customizations.page.production_overview.production_overview.get_production_data',
+            freeze: false,
+            callback: (r) => {
+                if (r.message) {
+                    this.data = r.message;
+                    this.render();
+                }
+            },
+        });
+    }
+
+    _loading_html() {
+        return `<div style="text-align:center;padding:60px;color:#6b7280;">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p style="margin-top:16px;">Loading production data…</p>
+        </div>`;
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+
+    render() {
+        const { mrs, mr_items, work_orders } = this.data;
+
+        // KPIs
+        const pending_mrs  = mrs.filter(m => m.status !== 'Stopped' && m.status !== 'Cancelled');
+        const active_wos   = work_orders.filter(w => w.status !== 'Completed');
+        const short_wos    = work_orders.filter(w => !w.can_start && w.status !== 'Completed');
+        const total_items  = mr_items.reduce((s, i) => s + (i.qty || 0), 0);
+
+        const kpi = this._kpi_row([
+            { label: 'Pending Requests', value: pending_mrs.length,  color: '#667eea, #764ba2' },
+            { label: 'Active Work Orders', value: active_wos.length, color: '#43e97b, #38f9d7' },
+            { label: 'Items to Produce',  value: total_items.toFixed(0), color: '#f093fb, #f5576c' },
+            { label: 'Short on Materials', value: short_wos.length,  color: '#f59e0b, #d97706' },
+        ]);
+
+        const tabs = `
+            <div class="po-tabs">
+                <button class="po-tab-btn ${this.active_tab === 'requests'  ? 'po-tab-active' : ''}" data-tab="requests">
+                    &#128203; Production Requests
+                    <span class="po-tab-badge">${pending_mrs.length}</span>
+                </button>
+                <button class="po-tab-btn ${this.active_tab === 'workorders' ? 'po-tab-active' : ''}" data-tab="workorders">
+                    &#9881; Work Orders
+                    <span class="po-tab-badge">${work_orders.length}</span>
+                </button>
+                <button class="po-tab-btn ${this.active_tab === 'materials'  ? 'po-tab-active' : ''}" data-tab="materials">
+                    &#128230; Material Readiness
+                    <span class="po-tab-badge po-tab-badge-warn">${short_wos.length}</span>
+                </button>
+            </div>
+            <div class="po-tab-content" id="po-tab-content"></div>`;
+
+        this.container.html(`${kpi}${tabs}${this._styles()}`);
+        this._render_active_tab();
+        this._attach_events();
+    }
+
+    _render_active_tab() {
+        const $content = this.container.find('#po-tab-content');
+        if (this.active_tab === 'requests')   $content.html(this._render_requests_tab());
+        if (this.active_tab === 'workorders') $content.html(this._render_workorders_tab());
+        if (this.active_tab === 'materials')  $content.html(this._render_materials_tab());
+        this._attach_tab_events();
+    }
+
+    // ── Requests tab ─────────────────────────────────────────────────────────
+
+    _render_requests_tab() {
+        const { mrs, mr_items } = this.data;
+        const items_by_mr = {};
+        mr_items.forEach(i => {
+            if (!items_by_mr[i.mr_name]) items_by_mr[i.mr_name] = [];
+            items_by_mr[i.mr_name].push(i);
+        });
+
+        const wo_mr_set = new Set(this.data.work_orders.map(w => w.mr_name).filter(Boolean));
+
+        if (!mrs.length) {
+            return `<div class="po-empty">No production requests found.</div>`;
+        }
+
+        const cards = mrs.map(mr => {
+            const items   = items_by_mr[mr.name] || [];
+            const has_wos = wo_mr_set.has(mr.name);
+            const status_color = {
+                'Draft':             '#6b7280',
+                'Submitted':         '#3b82f6',
+                'Partially Ordered': '#f59e0b',
+                'Ordered':           '#10b981',
+                'Transferred':       '#10b981',
+                'Issued':            '#10b981',
+                'Received':          '#10b981',
+            }[mr.status] || '#6b7280';
+
+            const item_rows = items.map(i => {
+                const wo_for_item = this.data.work_orders.find(w => w.mr_name === mr.name && w.production_item === i.item_code);
+                const wo_badge = wo_for_item
+                    ? `<span class="po-wo-badge" title="${wo_for_item.name}">${wo_for_item.status}</span>`
+                    : `<button class="btn btn-xs btn-primary po-create-wo-btn"
+                            data-mr="${frappe.utils.escape_html(mr.name)}"
+                            data-item="${frappe.utils.escape_html(i.item_code)}"
+                            data-qty="${i.qty}"
+                            data-uom="${frappe.utils.escape_html(i.uom || '')}">
+                            + Create Work Order
+                       </button>`;
+                return `<tr>
+                    <td><strong>${frappe.utils.escape_html(i.item_code)}</strong></td>
+                    <td>${frappe.utils.escape_html(i.item_name || '')}</td>
+                    <td class="po-r">${flt(i.qty, 2)} ${frappe.utils.escape_html(i.uom || '')}</td>
+                    <td>${wo_badge}</td>
+                </tr>`;
+            }).join('');
+
+            return `<div class="po-mr-card">
+                <div class="po-mr-head">
+                    <span>
+                        <a href="/app/material-request/${mr.name}" target="_blank" class="po-mr-link">
+                            &#128203; ${frappe.utils.escape_html(mr.name)}
+                        </a>
+                        ${mr.custom_source_page ? `<span class="po-source-tag">${frappe.utils.escape_html(mr.custom_source_page)}</span>` : ''}
+                    </span>
+                    <span style="display:flex;align-items:center;gap:8px;">
+                        <span class="po-status-dot" style="background:${status_color};">${frappe.utils.escape_html(mr.status)}</span>
+                        <span style="font-size:11px;color:#94a3b8;">${frappe.datetime.str_to_user(mr.transaction_date)}</span>
+                        ${mr.schedule_date ? `<span style="font-size:11px;color:#f59e0b;">Due: ${frappe.datetime.str_to_user(mr.schedule_date)}</span>` : ''}
+                    </span>
+                </div>
+                <table class="po-items-table">
+                    <thead><tr><th>Item Code</th><th>Description</th><th>Qty</th><th>Work Order</th></tr></thead>
+                    <tbody>${item_rows || '<tr><td colspan="4" style="text-align:center;color:#9ca3af;">No items</td></tr>'}</tbody>
+                </table>
+            </div>`;
+        }).join('');
+
+        return `<div class="po-mr-list">${cards}</div>`;
+    }
+
+    // ── Work Orders tab ───────────────────────────────────────────────────────
+
+    _render_workorders_tab() {
+        const { work_orders } = this.data;
+        if (!work_orders.length) {
+            return `<div class="po-empty">No Work Orders linked to production requests yet.</div>`;
+        }
+
+        const rows = work_orders.map(wo => {
+            const pct = wo.pct_complete || 0;
+            const bar_color = wo.status === 'Completed' ? '#10b981'
+                : pct > 50 ? '#3b82f6' : '#f59e0b';
+            const status_color = {
+                'Draft':       '#6b7280',
+                'Submitted':   '#3b82f6',
+                'Not Started': '#6b7280',
+                'In Process':  '#f59e0b',
+                'Completed':   '#10b981',
+                'Stopped':     '#ef4444',
+            }[wo.status] || '#6b7280';
+
+            const short_count = (wo.bom_items || []).filter(b => b.shortfall > 0).length;
+            const readiness_badge = wo.status === 'Completed'
+                ? ''
+                : wo.can_start
+                    ? `<span class="po-ready-badge">&#10003; Ready</span>`
+                    : `<span class="po-short-badge">&#9888; ${short_count} material${short_count !== 1 ? 's' : ''} short</span>`;
+
+            const action_btn = wo.status === 'Draft'
+                ? `<button class="btn btn-xs btn-success po-submit-wo-btn" data-wo="${frappe.utils.escape_html(wo.name)}">Submit</button>`
+                : wo.status === 'Completed' ? ''
+                : `<a href="/app/work-order/${wo.name}" target="_blank" class="btn btn-xs btn-default">Open</a>`;
+
+            return `<tr class="po-wo-row" data-wo="${frappe.utils.escape_html(wo.name)}">
+                <td>
+                    <a href="/app/work-order/${wo.name}" target="_blank" class="po-mr-link">
+                        ${frappe.utils.escape_html(wo.name)}
+                    </a>
+                    ${wo.mr_name ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px;">MR: ${frappe.utils.escape_html(wo.mr_name)}</div>` : ''}
+                </td>
+                <td>
+                    <strong>${frappe.utils.escape_html(wo.production_item)}</strong>
+                    <div style="font-size:11px;color:#6b7280;">${frappe.utils.escape_html(wo.item_name || '')}</div>
+                    ${wo.is_paint_order ? '<span class="po-paint-tag">&#127758; Paint</span>' : ''}
+                </td>
+                <td class="po-r">${flt(wo.qty, 2)}</td>
+                <td class="po-r">${flt(wo.produced_qty, 2)}</td>
+                <td>
+                    <div class="po-progress-bar">
+                        <div class="po-progress-fill" style="width:${pct}%;background:${bar_color};"></div>
+                    </div>
+                    <div style="font-size:10px;color:#6b7280;text-align:right;">${pct}%</div>
+                </td>
+                <td><span class="po-status-dot" style="background:${status_color};">${frappe.utils.escape_html(wo.status)}</span></td>
+                <td>${readiness_badge}</td>
+                <td>${action_btn}</td>
+            </tr>
+            <tr class="po-wo-detail-row" id="po-wo-detail-${frappe.utils.escape_html(wo.name)}" style="display:none;">
+                <td colspan="8">${this._wo_detail_html(wo)}</td>
+            </tr>`;
+        }).join('');
+
+        return `<div class="table-responsive">
+            <table class="table table-bordered po-wo-table">
+                <thead><tr>
+                    <th>Work Order</th><th>Item</th>
+                    <th class="po-r">Target Qty</th><th class="po-r">Produced</th>
+                    <th width="120px">Progress</th><th>Status</th>
+                    <th>Materials</th><th width="80px">Action</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    }
+
+    _wo_detail_html(wo) {
+        if (!wo.bom_items || !wo.bom_items.length) {
+            return `<div style="padding:12px;color:#9ca3af;">No BOM items found.</div>`;
+        }
+        const rows = wo.bom_items.map(b => {
+            const ok = b.shortfall === 0;
+            return `<tr style="${!ok ? 'background:#fef2f2;' : ''}">
+                <td>${frappe.utils.escape_html(b.item_code)}</td>
+                <td>${frappe.utils.escape_html(b.item_name || '')}
+                    ${b.is_extra ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:8px;margin-left:4px;">Extra</span>' : ''}
+                </td>
+                <td class="po-r">${flt(b.needed, 3)} ${frappe.utils.escape_html(b.uom || '')}</td>
+                <td class="po-r">${flt(b.in_stock, 3)}</td>
+                <td class="po-r" style="color:${ok ? '#10b981' : '#ef4444'};font-weight:600;">
+                    ${ok ? '&#10003; OK' : `&#9888; Short ${flt(b.shortfall, 3)}`}
+                </td>
+            </tr>`;
+        }).join('');
+
+        return `<div style="padding:12px 20px;">
+            <strong style="font-size:12px;color:#374151;">BOM / Raw Material Requirements</strong>
+            <table class="table table-sm po-detail-table" style="margin-top:8px;">
+                <thead><tr>
+                    <th>Item Code</th><th>Description</th>
+                    <th class="po-r">Required</th><th class="po-r">In Stock</th>
+                    <th class="po-r">Status</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    }
+
+    // ── Material Readiness tab ────────────────────────────────────────────────
+
+    _render_materials_tab() {
+        const active_wos = this.data.work_orders.filter(w => w.status !== 'Completed');
+        if (!active_wos.length) {
+            return `<div class="po-empty">No active Work Orders to check materials for.</div>`;
+        }
+
+        // Aggregate required vs. in-stock across all active WOs per item
+        const agg = {};
+        active_wos.forEach(wo => {
+            (wo.bom_items || []).forEach(b => {
+                if (!agg[b.item_code]) {
+                    agg[b.item_code] = { item_code: b.item_code, item_name: b.item_name, uom: b.uom, total_needed: 0, in_stock: b.in_stock };
+                }
+                agg[b.item_code].total_needed += b.needed;
+                agg[b.item_code].in_stock = Math.max(agg[b.item_code].in_stock, b.in_stock);
+            });
+        });
+
+        const items = Object.values(agg).sort((a, b) => {
+            const sa = Math.max(0, a.total_needed - a.in_stock);
+            const sb = Math.max(0, b.total_needed - b.in_stock);
+            return sb - sa; // shortfall first
+        });
+
+        const rows = items.map((it, idx) => {
+            const shortfall = Math.max(0, it.total_needed - it.in_stock);
+            const ok = shortfall === 0;
+            const pct = it.total_needed > 0 ? Math.min(100, (it.in_stock / it.total_needed) * 100) : 100;
+            return `<tr style="${!ok ? 'background:#fef2f2;' : ''}">
+                <td>${idx + 1}</td>
+                <td><strong>${frappe.utils.escape_html(it.item_code)}</strong></td>
+                <td>${frappe.utils.escape_html(it.item_name || '')}</td>
+                <td class="po-r">${flt(it.total_needed, 2)} ${frappe.utils.escape_html(it.uom || '')}</td>
+                <td class="po-r">${flt(it.in_stock, 2)}</td>
+                <td class="po-r" style="color:${ok ? '#10b981' : '#ef4444'};font-weight:600;">
+                    ${ok ? '&#10003; OK' : flt(shortfall, 2)}
+                </td>
+                <td>
+                    <div class="po-progress-bar">
+                        <div class="po-progress-fill" style="width:${pct.toFixed(0)}%;background:${ok ? '#10b981' : pct > 50 ? '#f59e0b' : '#ef4444'};"></div>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+
+        const ok_count   = items.filter(it => it.total_needed <= it.in_stock).length;
+        const short_count = items.length - ok_count;
+
+        return `<div>
+            <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+                <div class="po-mat-kpi po-mat-ok">&#10003; ${ok_count} item${ok_count !== 1 ? 's' : ''} sufficient</div>
+                <div class="po-mat-kpi po-mat-short">&#9888; ${short_count} item${short_count !== 1 ? 's' : ''} short</div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-bordered po-wo-table">
+                    <thead><tr>
+                        <th width="4%">#</th><th width="14%">Item Code</th><th>Description</th>
+                        <th class="po-r" width="14%">Total Needed</th>
+                        <th class="po-r" width="14%">In Stock</th>
+                        <th class="po-r" width="12%">Shortfall</th>
+                        <th width="16%">Coverage</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    _attach_events() {
+        const self = this;
+        this.container.off('click.po-tabs').on('click.po-tabs', '.po-tab-btn', function () {
+            self.active_tab = $(this).data('tab');
+            self.container.find('.po-tab-btn').removeClass('po-tab-active');
+            $(this).addClass('po-tab-active');
+            self._render_active_tab();
+        });
+    }
+
+    _attach_tab_events() {
+        const self = this;
+
+        // Expand/collapse WO detail rows
+        this.container.find('.po-wo-row').off('click.po-expand').on('click.po-expand', function (e) {
+            if ($(e.target).closest('button, a').length) return;
+            const wo = $(this).data('wo');
+            $(`#po-wo-detail-${wo}`).toggle();
+        });
+
+        // Create Work Order from MR item
+        this.container.find('.po-create-wo-btn').off('click').on('click', function () {
+            const mr   = $(this).data('mr');
+            const item = $(this).data('item');
+            const qty  = parseFloat($(this).data('qty')) || 1;
+            const $btn = $(this);
+            self._show_create_wo_dialog(mr, item, qty, $btn);
+        });
+
+        // Submit Work Order
+        this.container.find('.po-submit-wo-btn').off('click').on('click', function () {
+            const wo = $(this).data('wo');
+            frappe.confirm(__('Submit Work Order {0}?', [wo]), () => {
+                frappe.call({
+                    method: 'crystal_custom.crystal_customizations.page.production_overview.production_overview.submit_work_order',
+                    args: { wo_name: wo },
+                    callback: () => {
+                        frappe.show_alert({ message: __('Work Order {0} submitted', [wo]), indicator: 'green' });
+                        self.load();
+                    },
+                });
+            });
+        });
+    }
+
+    _show_create_wo_dialog(mr_name, item_code, qty, $btn) {
+        const self = this;
+        frappe.call({
+            method: 'crystal_custom.crystal_customizations.page.production_overview.production_overview.get_bom_list',
+            args: { item_code },
+            callback: (r) => {
+                const boms = r.message || [];
+                const bom_options = boms.map(b => b.name);
+                const default_bom = boms.find(b => b.is_default) || boms[0];
+
+                const d = new frappe.ui.Dialog({
+                    title: __('Create Work Order — {0}', [item_code]),
+                    fields: [
+                        { label: 'Item Code',   fieldname: 'item_code', fieldtype: 'Data',    default: item_code, read_only: 1 },
+                        { label: 'Quantity',    fieldname: 'qty',       fieldtype: 'Float',   default: qty, reqd: 1 },
+                        { label: 'BOM',         fieldname: 'bom_no',    fieldtype: 'Select',
+                          options: bom_options.join('\n'), default: default_bom ? default_bom.name : '',
+                          reqd: 1 },
+                        { label: 'Material Request', fieldname: 'mr_name', fieldtype: 'Data', default: mr_name, read_only: 1 },
+                    ],
+                    primary_action_label: __('Create Work Order'),
+                    primary_action(vals) {
+                        frappe.call({
+                            method: 'crystal_custom.crystal_customizations.page.production_overview.production_overview.create_work_order',
+                            args: { mr_name: vals.mr_name, item_code: vals.item_code, qty: vals.qty, bom_no: vals.bom_no },
+                            freeze: true,
+                            freeze_message: __('Creating Work Order…'),
+                            callback: (r) => {
+                                d.hide();
+                                if (r.message) {
+                                    frappe.show_alert({
+                                        message: __('Work Order <a href="/app/work-order/{0}" target="_blank">{0}</a> created', [r.message]),
+                                        indicator: 'green',
+                                    }, 8);
+                                    self.load();
+                                }
+                            },
+                        });
+                    },
+                });
+                d.show();
+            },
+        });
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    _kpi_row(cards) {
+        const items = cards.map(c => `
+            <div class="po-kpi-card" style="background:linear-gradient(135deg, ${c.color});">
+                <div class="po-kpi-val">${c.value}</div>
+                <div class="po-kpi-label">${c.label}</div>
+            </div>`).join('');
+        return `<div class="po-kpi-row">${items}</div>`;
+    }
+
+    _styles() {
+        return `<style>
+            .po-container { padding: 16px; }
+            .po-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+            .po-kpi-card { border-radius: 10px; padding: 18px 20px; color: #fff; }
+            .po-kpi-val  { font-size: 28px; font-weight: 800; line-height: 1; }
+            .po-kpi-label { font-size: 12px; opacity: .85; margin-top: 4px; }
+
+            .po-tabs { display: flex; gap: 6px; border-bottom: 2px solid #e2e8f0; margin-bottom: 18px; }
+            .po-tab-btn { background: none; border: none; padding: 8px 18px; font-size: 13px; font-weight: 600;
+                          color: #6b7280; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+            .po-tab-btn:hover  { color: #1e293b; }
+            .po-tab-active     { color: #1e293b !important; border-bottom-color: #1e293b !important; }
+            .po-tab-badge      { display: inline-block; background: #e2e8f0; color: #374151;
+                                  border-radius: 10px; font-size: 10px; padding: 1px 7px; margin-left: 5px; }
+            .po-tab-badge-warn { background: #fef3c7 !important; color: #92400e !important; }
+
+            .po-mr-list { display: flex; flex-direction: column; gap: 16px; }
+            .po-mr-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+            .po-mr-head { background: #1e293b; color: #f1f5f9; padding: 11px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+            .po-mr-link { color: #93c5fd !important; font-weight: 700; text-decoration: none; }
+            .po-mr-link:hover { color: #bfdbfe !important; }
+            .po-source-tag { font-size: 10px; background: #334155; padding: 1px 7px; border-radius: 10px; margin-left: 8px; color: #94a3b8; }
+            .po-items-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            .po-items-table th { background: #f8fafc; padding: 8px 12px; font-size: 11px; text-align: left;
+                                  border-bottom: 1px solid #e2e8f0; color: #475569; }
+            .po-items-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
+            .po-items-table tr:last-child td { border-bottom: none; }
+
+            .po-status-dot { font-size: 11px; padding: 2px 8px; border-radius: 10px; color: #fff; font-weight: 600; white-space: nowrap; }
+            .po-wo-badge   { font-size: 10px; background: #dcfce7; color: #166534; border: 1px solid #86efac;
+                              border-radius: 10px; padding: 2px 7px; }
+            .po-paint-tag  { font-size: 10px; background: #fef3c7; color: #92400e; border-radius: 8px; padding: 1px 6px; margin-left: 4px; }
+            .po-ready-badge { font-size: 11px; background: #dcfce7; color: #166534; border-radius: 10px; padding: 2px 8px; font-weight: 600; white-space: nowrap; }
+            .po-short-badge { font-size: 11px; background: #fef2f2; color: #991b1b; border-radius: 10px; padding: 2px 8px; font-weight: 600; white-space: nowrap; }
+
+            .po-wo-table { font-size: 13px; }
+            .po-wo-table th { background: #1e293b; color: #f1f5f9; padding: 9px 12px; border: none !important; font-size: 11px; }
+            .po-wo-table td { padding: 9px 12px; vertical-align: middle; }
+            .po-wo-row    { cursor: pointer; }
+            .po-wo-row:hover td { background: #f8fafc; }
+            .po-r { text-align: right !important; }
+
+            .po-progress-bar  { height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+            .po-progress-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+
+            .po-detail-table { font-size: 12px; }
+            .po-detail-table th { background: #334155; color: #f1f5f9; padding: 6px 10px; font-size: 11px; }
+            .po-detail-table td { padding: 7px 10px; }
+
+            .po-mat-kpi       { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+            .po-mat-ok        { background: #dcfce7; color: #166534; }
+            .po-mat-short     { background: #fef2f2; color: #991b1b; }
+            .po-empty         { padding: 40px; text-align: center; color: #9ca3af; font-size: 14px; }
+
+            @media (max-width: 768px) { .po-kpi-row { grid-template-columns: repeat(2, 1fr); } }
+        </style>`;
+    }
+}
