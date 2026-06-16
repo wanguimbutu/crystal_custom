@@ -123,14 +123,17 @@ def get_truck_fulfillment_data():
         if r.is_closed:
             trucks_map[tn]['is_closed'] = True
 
-    # Truck meta (weight + value), no date filter
+    # Truck meta (weight + value + regions), no date filter
     meta_rows = frappe.db.sql("""
         SELECT
             so.custom_truck_number   AS truck_number,
             SUM(so.total_net_weight) AS total_weight,
             SUM(so.grand_total)      AS total_value,
             COUNT(so.name)           AS order_count,
-            MAX(IFNULL(so.custom_truck_closed, 0)) AS is_closed
+            MAX(IFNULL(so.custom_truck_closed, 0)) AS is_closed,
+            GROUP_CONCAT(DISTINCT so.custom_delivery_region
+                         ORDER BY so.custom_delivery_region
+                         SEPARATOR ', ')            AS delivery_regions
         FROM `tabSales Order` so
         WHERE so.docstatus = 0
           AND so.workflow_state = 'Pending Customer Order Reconfirmation'
@@ -146,12 +149,13 @@ def get_truck_fulfillment_data():
         data = trucks_map[tn]
         meta = meta_map.get(tn, {})
         trucks.append({
-            'truck_number': tn,
-            'order_count':  len(data['orders']),
-            'orders':       list(data['orders'].values()),
-            'total_weight': float(meta.get('total_weight') or 0),
-            'total_value':  float(meta.get('total_value')  or 0),
-            'is_closed':    bool(data['is_closed']),
+            'truck_number':     tn,
+            'order_count':      len(data['orders']),
+            'orders':           list(data['orders'].values()),
+            'total_weight':     float(meta.get('total_weight') or 0),
+            'total_value':      float(meta.get('total_value')  or 0),
+            'is_closed':        bool(data['is_closed']),
+            'delivery_regions': meta.get('delivery_regions') or '',
             'items': [
                 {
                     'item_code':    ic,

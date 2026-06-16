@@ -420,6 +420,7 @@ class OrderFulfillmentManager {
 						${truck.order_count} order${truck.order_count !== 1 ? 's' : ''}
 						${truck.total_weight ? ` &nbsp;·&nbsp; ${truck.total_weight.toFixed(0)} kg` : ''}
 					</span>
+					${truck.delivery_regions ? `<span class="tf-truck-region-tag">&#128205; ${frappe.utils.escape_html(truck.delivery_regions)}</span>` : ''}
 					${closed_html}
 				</div>
 				<span class="tf-status-badge" id="tf-status-${sid}" style="background:${status_color}">
@@ -1475,6 +1476,7 @@ ${truck_blocks}
 		}
 		.tf-truck-num  { font-size: 15px; font-weight: 700; color: #f1f5f9; }
 		.tf-truck-meta { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+		.tf-truck-region-tag { font-size: 11px; background: rgba(255,255,255,0.15); color: #e2e8f0; border-radius: 10px; padding: 2px 8px; margin-left: 6px; vertical-align: middle; }
 		.tf-card-table {
 			width: 100%;
 			border-collapse: collapse;
