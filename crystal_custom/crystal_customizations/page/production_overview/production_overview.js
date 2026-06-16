@@ -151,7 +151,6 @@ class ProductionOverview {
                         <a href="/app/material-request/${mr.name}" target="_blank" class="po-mr-link">
                             &#128203; ${frappe.utils.escape_html(mr.name)}
                         </a>
-                        ${mr.custom_source_page ? `<span class="po-source-tag">${frappe.utils.escape_html(mr.custom_source_page)}</span>` : ''}
                     </span>
                     <span style="display:flex;align-items:center;gap:8px;">
                         <span class="po-status-dot" style="background:${status_color};">${frappe.utils.escape_html(mr.status)}</span>

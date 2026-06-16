@@ -16,8 +16,7 @@ def get_production_data():
             mr.name,
             mr.transaction_date,
             mr.schedule_date,
-            mr.status,
-            mr.custom_source_page
+            mr.status
         FROM `tabMaterial Request` mr
         WHERE mr.material_request_type = 'Manufacture'
           AND mr.docstatus != 2
