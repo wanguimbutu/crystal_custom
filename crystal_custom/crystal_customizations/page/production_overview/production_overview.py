@@ -60,7 +60,7 @@ def get_production_data():
                 wo.material_request   AS mr_name,
                 wo.wip_warehouse,
                 wo.fg_warehouse,
-                IFNULL(wo.pm_is_paint_order, 0) AS is_paint_order
+                0 AS is_paint_order
             FROM `tabWork Order` wo
             WHERE wo.material_request IN %(names)s
               AND wo.docstatus != 2
@@ -121,26 +121,6 @@ def get_production_data():
                 'shortfall':  max(0, needed - in_stock),
                 'uom':        bi.uom,
             })
-        # Additional paint materials (pm_additional_materials child table)
-        extra = []
-        if wo.is_paint_order:
-            extra = frappe.db.sql("""
-                SELECT item_code, item_name, qty, uom
-                FROM `tabPM Additional Material`
-                WHERE parent = %(wo)s
-            """, {'wo': wo.name}, as_dict=1)
-            for e in extra:
-                in_stock = stock_map.get(e.item_code, 0)
-                bom_reqs.append({
-                    'item_code':  e.item_code,
-                    'item_name':  e.item_name,
-                    'needed':     flt(e.qty),
-                    'in_stock':   in_stock,
-                    'shortfall':  max(0, flt(e.qty) - in_stock),
-                    'uom':        e.uom,
-                    'is_extra':   True,
-                })
-
         pct = round((flt(wo.produced_qty) / scale * 100), 1) if scale else 0
         wo_data.append({
             **{k: v for k, v in wo.items()},

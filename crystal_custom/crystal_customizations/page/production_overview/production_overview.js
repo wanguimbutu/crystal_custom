@@ -211,7 +211,6 @@ class ProductionOverview {
                 <td>
                     <strong>${frappe.utils.escape_html(wo.production_item)}</strong>
                     <div style="font-size:11px;color:#6b7280;">${frappe.utils.escape_html(wo.item_name || '')}</div>
-                    ${wo.is_paint_order ? '<span class="po-paint-tag">&#127758; Paint</span>' : ''}
                 </td>
                 <td class="po-r">${flt(wo.qty, 2)}</td>
                 <td class="po-r">${flt(wo.produced_qty, 2)}</td>
@@ -251,9 +250,7 @@ class ProductionOverview {
             const ok = b.shortfall === 0;
             return `<tr style="${!ok ? 'background:#fef2f2;' : ''}">
                 <td>${frappe.utils.escape_html(b.item_code)}</td>
-                <td>${frappe.utils.escape_html(b.item_name || '')}
-                    ${b.is_extra ? '<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:8px;margin-left:4px;">Extra</span>' : ''}
-                </td>
+                <td>${frappe.utils.escape_html(b.item_name || '')}</td>
                 <td class="po-r">${flt(b.needed, 3)} ${frappe.utils.escape_html(b.uom || '')}</td>
                 <td class="po-r">${flt(b.in_stock, 3)}</td>
                 <td class="po-r" style="color:${ok ? '#10b981' : '#ef4444'};font-weight:600;">
@@ -521,7 +518,6 @@ class ProductionOverview {
             .po-status-dot { font-size: 11px; padding: 2px 8px; border-radius: 10px; color: #fff; font-weight: 600; white-space: nowrap; }
             .po-wo-badge   { font-size: 10px; background: #dcfce7; color: #166534; border: 1px solid #86efac;
                               border-radius: 10px; padding: 2px 7px; }
-            .po-paint-tag  { font-size: 10px; background: #fef3c7; color: #92400e; border-radius: 8px; padding: 1px 6px; margin-left: 4px; }
             .po-ready-badge { font-size: 11px; background: #dcfce7; color: #166534; border-radius: 10px; padding: 2px 8px; font-weight: 600; white-space: nowrap; }
             .po-short-badge { font-size: 11px; background: #fef2f2; color: #991b1b; border-radius: 10px; padding: 2px 8px; font-weight: 600; white-space: nowrap; }
 
