@@ -1,3 +1,10 @@
+## [1.8.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.8.1...v1.8.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* hide submitted orders from table view; remove duplicate totals from packing list ([70fe814](https://github.com/wanguimbutu/crystal_custom/commit/70fe8148afdf59e93ba19be9ef5aae23240fd017))
+
 ## [1.8.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.8.0...v1.8.1) (2026-06-16)
 
 
