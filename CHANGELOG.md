@@ -1,3 +1,10 @@
+## [1.8.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.8.0...v1.8.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* loading sheet uses full order qty; truck assignment enforces capacity hard limit ([b0da80d](https://github.com/wanguimbutu/crystal_custom/commit/b0da80dd0c9d3fd5a1c17702fba76725beaaf3cc))
+
 # [1.8.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.7.0...v1.8.0) (2026-06-16)
 
 
