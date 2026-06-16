@@ -462,18 +462,6 @@ class DeliveryNoteManager {
             this.orders_page * this.page_size
         );
 
-        // Group current page by truck
-        const groups = {};
-        page_slice.forEach(o => {
-            const k = o.custom_truck_number || '__no_truck__';
-            if (!groups[k]) groups[k] = [];
-            groups[k].push(o);
-        });
-        const group_keys = Object.keys(groups).sort((a, b) => {
-            if (a === '__no_truck__') return 1;
-            if (b === '__no_truck__') return -1;
-            return a.localeCompare(b);
-        });
 
         const view_toggle = `
             <div class="dm-view-toggle">
@@ -498,11 +486,26 @@ class DeliveryNoteManager {
             return;
         }
 
+        // Table view: only show draft (pending) orders; submitted orders belong in the Truck View
+        const table_slice = page_slice.filter(o => o.docstatus !== 1);
+        const table_groups = {};
+        table_slice.forEach(o => {
+            const k = o.custom_truck_number || '__no_truck__';
+            if (!table_groups[k]) table_groups[k] = [];
+            table_groups[k].push(o);
+        });
+        const table_group_keys = Object.keys(table_groups).sort((a, b) => {
+            if (a === '__no_truck__') return 1;
+            if (b === '__no_truck__') return -1;
+            return a.localeCompare(b);
+        });
+        const draft_count = all_filtered.filter(o => o.docstatus !== 1).length;
+
         let html = `<div class="delivery-orders-table">${summary}${view_toggle}
                 <div class="dm-selection-bar">
                     <label class="dm-sel-all-label">
                         <input type="checkbox" id="dm-select-all" style="width:15px;height:15px;accent-color:#667eea;">
-                        Select All (${all_filtered.length})
+                        Select All (${draft_count})
                     </label>
                     <span class="dm-sel-count" id="dm-sel-count">${this.selected_orders.size} selected</span>
                 </div>
@@ -526,8 +529,8 @@ class DeliveryNoteManager {
                         </thead>
                         <tbody>`;
 
-        group_keys.forEach(key => {
-            const grp = groups[key];
+        table_group_keys.forEach(key => {
+            const grp = table_groups[key];
             const grp_label = key === '__no_truck__' ? 'No Truck' : `Truck: ${key}`;
             const grp_val   = grp.reduce((s, o) => s + o.grand_total, 0);
             const grp_wt    = grp.reduce((s, o) => s + (o.total_net_weight || 0), 0);
@@ -926,15 +929,6 @@ class DeliveryNoteManager {
             order_items[i.parent].push({ ...i, pending_qty: pending });
         });
 
-        // Aggregate totals across all orders
-        const totals = {};
-        raw_items.forEach(i => {
-            const pending = (i.qty || 0) - (i.delivered_qty || 0);
-            if (pending <= 0) return;
-            if (!totals[i.item_code]) totals[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom };
-            totals[i.item_code].qty += pending;
-        });
-
         // Sort by customer name
         const sorted_orders = order_names
             .filter(n => order_items[n])
@@ -979,17 +973,6 @@ class DeliveryNoteManager {
             </div>`;
         });
 
-        const total_items = Object.values(totals).sort((a, b) => a.item_code.localeCompare(b.item_code));
-        const grand_qty   = total_items.reduce((s, i) => s + i.qty, 0);
-        const total_rows  = total_items.map((item, idx) => `
-            <tr>
-                <td>${idx + 1}</td>
-                <td><strong>${item.item_code}</strong></td>
-                <td>${item.item_name}</td>
-                <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
-                <td>${item.uom}</td>
-            </tr>`).join('');
-
         const w = window.open('', '_blank');
         w.document.write(`<!DOCTYPE html><html>
 <head><meta charset="utf-8"><title>Packing List — ${truck_num}</title>
@@ -1006,8 +989,6 @@ class DeliveryNoteManager {
   .cust-name{font-size:14px;font-weight:700;}
   .cust-meta{font-size:11px;color:#94a3b8;}
   .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;}
-  .totals-section{border-top:3px solid #1e293b;padding-top:12px;margin-top:8px;}
-  .totals-title{font-size:15px;font-weight:700;margin-bottom:8px;color:#1e293b;}
   @media print{.no-print{display:none}body{margin:10px}}
 </style></head><body>
 <button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#1e293b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Print</button>
@@ -1021,17 +1002,6 @@ class DeliveryNoteManager {
 
 ${customer_blocks}
 
-<div class="totals-section">
-  <div class="totals-title">GRAND TOTALS — All Items</div>
-  <table>
-    <thead><tr><th>#</th><th>Item Code</th><th>Description</th><th>Total Qty</th><th>UOM</th></tr></thead>
-    <tbody>${total_rows}</tbody>
-    <tfoot><tr>
-      <td colspan="3" style="text-align:right;">TOTAL</td>
-      <td>${grand_qty.toFixed(2)}</td><td>—</td>
-    </tr></tfoot>
-  </table>
-</div>
 <p style="margin-top:20px;font-size:10px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
 </body></html>`);
         w.document.close();
@@ -1200,15 +1170,6 @@ ${customer_blocks}
                 order_items[i.parent].push({ ...i, pending_qty: pending });
             });
 
-            // Aggregate totals
-            const totals = {};
-            raw_items.forEach(i => {
-                const pending = i.qty - (i.delivered_qty || 0);
-                if (pending <= 0) return;
-                if (!totals[i.item_code]) totals[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom };
-                totals[i.item_code].qty += pending;
-            });
-
             // Sort orders by truck then customer
             const sorted_orders = order_names
                 .filter(n => order_items[n])
@@ -1263,17 +1224,6 @@ ${customer_blocks}
                 </div>`;
             });
 
-            const total_items = Object.values(totals).sort((a, b) => a.item_code.localeCompare(b.item_code));
-            const grand_qty   = total_items.reduce((s, i) => s + i.qty, 0);
-            const total_rows  = total_items.map((item, idx) => `
-                <tr>
-                    <td>${idx + 1}</td>
-                    <td><strong>${item.item_code}</strong></td>
-                    <td>${item.item_name}</td>
-                    <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
-                    <td>${item.uom}</td>
-                </tr>`).join('');
-
             const html = `<!DOCTYPE html><html>
 <head><meta charset="utf-8"><title>Packing List</title>
 <style>
@@ -1289,8 +1239,6 @@ ${customer_blocks}
   .cust-name{font-size:14px;font-weight:700;}
   .cust-meta{font-size:11px;color:#94a3b8;}
   .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;}
-  .totals-section{border-top:3px solid #1e293b;padding-top:12px;margin-top:8px;}
-  .totals-title{font-size:15px;font-weight:700;margin-bottom:8px;color:#1e293b;}
   @media print{.no-print{display:none}body{margin:10px}}
 </style>
 </head><body>
@@ -1305,17 +1253,6 @@ ${customer_blocks}
 
 ${customer_blocks}
 
-<div class="totals-section">
-  <div class="totals-title">GRAND TOTALS — All Items</div>
-  <table>
-    <thead><tr><th>#</th><th>Item Code</th><th>Description</th><th>Total Qty</th><th>UOM</th></tr></thead>
-    <tbody>${total_rows}</tbody>
-    <tfoot><tr>
-      <td colspan="3" style="text-align:right;">TOTAL</td>
-      <td>${grand_qty.toFixed(2)}</td><td>—</td>
-    </tr></tfoot>
-  </table>
-</div>
 <p style="margin-top:20px;font-size:10px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
 </body></html>`;
 
