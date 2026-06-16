@@ -64,6 +64,17 @@ def get_truck_fulfillment_data():
     matches truck assignment. Includes closed trucks (is_closed=True).
     Stock is always current (from tabBin at call time).
     """
+    import json as _json
+
+    # is_closed comes from the KV store — same source as truck assignment
+    # (custom_truck_closed on individual orders is not reliable: trucks are reused
+    #  across cycles so old Completed orders still have closed=1 from prior dispatches)
+    try:
+        _closed_list = _json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
+    except Exception:
+        _closed_list = []
+    closed_tns = {ct.get('truck_number') for ct in _closed_list}
+
     # Show ALL truck-assigned orders regardless of status, workflow state, or docstatus
     # Only exclude cancelled (docstatus=2) orders
     rows = frappe.db.sql("""
@@ -72,7 +83,6 @@ def get_truck_fulfillment_data():
             so.name                                                         AS sales_order,
             so.customer_name,
             so.custom_paint_notes,
-            MAX(IFNULL(so.custom_truck_closed, 0))                          AS is_closed,
             soi.item_code,
             soi.item_name,
             GREATEST(0, SUM(soi.qty - IFNULL(soi.delivered_qty, 0)))       AS required_qty,
@@ -105,7 +115,7 @@ def get_truck_fulfillment_data():
     item_uoms  = {r.item_code: r.uom       for r in rows}
 
     from collections import defaultdict
-    trucks_map = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float), 'is_closed': False})
+    trucks_map = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float)})
     for r in rows:
         tn = r.truck_number
         # Always add the order (even if all items delivered) so order count matches truck assignment
@@ -117,8 +127,6 @@ def get_truck_fulfillment_data():
         # Only accumulate items that still need to be fulfilled
         if float(r.required_qty) > 0:
             trucks_map[tn]['items'][r.item_code] += float(r.required_qty)
-        if r.is_closed:
-            trucks_map[tn]['is_closed'] = True
 
     # Truck meta (weight + value + regions), no date filter
     meta_rows = frappe.db.sql("""
@@ -127,7 +135,6 @@ def get_truck_fulfillment_data():
             SUM(so.total_net_weight) AS total_weight,
             SUM(so.grand_total)      AS total_value,
             COUNT(so.name)           AS order_count,
-            MAX(IFNULL(so.custom_truck_closed, 0)) AS is_closed,
             GROUP_CONCAT(DISTINCT so.custom_delivery_region
                          ORDER BY so.custom_delivery_region
                          SEPARATOR ', ')            AS delivery_regions
@@ -149,7 +156,7 @@ def get_truck_fulfillment_data():
             'orders':           list(data['orders'].values()),
             'total_weight':     float(meta.get('total_weight') or 0),
             'total_value':      float(meta.get('total_value')  or 0),
-            'is_closed':        bool(data['is_closed']),
+            'is_closed':        tn in closed_tns,
             'delivery_regions': meta.get('delivery_regions') or '',
             'items': [
                 {
@@ -181,6 +188,15 @@ def get_truck_customer_data():
     Includes closed trucks. Stock is always current.
     Used by the Customer View tab.
     """
+    import json as _json
+
+    # is_closed comes from the KV store — same source as truck assignment
+    try:
+        _closed_list = _json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
+    except Exception:
+        _closed_list = []
+    closed_tns = {ct.get('truck_number') for ct in _closed_list}
+
     # Show ALL truck-assigned orders regardless of status or workflow state
     # Only exclude cancelled (docstatus=2) orders
     rows = frappe.db.sql("""
@@ -192,7 +208,6 @@ def get_truck_customer_data():
             so.grand_total,
             so.total_net_weight,
             so.custom_paint_notes,
-            IFNULL(so.custom_truck_closed, 0)                               AS is_closed,
             soi.item_code,
             soi.item_name,
             GREATEST(0, SUM(soi.qty - IFNULL(soi.delivered_qty, 0)))       AS required_qty,
@@ -237,7 +252,6 @@ def get_truck_customer_data():
                 'grand_total':      float(r.grand_total or 0),
                 'total_net_weight': float(r.total_net_weight or 0),
                 'paint_notes':      r.custom_paint_notes or '',
-                'is_closed':        bool(r.is_closed),
                 'items':            [],
             }
         # Only include items with outstanding quantity
@@ -254,7 +268,7 @@ def get_truck_customer_data():
         orders_list = list(orders_dict.values())
         trucks.append({
             'truck_number': tn,
-            'is_closed':    any(o.get('is_closed') for o in orders_list),
+            'is_closed':    tn in closed_tns,
             'orders':       orders_list,
         })
 
