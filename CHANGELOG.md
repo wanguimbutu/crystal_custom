@@ -1,3 +1,15 @@
+# [1.11.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.3...v1.11.0) (2026-06-16)
+
+
+### Bug Fixes
+
+* read colour notes from custom_additonal_notes field on Sales Order ([1b5a2c2](https://github.com/wanguimbutu/crystal_custom/commit/1b5a2c23060db2a90004d69de2ab589809ce257d))
+
+
+### Features
+
+* show live order total in order confirmation item editor ([8ad23af](https://github.com/wanguimbutu/crystal_custom/commit/8ad23af47d5f1fe3901008e5afc6eb3afabbba3d))
+
 ## [1.10.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.2...v1.10.3) (2026-06-16)
 
 
