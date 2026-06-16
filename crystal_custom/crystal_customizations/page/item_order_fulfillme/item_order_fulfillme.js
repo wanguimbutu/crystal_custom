@@ -15,7 +15,6 @@ class OrderFulfillmentManager {
 		this.truck_data    = { trucks: [], stock: {} };
 		this.customer_data = { trucks: [], stock: {} };
 		this.allocations   = {};   // { item_code: { truck_number: qty } }
-		this.closed_trucks = [];
 		this.search_term   = '';
 		this._alloc_save_timer = null;
 		this.setup_page();
@@ -95,7 +94,6 @@ class OrderFulfillmentManager {
 
 		const prev_stock = this.truck_data ? { ...this.truck_data.stock } : {};
 
-		// Load all data in parallel
 		Promise.all([
 			new Promise(resolve => frappe.call({
 				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_sales_order_fulfillment',
@@ -105,26 +103,15 @@ class OrderFulfillmentManager {
 			})),
 			new Promise(resolve => frappe.call({
 				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_truck_fulfillment_data',
-				// no date args — trucks always match truck assignment regardless of date filter
 				callback: r => { this.truck_data = r.message || { trucks: [], stock: {} }; resolve(); },
 				error: () => resolve(),
 			})),
 			new Promise(resolve => frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
-				callback: r => {
-					try { this.closed_trucks = JSON.parse(r.message || '[]') || []; } catch(e) { this.closed_trucks = []; }
-					resolve();
-				},
-				error: () => { this.closed_trucks = []; resolve(); },
-			})),
-			new Promise(resolve => frappe.call({
 				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_truck_customer_data',
-				// no date args — trucks always match truck assignment
 				callback: r => { this.customer_data = r.message || { trucks: [], stock: {} }; resolve(); },
 				error: () => resolve(),
 			})),
 		]).then(() => {
-			// Detect stock changes and notify
 			const changed = Object.keys(this.truck_data.stock).filter(ic => {
 				const old_qty = (prev_stock[ic] || {}).available_qty;
 				const new_qty = (this.truck_data.stock[ic] || {}).available_qty;
@@ -143,28 +130,18 @@ class OrderFulfillmentManager {
 	// ── Rendering ─────────────────────────────────────────────────────────────
 
 	render() {
-		const active_trucks  = this.truck_data.trucks.filter(t => !t.is_closed);
-		const sorted_trucks  = this.truck_data.trucks.filter(t => t.is_closed);
-		const current_tns    = new Set(this.truck_data.trucks.map(t => t.truck_number));
-		const legacy_closed  = this.closed_trucks.filter(ct => !current_tns.has(ct.truck_number));
-		const sorted_badge   = sorted_trucks.length + legacy_closed.length;
-
-		const trucks_badge = active_trucks.length;
+		const trucks_badge = this.truck_data.trucks.length;
 		const items_badge  = this.summary_data.length;
 		const cust_badge   = this.customer_data.trucks.reduce((s, t) => s + t.orders.length, 0);
 		const stock_badge  = Object.keys(this._compute_item_summary()).length;
 
 		let html = `${this._styles()}
 		<div class="tf-tabs">
-			<button class="tf-tab-btn ${this.active_tab === 'trucks'   ? 'active' : ''}" data-tab="trucks">
+			<button class="tf-tab-btn ${this.active_tab === 'trucks'    ? 'active' : ''}" data-tab="trucks">
 				Trucks
 				${trucks_badge ? `<span class="tf-tab-badge">${trucks_badge}</span>` : ''}
 			</button>
-			<button class="tf-tab-btn ${this.active_tab === 'sorted'   ? 'active' : ''}" data-tab="sorted">
-				Sorted Trucks
-				${sorted_badge ? `<span class="tf-tab-badge" style="background:#10b981;">${sorted_badge}</span>` : ''}
-			</button>
-			<button class="tf-tab-btn ${this.active_tab === 'stock'    ? 'active' : ''}" data-tab="stock">
+			<button class="tf-tab-btn ${this.active_tab === 'stock'     ? 'active' : ''}" data-tab="stock">
 				Stock Overview
 				${stock_badge ? `<span class="tf-tab-badge">${stock_badge}</span>` : ''}
 			</button>
@@ -172,17 +149,14 @@ class OrderFulfillmentManager {
 				Customer View
 				${cust_badge ? `<span class="tf-tab-badge">${cust_badge}</span>` : ''}
 			</button>
-			<button class="tf-tab-btn ${this.active_tab === 'summary'  ? 'active' : ''}" data-tab="summary">
+			<button class="tf-tab-btn ${this.active_tab === 'summary'   ? 'active' : ''}" data-tab="summary">
 				Item Summary
 				${items_badge ? `<span class="tf-tab-badge">${items_badge}</span>` : ''}
 			</button>
 		</div>
 		<div class="tf-tab-content">
 			<div class="tf-tab-pane ${this.active_tab === 'trucks'    ? 'active' : ''}" id="tf-trucks-pane">
-				${this._render_trucks_tab(active_trucks)}
-			</div>
-			<div class="tf-tab-pane ${this.active_tab === 'sorted'    ? 'active' : ''}" id="tf-sorted-pane">
-				${this._render_sorted_tab(sorted_trucks, legacy_closed)}
+				${this._render_trucks_tab()}
 			</div>
 			<div class="tf-tab-pane ${this.active_tab === 'stock'     ? 'active' : ''}" id="tf-stock-pane">
 				${this._render_stock_tab()}
@@ -208,16 +182,18 @@ class OrderFulfillmentManager {
 		});
 	}
 
-	_render_trucks_tab(trucks) {
+	_render_trucks_tab() {
+		let trucks = this.truck_data.trucks;
+
 		if (this.search_term) {
-			const q = trucks.filter(t =>
-				(t.truck_number || '').toLowerCase().includes(this.search_term.toLowerCase()) ||
+			const q = this.search_term.toLowerCase();
+			trucks = trucks.filter(t =>
+				(t.truck_number || '').toLowerCase().includes(q) ||
 				(t.orders || []).some(o =>
-					(o.name          || '').toLowerCase().includes(this.search_term.toLowerCase()) ||
-					(o.customer_name || '').toLowerCase().includes(this.search_term.toLowerCase())
+					(o.name          || '').toLowerCase().includes(q) ||
+					(o.customer_name || '').toLowerCase().includes(q)
 				)
 			);
-			trucks = q;
 		}
 
 		if (!trucks.length) {
@@ -227,7 +203,7 @@ class OrderFulfillmentManager {
 			</div>`;
 		}
 
-		// Shortages first
+		// Shortages first, then alpha
 		trucks = [...trucks].sort((a, b) => {
 			const a_short = a.items.length > 0 && this._truck_has_shortage(a);
 			const b_short = b.items.length > 0 && this._truck_has_shortage(b);
@@ -256,55 +232,6 @@ class OrderFulfillmentManager {
 				${trucks.map(t => this._render_truck_card(t, item_summary)).join('')}
 			</div>
 		</div>`;
-	}
-
-	_render_sorted_tab(sorted_trucks, legacy_closed) {
-		const item_summary = this._compute_item_summary();
-		let html = '';
-
-		if (sorted_trucks.length) {
-			// Sort: shortages first (so incomplete ones stand out), then alpha
-			const ordered = [...sorted_trucks].sort((a, b) => {
-				const a_short = a.items.length > 0 && this._truck_has_shortage(a);
-				const b_short = b.items.length > 0 && this._truck_has_shortage(b);
-				if (a_short !== b_short) return b_short ? 1 : -1;
-				return (a.truck_number || '').localeCompare(b.truck_number || '');
-			});
-			html += `
-			<div class="tf-section">
-				<div class="tf-section-header">
-					&#10004; Sorted Trucks
-					<span class="tf-header-note">Stock sorting complete — allocation still editable</span>
-					<span class="tf-tab-badge" style="background:#10b981;">${sorted_trucks.length}</span>
-				</div>
-				<div class="tf-trucks-grid">
-					${ordered.map(t => this._render_truck_card(t, item_summary)).join('')}
-				</div>
-			</div>`;
-		}
-
-		if (legacy_closed.length) {
-			html += `
-			<div class="tf-section tf-closed-section" style="margin-top:${sorted_trucks.length ? '24px' : '0'};">
-				<div class="tf-section-header">
-					&#128666; Dispatched Trucks
-					<span class="tf-header-note">Fully dispatched — for reference only</span>
-					<span class="tf-tab-badge">${legacy_closed.length}</span>
-				</div>
-				<div class="tf-trucks-grid">
-					${legacy_closed.map((ct, idx) => this._render_closed_truck_card(ct, idx)).join('')}
-				</div>
-			</div>`;
-		}
-
-		if (!html) {
-			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>No sorted trucks yet.</strong>
-				Use the <em>Close &amp; Mark Sorted</em> button on a truck in the Trucks tab.
-			</div>`;
-		}
-
-		return html;
 	}
 
 	_compute_item_summary() {
@@ -425,7 +352,6 @@ class OrderFulfillmentManager {
 			: fully_allocated ? '#10b981'
 			: '#ef4444';
 
-		// Orders list inside the card
 		const orders_html = (truck.orders || []).map(o => `
 			<div class="tf-order-row${o.paint_notes ? ' tf-order-row-paint' : ''}">
 				<div style="flex:1;min-width:0;">
@@ -439,13 +365,6 @@ class OrderFulfillmentManager {
 				        title="Remove from truck">Remove</button>
 			</div>`).join('');
 
-		const closed_badge = truck.is_closed
-			? `<span class="tf-closed-badge" style="margin-left:8px;">&#10004; SORTED</span>`
-			: `<button class="btn btn-xs btn-warning tf-close-truck-btn" data-truck="${frappe.utils.escape_html(tn)}"
-			          style="margin-left:8px;">
-				&#10003; Close &amp; Mark Sorted
-			</button>`;
-
 		return `
 		<div class="tf-truck-card">
 			<div class="tf-truck-head">
@@ -456,7 +375,6 @@ class OrderFulfillmentManager {
 						${truck.total_weight ? ` &nbsp;·&nbsp; ${truck.total_weight.toFixed(0)} kg` : ''}
 					</span>
 					${truck.delivery_regions ? `<span class="tf-truck-region-tag">&#128205; ${frappe.utils.escape_html(truck.delivery_regions)}</span>` : ''}
-					${closed_badge}
 				</div>
 				<span class="tf-status-badge" id="tf-status-${sid}" style="background:${status_color}">
 					${status_label}
@@ -487,7 +405,6 @@ class OrderFulfillmentManager {
 	}
 
 	_get_cv_trucks_and_stock() {
-		// Returns the current (possibly search-filtered) trucks + stock used by the customer view
 		return {
 			trucks: this.customer_data.trucks || [],
 			stock:  this.customer_data.stock  || {},
@@ -495,7 +412,7 @@ class OrderFulfillmentManager {
 	}
 
 	_print_customers_tab() {
-		const { trucks, stock } = this._get_cv_trucks_and_stock();
+		const { trucks } = this._get_cv_trucks_and_stock();
 		const today = frappe.datetime.str_to_user(frappe.datetime.get_today());
 
 		let truck_blocks = '';
@@ -608,10 +525,9 @@ ${truck_blocks}
 	}
 
 	_download_customers_tab() {
-		const { trucks, stock } = this._get_cv_trucks_and_stock();
+		const { trucks } = this._get_cv_trucks_and_stock();
 		const today = frappe.datetime.get_today();
 
-		// Flat Excel: one row per order-item combination
 		let rows = '';
 		trucks.forEach(truck => {
 			const tn = truck.truck_number;
@@ -671,6 +587,8 @@ ${truck_blocks}
 		frappe.show_alert({ message: __('Customer view downloaded'), indicator: 'green' });
 	}
 
+	// ── Stock Overview Tab ────────────────────────────────────────────────────
+
 	_render_stock_tab() {
 		const item_summary = this._compute_item_summary();
 
@@ -699,7 +617,7 @@ ${truck_blocks}
 			</div>`;
 		}
 
-		let html = `
+		return `
 		<div class="tf-kpi-row">
 			${this._kpi('Items', total_items, '#667eea')}
 			${this._kpi('Fully Stocked', items_ok, '#10b981')}
@@ -714,95 +632,6 @@ ${truck_blocks}
 				${this._render_item_overview(item_summary)}
 			</div>
 		</div>`;
-
-		return html;
-	}
-
-	_render_closed_truck_card(ct, idx) {
-		const closed_label = ct.closed_at
-			? frappe.datetime.str_to_user(ct.closed_at.split(' ')[0]) + ' ' + (ct.closed_at.split(' ')[1] || '').slice(0, 5)
-			: '—';
-
-		const order_rows = (ct.orders || []).map(o => `
-			<div class="tf-order-row">
-				<div>
-					<a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${frappe.utils.escape_html(o.name)}</a>
-					<span class="tf-order-cust">${frappe.utils.escape_html(o.customer_name || '')}</span>
-				</div>
-				${o.delivery_region ? `<span style="font-size:11px;color:#94a3b8;">${frappe.utils.escape_html(o.delivery_region)}</span>` : ''}
-			</div>`).join('');
-
-		return `
-		<div class="tf-truck-card tf-closed-card">
-			<div class="tf-truck-head" style="background:#475569;">
-				<div>
-					<span class="tf-truck-num" style="color:#f1f5f9;">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</span>
-					<span class="tf-truck-meta" style="color:#cbd5e1;">
-						${ct.order_count} order${ct.order_count !== 1 ? 's' : ''}
-						${ct.total_weight ? ` &nbsp;·&nbsp; ${(ct.total_weight).toFixed(0)} kg` : ''}
-					</span>
-				</div>
-				<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-					<span style="font-size:10px;color:#94a3b8;">Dispatched ${frappe.utils.escape_html(closed_label)}</span>
-					<button class="btn btn-xs tf-dl-closed-btn" data-idx="${idx}"
-					        style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;"
-					        title="Download report">&#8659; Download</button>
-				</div>
-			</div>
-			${ct.driver_name ? `<div style="padding:6px 14px;font-size:12px;color:#475569;border-bottom:1px solid #e5e7eb;">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
-			${(ct.orders || []).length ? `
-			<div class="tf-orders-section">
-				<div class="tf-orders-toggle tf-closed-toggle" data-idx="${idx}">
-					&#9658; View ${(ct.orders || []).length} order${(ct.orders || []).length !== 1 ? 's' : ''}
-				</div>
-				<div class="tf-orders-list tf-closed-orders-list" id="tf-closed-orders-${idx}" style="display:none;">
-					${order_rows}
-				</div>
-			</div>` : ''}
-		</div>`;
-	}
-
-	_download_closed_truck(ct) {
-		const today = frappe.datetime.now_date();
-		const rows  = (ct.orders || []).map(o => `<tr>
-			<td>${frappe.utils.escape_html(o.name)}</td>
-			<td>${frappe.utils.escape_html(o.customer_name || '')}</td>
-			<td>${frappe.utils.escape_html(o.delivery_region || '—')}</td>
-		</tr>`).join('');
-
-		const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
-			xmlns:x="urn:schemas-microsoft-com:office:excel"
-			xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="utf-8">
-<style>
-	table{border-collapse:collapse}
-	th,td{border:1px solid #ddd;padding:8px;font-family:sans-serif;font-size:12px}
-	th{background:#475569;color:#fff;font-weight:bold}
-</style></head><body>
-<h2 style="font-family:sans-serif">DISPATCHED TRUCK — ${frappe.utils.escape_html(ct.truck_number)}</h2>
-<table style="margin-bottom:16px;border:none;font-family:sans-serif"><tr style="border:none">
-	<td style="border:none;font-weight:bold">Truck:</td><td style="border:none">${frappe.utils.escape_html(ct.truck_number)}</td>
-	${ct.driver_name ? `<td style="border:none;font-weight:bold;padding-left:20px">Driver:</td><td style="border:none">${frappe.utils.escape_html(ct.driver_name)}</td>` : ''}
-	<td style="border:none;font-weight:bold;padding-left:20px">Dispatched:</td><td style="border:none">${frappe.utils.escape_html(ct.closed_at || '—')}</td>
-	<td style="border:none;font-weight:bold;padding-left:20px">Orders:</td><td style="border:none">${ct.order_count}</td>
-	<td style="border:none;font-weight:bold;padding-left:20px">Weight:</td><td style="border:none">${(ct.total_weight || 0).toFixed(2)} kg</td>
-	<td style="border:none;font-weight:bold;padding-left:20px">Value:</td><td style="border:none">${(ct.total_value || 0).toFixed(2)}</td>
-</tr></table>
-<table>
-	<thead><tr><th>Order</th><th>Customer</th><th>Region</th></tr></thead>
-	<tbody>${rows}</tbody>
-</table>
-</body></html>`;
-
-		const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-		const a    = document.createElement('a');
-		a.href     = URL.createObjectURL(blob);
-		a.download = `Truck_${ct.truck_number}_Dispatched_${today}.xls`;
-		a.style.display = 'none';
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		frappe.show_alert({ message: __('Downloaded report for dispatched truck {0}', [ct.truck_number]), indicator: 'green' });
 	}
 
 	// ── Customer View Tab ─────────────────────────────────────────────────────
@@ -829,7 +658,7 @@ ${truck_blocks}
 
 		if (!trucks.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>${this.search_term ? 'No customers match your search.' : 'No truck-assigned orders at Pending Confirmation.'}</strong>
+				<strong>${this.search_term ? 'No customers match your search.' : 'No truck-assigned orders.'}</strong>
 			</div>`;
 		}
 
@@ -845,7 +674,6 @@ ${truck_blocks}
 		</div>`;
 
 		trucks.forEach(truck => {
-			// Compute truck-level allocation for each item from this.allocations
 			const tn = truck.truck_number;
 
 			html += `
@@ -857,14 +685,12 @@ ${truck_blocks}
 				<div class="tf-cv-customers">`;
 
 			truck.orders.forEach(order => {
-				const order_total_wt = order.items.reduce((s, i) => s + (i.required_qty * 0), 0); // weight not in data
 				const sid = this._sid(order.name);
 
 				const item_rows = order.items.map(item => {
 					const ic           = item.item_code;
 					const truck_alloc  = (this.allocations[ic] || {})[tn] || 0;
 					const in_stock     = stock[ic] || 0;
-					// Within this truck, how much does this order need vs truck allocation
 					const covered      = Math.min(item.required_qty, truck_alloc);
 					const short        = Math.max(0, item.required_qty - truck_alloc);
 					const stock_short  = Math.max(0, item.required_qty - in_stock);
@@ -950,7 +776,7 @@ ${truck_blocks}
 		return html;
 	}
 
-	// ── Summary Tab (existing per-item view) ──────────────────────────────────
+	// ── Item Summary Tab ──────────────────────────────────────────────────────
 
 	_render_summary_tab() {
 		let data = this.summary_data;
@@ -971,7 +797,6 @@ ${truck_blocks}
 
 		const total_items = data.length;
 		const short_items = data.filter(d => d.shortage > 0).length;
-		const total_short = data.reduce((a, d) => a + d.shortage, 0);
 
 		let html = `
 		<div class="tf-kpi-row">
@@ -1036,13 +861,12 @@ ${truck_blocks}
 			self.container.find(`#tf-${tab}-pane`).addClass('active');
 		});
 
-		// Allocation input (delegated — works after re-render)
+		// Allocation input
 		this.container.off('input.tf-alloc').on('input.tf-alloc', '.tf-alloc-input', function () {
 			const tn    = $(this).data('truck');
 			const ic    = $(this).data('item');
 			let   value = parseFloat($(this).val()) || 0;
 
-			// Clamp to max
 			const max = parseFloat($(this).attr('max')) || 0;
 			if (value > max) { value = max; $(this).val(max); }
 
@@ -1074,41 +898,6 @@ ${truck_blocks}
 			this._create_mr_from_summary();
 		});
 
-		// Closed truck order list toggle
-		this.container.off('click.tf-closed-toggle').on('click.tf-closed-toggle', '.tf-closed-toggle', function () {
-			const idx   = $(this).data('idx');
-			const $list = $(`#tf-closed-orders-${idx}`);
-			const open  = $list.is(':visible');
-			$list.slideToggle(150);
-			const ct = self.closed_trucks[idx] || {};
-			const n  = (ct.orders || []).length;
-			$(this).html(`${open ? '&#9658;' : '&#9660;'} View ${n} order${n !== 1 ? 's' : ''}`);
-		});
-
-		// Closed truck download
-		this.container.off('click.tf-dl-closed').on('click.tf-dl-closed', '.tf-dl-closed-btn', function () {
-			const ct = self.closed_trucks[parseInt($(this).data('idx'), 10)];
-			if (ct) self._download_closed_truck(ct);
-		});
-
-		// Close & Mark Sorted
-		this.container.off('click.tf-close').on('click.tf-close', '.tf-close-truck-btn', function () {
-			const tn = $(this).data('truck');
-			frappe.confirm(
-				__('Close truck {0} and mark as sorted? Stock allocation will remain visible but the truck will be flagged as sorted.', [tn]),
-				() => {
-					frappe.call({
-						method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.close_truck',
-						args: { truck_number: tn },
-						callback: () => {
-							frappe.show_alert({ message: __('Truck {0} marked as sorted', [tn]), indicator: 'green' });
-							self.load_data();
-						},
-					});
-				}
-			);
-		});
-
 		// Customer view — print and download
 		this.container.off('click.tf-cv-print').on('click.tf-cv-print', '.tf-cv-print-btn', () => {
 			this._print_customers_tab();
@@ -1123,7 +912,6 @@ ${truck_blocks}
 	_update_allocations_in_place(changed_ic, changed_tn) {
 		const item_summary = this._compute_item_summary();
 
-		// Update overview table cells for affected item
 		Object.keys(item_summary).forEach(ic => {
 			const s   = item_summary[ic];
 			const sid = this._sid(ic);
@@ -1134,7 +922,6 @@ ${truck_blocks}
 			$short.html(s.total_short > 0 ? `<strong>${s.total_short.toFixed(2)}</strong>` : '—');
 		});
 
-		// Update all truck cards that contain the changed item
 		this.truck_data.trucks.forEach(truck => {
 			const tn  = truck.truck_number;
 			const sid = this._sid(tn);
@@ -1146,19 +933,16 @@ ${truck_blocks}
 				const max   = Math.min(item.required_qty, alloc + avail);
 				const short = Math.max(0, item.required_qty - alloc);
 
-				// Update max attribute on the input
 				this.container.find(
 					`.tf-alloc-input[data-truck="${tn}"][data-item="${ic}"]`
 				).attr('max', max.toFixed(3));
 
-				// Update the shortage cell for this truck + item
 				const isid  = this._sid(ic);
 				const $cell = $(`#tf-short-${sid}-${isid}`);
 				$cell.removeClass('tf-short tf-ok').addClass(short > 0 ? 'tf-short' : 'tf-ok');
 				$cell.html(short > 0 ? `<strong>${short.toFixed(2)}</strong>` : '—');
 			});
 
-			// Update truck status badge
 			const truck_has_short = truck.items.some(item => {
 				const alloc = (this.allocations[item.item_code] || {})[tn] || 0;
 				return item.required_qty > alloc;
@@ -1197,14 +981,11 @@ ${truck_blocks}
 			return;
 		}
 
-		// Reset allocations
 		this.allocations = {};
 
-		// For each item, fill trucks in order until stock runs out
 		const trucks  = this.truck_data.trucks;
 		const stock   = this.truck_data.stock;
 
-		// Collect all unique item codes
 		const all_items = new Set();
 		trucks.forEach(t => t.items.forEach(i => all_items.add(i.item_code)));
 
@@ -1224,7 +1005,6 @@ ${truck_blocks}
 			});
 		});
 
-		// Persist and re-render
 		this._save_allocations();
 		this.container.find('#tf-trucks-pane').html(this._render_trucks_tab());
 		this._attach_events();
@@ -1304,7 +1084,6 @@ ${truck_blocks}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
-	/** Convert any string to a safe DOM id segment. */
 	_sid(str) {
 		return String(str).replace(/[^a-zA-Z0-9]/g, '_');
 	}
@@ -1327,28 +1106,6 @@ ${truck_blocks}
 	_styles() {
 		return `<style>
 		.tf-container { margin-top: 16px; }
-
-		/* Search bar */
-		.tf-search-row {
-			display: flex;
-			align-items: center;
-			gap: 12px;
-			margin-bottom: 16px;
-		}
-		.tf-search-input {
-			max-width: 340px;
-			height: 34px;
-			font-size: 13px;
-			border-radius: 6px;
-		}
-		.tf-search-count {
-			font-size: 12px;
-			color: #6b7280;
-			background: #fef3c7;
-			border: 1px solid #fcd34d;
-			border-radius: 4px;
-			padding: 1px 8px;
-		}
 
 		/* Tabs */
 		.tf-tabs {
@@ -1486,16 +1243,6 @@ ${truck_blocks}
 			overflow: hidden;
 			background: #fff;
 			box-shadow: 0 1px 4px rgba(0,0,0,.05);
-		}
-		.tf-closed-badge {
-			display: inline-block;
-			background: #10b981;
-			color: #fff;
-			font-size: 10px;
-			font-weight: 700;
-			border-radius: 10px;
-			padding: 2px 8px;
-			vertical-align: middle;
 		}
 		.tf-truck-head {
 			display: flex;

@@ -66,17 +66,14 @@ def get_truck_fulfillment_data():
     """
     import json as _json
 
-    # is_closed comes from the KV store — same source as truck assignment
-    # (custom_truck_closed on individual orders is not reliable: trucks are reused
-    #  across cycles so old Completed orders still have closed=1 from prior dispatches)
+    # Exclude trucks that have been closed/dispatched (same source as truck assignment)
     try:
         _closed_list = _json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
     except Exception:
         _closed_list = []
     closed_tns = {ct.get('truck_number') for ct in _closed_list}
 
-    # Show ALL truck-assigned orders regardless of status, workflow state, or docstatus
-    # Only exclude cancelled (docstatus=2) orders
+    # Show ALL non-cancelled truck-assigned orders; skip trucks already dispatched
     rows = frappe.db.sql("""
         SELECT
             so.custom_truck_number                                          AS truck_number,
@@ -101,7 +98,8 @@ def get_truck_fulfillment_data():
         return {'trucks': [], 'stock': {}}
 
     # Unique items still needing stock (required_qty > 0) for stock lookup
-    unique_items = list({r.item_code for r in rows if float(r.required_qty) > 0})
+    unique_items = list({r.item_code for r in rows
+                         if r.truck_number not in closed_tns and float(r.required_qty) > 0})
     stock_map  = {}
     if unique_items:
         item_ph = ', '.join(['%s'] * len(unique_items))
@@ -118,17 +116,17 @@ def get_truck_fulfillment_data():
     trucks_map = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float)})
     for r in rows:
         tn = r.truck_number
-        # Always add the order (even if all items delivered) so order count matches truck assignment
+        if tn in closed_tns:
+            continue  # skip dispatched trucks entirely
         trucks_map[tn]['orders'][r.sales_order] = {
             'name':          r.sales_order,
             'customer_name': r.customer_name or r.sales_order,
             'paint_notes':   r.custom_paint_notes or '',
         }
-        # Only accumulate items that still need to be fulfilled
         if float(r.required_qty) > 0:
             trucks_map[tn]['items'][r.item_code] += float(r.required_qty)
 
-    # Truck meta (weight + value + regions), no date filter
+    # Truck meta (weight + value + regions)
     meta_rows = frappe.db.sql("""
         SELECT
             so.custom_truck_number   AS truck_number,
@@ -156,7 +154,6 @@ def get_truck_fulfillment_data():
             'orders':           list(data['orders'].values()),
             'total_weight':     float(meta.get('total_weight') or 0),
             'total_value':      float(meta.get('total_value')  or 0),
-            'is_closed':        tn in closed_tns,
             'delivery_regions': meta.get('delivery_regions') or '',
             'items': [
                 {
@@ -190,15 +187,14 @@ def get_truck_customer_data():
     """
     import json as _json
 
-    # is_closed comes from the KV store — same source as truck assignment
+    # Exclude dispatched trucks (same source as truck assignment)
     try:
         _closed_list = _json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
     except Exception:
         _closed_list = []
     closed_tns = {ct.get('truck_number') for ct in _closed_list}
 
-    # Show ALL truck-assigned orders regardless of status or workflow state
-    # Only exclude cancelled (docstatus=2) orders
+    # Show ALL non-cancelled truck-assigned orders; skip dispatched trucks
     rows = frappe.db.sql("""
         SELECT
             so.custom_truck_number                                          AS truck_number,
@@ -224,8 +220,9 @@ def get_truck_customer_data():
     if not rows:
         return {'trucks': [], 'stock': {}}
 
-    # Unique items still needing fulfillment for stock lookup
-    unique_items = list({r.item_code for r in rows if float(r.required_qty) > 0})
+    # Unique items still needing fulfillment for stock lookup (skip closed trucks)
+    unique_items = list({r.item_code for r in rows
+                         if r.truck_number not in closed_tns and float(r.required_qty) > 0})
     stock_map = {}
     if unique_items:
         item_ph = ', '.join(['%s'] * len(unique_items))
@@ -236,11 +233,13 @@ def get_truck_customer_data():
         )
         stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
 
-    # Group truck → order → items (only items with pending qty)
+    # Group truck → order → items (only items with pending qty; skip closed trucks)
     from collections import OrderedDict
     trucks_map = OrderedDict()
     for r in rows:
         tn = r.truck_number
+        if tn in closed_tns:
+            continue
         on = r.sales_order
         if tn not in trucks_map:
             trucks_map[tn] = OrderedDict()
@@ -254,7 +253,6 @@ def get_truck_customer_data():
                 'paint_notes':      r.custom_paint_notes or '',
                 'items':            [],
             }
-        # Only include items with outstanding quantity
         if float(r.required_qty) > 0:
             trucks_map[tn][on]['items'].append({
                 'item_code':    r.item_code,
@@ -265,11 +263,9 @@ def get_truck_customer_data():
 
     trucks = []
     for tn, orders_dict in trucks_map.items():
-        orders_list = list(orders_dict.values())
         trucks.append({
             'truck_number': tn,
-            'is_closed':    tn in closed_tns,
-            'orders':       orders_list,
+            'orders':       list(orders_dict.values()),
         })
 
     stock = {ic: float(stock_map.get(ic, 0)) for ic in unique_items}
