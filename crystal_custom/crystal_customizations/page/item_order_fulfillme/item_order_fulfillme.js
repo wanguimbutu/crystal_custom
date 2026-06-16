@@ -143,18 +143,26 @@ class OrderFulfillmentManager {
 	// ── Rendering ─────────────────────────────────────────────────────────────
 
 	render() {
-		const trucks_badge = this.truck_data.trucks.length;
+		const active_trucks  = this.truck_data.trucks.filter(t => !t.is_closed);
+		const sorted_trucks  = this.truck_data.trucks.filter(t => t.is_closed);
+		const current_tns    = new Set(this.truck_data.trucks.map(t => t.truck_number));
+		const legacy_closed  = this.closed_trucks.filter(ct => !current_tns.has(ct.truck_number));
+		const sorted_badge   = sorted_trucks.length + legacy_closed.length;
+
+		const trucks_badge = active_trucks.length;
 		const items_badge  = this.summary_data.length;
-
-		const cust_badge = this.customer_data.trucks.reduce((s, t) => s + t.orders.length, 0);
-
-		const stock_badge = Object.keys(this._compute_item_summary()).length;
+		const cust_badge   = this.customer_data.trucks.reduce((s, t) => s + t.orders.length, 0);
+		const stock_badge  = Object.keys(this._compute_item_summary()).length;
 
 		let html = `${this._styles()}
 		<div class="tf-tabs">
 			<button class="tf-tab-btn ${this.active_tab === 'trucks'   ? 'active' : ''}" data-tab="trucks">
 				Trucks
 				${trucks_badge ? `<span class="tf-tab-badge">${trucks_badge}</span>` : ''}
+			</button>
+			<button class="tf-tab-btn ${this.active_tab === 'sorted'   ? 'active' : ''}" data-tab="sorted">
+				Sorted Trucks
+				${sorted_badge ? `<span class="tf-tab-badge" style="background:#10b981;">${sorted_badge}</span>` : ''}
 			</button>
 			<button class="tf-tab-btn ${this.active_tab === 'stock'    ? 'active' : ''}" data-tab="stock">
 				Stock Overview
@@ -171,7 +179,10 @@ class OrderFulfillmentManager {
 		</div>
 		<div class="tf-tab-content">
 			<div class="tf-tab-pane ${this.active_tab === 'trucks'    ? 'active' : ''}" id="tf-trucks-pane">
-				${this._render_trucks_tab()}
+				${this._render_trucks_tab(active_trucks)}
+			</div>
+			<div class="tf-tab-pane ${this.active_tab === 'sorted'    ? 'active' : ''}" id="tf-sorted-pane">
+				${this._render_sorted_tab(sorted_trucks, legacy_closed)}
 			</div>
 			<div class="tf-tab-pane ${this.active_tab === 'stock'     ? 'active' : ''}" id="tf-stock-pane">
 				${this._render_stock_tab()}
@@ -197,30 +208,27 @@ class OrderFulfillmentManager {
 		});
 	}
 
-	_render_trucks_tab() {
-		let trucks = this.truck_data.trucks;
-
+	_render_trucks_tab(trucks) {
 		if (this.search_term) {
-			const q = this.search_term.toLowerCase();
-			trucks = trucks.filter(t =>
-				(t.truck_number || '').toLowerCase().includes(q) ||
+			const q = trucks.filter(t =>
+				(t.truck_number || '').toLowerCase().includes(this.search_term.toLowerCase()) ||
 				(t.orders || []).some(o =>
-					(o.name          || '').toLowerCase().includes(q) ||
-					(o.customer_name || '').toLowerCase().includes(q)
+					(o.name          || '').toLowerCase().includes(this.search_term.toLowerCase()) ||
+					(o.customer_name || '').toLowerCase().includes(this.search_term.toLowerCase())
 				)
 			);
+			trucks = q;
 		}
 
 		if (!trucks.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>${this.search_term ? 'No trucks match your search.' : 'No trucks with assigned orders'}</strong>
+				<strong>${this.search_term ? 'No trucks match your search.' : 'No active trucks with assigned orders'}</strong>
 				${!this.search_term ? ' — assign orders to trucks in the Truck Assignment page first.' : ''}
 			</div>`;
 		}
 
-		// Active trucks first (with shortages first among those), then closed trucks
+		// Shortages first
 		trucks = [...trucks].sort((a, b) => {
-			if (a.is_closed !== b.is_closed) return a.is_closed ? 1 : -1;
 			const a_short = a.items.length > 0 && this._truck_has_shortage(a);
 			const b_short = b.items.length > 0 && this._truck_has_shortage(b);
 			if (a_short !== b_short) return b_short ? 1 : -1;
@@ -228,22 +236,17 @@ class OrderFulfillmentManager {
 		});
 
 		const item_summary = this._compute_item_summary();
-		const has_any_short = Object.values(item_summary).some(s => s.total_short > 0);
+		const total_items  = Object.keys(item_summary).length;
+		const items_ok     = Object.values(item_summary).filter(s => s.total_short <= 0).length;
+		const items_short  = total_items - items_ok;
 
-		// KPI row
-		const total_items    = Object.keys(item_summary).length;
-		const items_ok       = Object.values(item_summary).filter(s => s.total_short <= 0).length;
-		const items_short    = total_items - items_ok;
-		const total_shortage = Object.values(item_summary).reduce((a, s) => a + s.total_short, 0);
-
-		let html = `
+		return `
 		<div class="tf-kpi-row">
-			${this._kpi('Trucks', trucks.length, '#8b5cf6')}
+			${this._kpi('Active Trucks', trucks.length, '#8b5cf6')}
 			${this._kpi('Items Needed', total_items, '#667eea')}
 			${this._kpi('Fully Stocked', items_ok, '#10b981')}
 			${this._kpi('With Shortages', items_short, items_short > 0 ? '#ef4444' : '#9ca3af')}
 		</div>
-
 		<div class="tf-section">
 			<div class="tf-section-header">
 				Truck Allocations
@@ -253,19 +256,51 @@ class OrderFulfillmentManager {
 				${trucks.map(t => this._render_truck_card(t, item_summary)).join('')}
 			</div>
 		</div>`;
+	}
 
-		// Legacy dispatched trucks (from KV store) — show only those not in current data
-		const current_tns = new Set(trucks.map(t => t.truck_number));
-		const legacy_closed = this.closed_trucks.filter(ct => !current_tns.has(ct.truck_number));
-		if (legacy_closed.length) {
-			html += `<div class="tf-section tf-closed-section">
+	_render_sorted_tab(sorted_trucks, legacy_closed) {
+		const item_summary = this._compute_item_summary();
+		let html = '';
+
+		if (sorted_trucks.length) {
+			// Sort: shortages first (so incomplete ones stand out), then alpha
+			const ordered = [...sorted_trucks].sort((a, b) => {
+				const a_short = a.items.length > 0 && this._truck_has_shortage(a);
+				const b_short = b.items.length > 0 && this._truck_has_shortage(b);
+				if (a_short !== b_short) return b_short ? 1 : -1;
+				return (a.truck_number || '').localeCompare(b.truck_number || '');
+			});
+			html += `
+			<div class="tf-section">
 				<div class="tf-section-header">
-					Dispatched Trucks
+					&#10004; Sorted Trucks
+					<span class="tf-header-note">Stock sorting complete — allocation still editable</span>
+					<span class="tf-tab-badge" style="background:#10b981;">${sorted_trucks.length}</span>
+				</div>
+				<div class="tf-trucks-grid">
+					${ordered.map(t => this._render_truck_card(t, item_summary)).join('')}
+				</div>
+			</div>`;
+		}
+
+		if (legacy_closed.length) {
+			html += `
+			<div class="tf-section tf-closed-section" style="margin-top:${sorted_trucks.length ? '24px' : '0'};">
+				<div class="tf-section-header">
+					&#128666; Dispatched Trucks
+					<span class="tf-header-note">Fully dispatched — for reference only</span>
 					<span class="tf-tab-badge">${legacy_closed.length}</span>
 				</div>
 				<div class="tf-trucks-grid">
 					${legacy_closed.map((ct, idx) => this._render_closed_truck_card(ct, idx)).join('')}
 				</div>
+			</div>`;
+		}
+
+		if (!html) {
+			return `<div class="alert alert-info" style="margin-top:20px;">
+				<strong>No sorted trucks yet.</strong>
+				Use the <em>Close &amp; Mark Sorted</em> button on a truck in the Trucks tab.
 			</div>`;
 		}
 
