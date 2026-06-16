@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.6.0...v1.7.0) (2026-06-16)
+
+
+### Features
+
+* inline order editor on Customer Order Confirmation page ([aee4376](https://github.com/wanguimbutu/crystal_custom/commit/aee4376bb0e7e37579e80c5cac5b9640ad516153))
+
 # [1.6.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.5.0...v1.6.0) (2026-06-16)
 
 
