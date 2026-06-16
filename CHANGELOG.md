@@ -1,3 +1,10 @@
+## [1.14.5](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.4...v1.14.5) (2026-06-16)
+
+
+### Bug Fixes
+
+* derive dispatched trucks from order state not KV store ([cff00f1](https://github.com/wanguimbutu/crystal_custom/commit/cff00f1d4e40a53317e55b88903c678ef865eb3f))
+
 ## [1.14.4](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.3...v1.14.4) (2026-06-16)
 
 
