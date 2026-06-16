@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.11.0...v1.12.0) (2026-06-16)
+
+
+### Features
+
+* show delivery region on truck cards in order fulfillment ([cad71bd](https://github.com/wanguimbutu/crystal_custom/commit/cad71bdee51f77ac7f2a4f6d67dabd9377c54a07))
+
 # [1.11.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.3...v1.11.0) (2026-06-16)
 
 
