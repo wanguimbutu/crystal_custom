@@ -64,16 +64,32 @@ def get_truck_fulfillment_data():
     matches truck assignment. Includes closed trucks (is_closed=True).
     Stock is always current (from tabBin at call time).
     """
-    import json as _json
+    # A truck is dispatched when ALL its active (not Completed/Closed) orders
+    # have custom_truck_closed=1. Derived from orders — no KV store dependency,
+    # so truck number reuse across delivery cycles is handled correctly.
+    dispatch_rows = frappe.db.sql("""
+        SELECT
+            custom_truck_number,
+            SUM(CASE WHEN IFNULL(custom_truck_closed, 0) = 0 THEN 1 ELSE 0 END) AS open_count,
+            COUNT(*) AS total_count
+        FROM `tabSales Order`
+        WHERE docstatus != 2
+          AND status NOT IN ('Completed', 'Closed')
+          AND custom_truck_number IS NOT NULL
+          AND custom_truck_number != ''
+        GROUP BY custom_truck_number
+    """, as_dict=1)
+    # dispatched = has active orders AND every one of them is closed
+    closed_tns = {
+        r.custom_truck_number
+        for r in dispatch_rows
+        if int(r.total_count) > 0 and int(r.open_count) == 0
+    }
 
-    # Exclude trucks that have been closed/dispatched (same source as truck assignment)
-    try:
-        _closed_list = _json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
-    except Exception:
-        _closed_list = []
-    closed_tns = {ct.get('truck_number') for ct in _closed_list}
-
-    # Show ALL non-cancelled truck-assigned orders; skip trucks already dispatched
+    # Orders to show: active (not Completed/Closed), truck assigned.
+    # 'To Bill' orders (fully delivered, not yet billed) are included — their
+    # items have required_qty=0 so they appear in the order count but not the
+    # allocation table, which is the correct behaviour.
     rows = frappe.db.sql("""
         SELECT
             so.custom_truck_number                                          AS truck_number,
@@ -88,6 +104,7 @@ def get_truck_fulfillment_data():
         FROM `tabSales Order` so
         INNER JOIN `tabSales Order Item` soi ON soi.parent = so.name
         WHERE so.docstatus != 2
+          AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number, so.name, soi.item_code
@@ -97,7 +114,7 @@ def get_truck_fulfillment_data():
     if not rows:
         return {'trucks': [], 'stock': {}}
 
-    # Unique items still needing stock (required_qty > 0) for stock lookup
+    # Unique items still needing stock (required_qty > 0, non-dispatched trucks)
     unique_items = list({r.item_code for r in rows
                          if r.truck_number not in closed_tns and float(r.required_qty) > 0})
     stock_map  = {}
@@ -117,7 +134,7 @@ def get_truck_fulfillment_data():
     for r in rows:
         tn = r.truck_number
         if tn in closed_tns:
-            continue  # skip dispatched trucks entirely
+            continue
         trucks_map[tn]['orders'][r.sales_order] = {
             'name':          r.sales_order,
             'customer_name': r.customer_name or r.sales_order,
@@ -126,7 +143,7 @@ def get_truck_fulfillment_data():
         if float(r.required_qty) > 0:
             trucks_map[tn]['items'][r.item_code] += float(r.required_qty)
 
-    # Truck meta (weight + value + regions)
+    # Truck meta: only active orders (same status filter) for correct weight/count
     meta_rows = frappe.db.sql("""
         SELECT
             so.custom_truck_number   AS truck_number,
@@ -138,6 +155,7 @@ def get_truck_fulfillment_data():
                          SEPARATOR ', ')            AS delivery_regions
         FROM `tabSales Order` so
         WHERE so.docstatus != 2
+          AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number
@@ -185,16 +203,25 @@ def get_truck_customer_data():
     Includes closed trucks. Stock is always current.
     Used by the Customer View tab.
     """
-    import json as _json
+    # Same dispatched-truck logic as get_truck_fulfillment_data
+    dispatch_rows = frappe.db.sql("""
+        SELECT
+            custom_truck_number,
+            SUM(CASE WHEN IFNULL(custom_truck_closed, 0) = 0 THEN 1 ELSE 0 END) AS open_count,
+            COUNT(*) AS total_count
+        FROM `tabSales Order`
+        WHERE docstatus != 2
+          AND status NOT IN ('Completed', 'Closed')
+          AND custom_truck_number IS NOT NULL
+          AND custom_truck_number != ''
+        GROUP BY custom_truck_number
+    """, as_dict=1)
+    closed_tns = {
+        r.custom_truck_number
+        for r in dispatch_rows
+        if int(r.total_count) > 0 and int(r.open_count) == 0
+    }
 
-    # Exclude dispatched trucks (same source as truck assignment)
-    try:
-        _closed_list = _json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
-    except Exception:
-        _closed_list = []
-    closed_tns = {ct.get('truck_number') for ct in _closed_list}
-
-    # Show ALL non-cancelled truck-assigned orders; skip dispatched trucks
     rows = frappe.db.sql("""
         SELECT
             so.custom_truck_number                                          AS truck_number,
@@ -211,6 +238,7 @@ def get_truck_customer_data():
         FROM `tabSales Order` so
         INNER JOIN `tabSales Order Item` soi ON soi.parent = so.name
         WHERE so.docstatus != 2
+          AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number, so.name, soi.item_code
@@ -220,7 +248,6 @@ def get_truck_customer_data():
     if not rows:
         return {'trucks': [], 'stock': {}}
 
-    # Unique items still needing fulfillment for stock lookup (skip closed trucks)
     unique_items = list({r.item_code for r in rows
                          if r.truck_number not in closed_tns and float(r.required_qty) > 0})
     stock_map = {}
