@@ -902,8 +902,13 @@ class OrderConfirmationManager {
         });
     }
 
+    _editor_total(items) {
+        return items.reduce((s, i) => s + flt(i.qty) * flt(i.rate), 0);
+    }
+
     render_order_editor($container, order_name, items) {
         const rows = items.map((item, idx) => this._item_editor_row(item, idx)).join('');
+        const total = this._editor_total(items);
         $container.html(`
             <div class="oc-editor">
                 <table class="table table-bordered oc-editor-table">
@@ -913,6 +918,17 @@ class OrderConfirmationManager {
                         <th width="110px">Amount</th><th width="40px"></th>
                     </tr></thead>
                     <tbody class="oc-items-tbody">${rows}</tbody>
+                    <tfoot>
+                        <tr style="background:#1e293b;">
+                            <td colspan="4" style="text-align:right;font-weight:700;color:#fff;font-size:13px;padding:10px 12px!important;">
+                                Order Total
+                            </td>
+                            <td class="oc-editor-total" style="font-weight:700;color:#43e97b;font-size:15px;padding:10px 12px!important;">
+                                ${format_currency(total)}
+                            </td>
+                            <td style="background:#1e293b;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
                 <div class="oc-editor-actions">
                     <button class="btn btn-xs btn-default oc-add-item-btn">+ Add Item</button>
@@ -970,6 +986,7 @@ class OrderConfirmationManager {
             if (items && items[idx]) items[idx].qty = qty;
             const rate = items && items[idx] ? flt(items[idx].rate) : 0;
             $row.find('.oc-row-amount').text(format_currency(qty * rate, null, 0));
+            $container.find('.oc-editor-total').text(format_currency(self._editor_total(items || [])));
         });
 
         // Remove item row
@@ -981,6 +998,7 @@ class OrderConfirmationManager {
             // Re-render tbody
             const rows = (self._editor_items[order_name] || []).map((item, i) => self._item_editor_row(item, i)).join('');
             $container.find('.oc-items-tbody').html(rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">No items</td></tr>');
+            $container.find('.oc-editor-total').text(format_currency(self._editor_total(self._editor_items[order_name] || [])));
             self._attach_editor_events($container, order_name);
         });
 
