@@ -1,3 +1,16 @@
+# [1.15.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.6...v1.15.0) (2026-06-16)
+
+
+### Bug Fixes
+
+* remove non-existent custom_additonal_notes column from paint orders query ([9a206be](https://github.com/wanguimbutu/crystal_custom/commit/9a206be9967664fd94ec1481fb48b8b411031b20))
+* use custom_additonal_notes (actual SO field) for paint/colour notes ([4215ae1](https://github.com/wanguimbutu/crystal_custom/commit/4215ae18542d5acaf72826b97a28472dfa0c1671))
+
+
+### Features
+
+* full search in order fulfillment (item, truck, order, region, sales person) ([0770926](https://github.com/wanguimbutu/crystal_custom/commit/0770926c05c2ab6609814c853817088a6fb11f10))
+
 ## [1.14.6](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.5...v1.14.6) (2026-06-16)
 
 
