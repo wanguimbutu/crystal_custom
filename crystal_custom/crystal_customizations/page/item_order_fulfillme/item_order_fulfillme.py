@@ -75,7 +75,10 @@ def get_truck_fulfillment_data():
             so.custom_truck_number                                          AS truck_number,
             so.name                                                         AS sales_order,
             so.customer_name,
-            so.custom_additonal_notes AS custom_paint_notes,
+            so.custom_additonal_notes                                       AS custom_paint_notes,
+            so.custom_delivery_region,
+            (SELECT GROUP_CONCAT(DISTINCT st.sales_person ORDER BY st.sales_person SEPARATOR ', ')
+             FROM `tabSales Team` st WHERE st.parent = so.name)            AS sales_persons,
             soi.item_code,
             soi.item_name,
             GREATEST(0, SUM(soi.qty - IFNULL(soi.delivered_qty, 0)))       AS required_qty,
@@ -114,9 +117,11 @@ def get_truck_fulfillment_data():
     for r in rows:
         tn = r.truck_number
         trucks_map[tn]['orders'][r.sales_order] = {
-            'name':          r.sales_order,
-            'customer_name': r.customer_name or r.sales_order,
-            'paint_notes':   r.custom_paint_notes or '',
+            'name':            r.sales_order,
+            'customer_name':   r.customer_name or r.sales_order,
+            'paint_notes':     r.custom_paint_notes or '',
+            'delivery_region': r.custom_delivery_region or '',
+            'sales_persons':   r.sales_persons or '',
         }
         if float(r.required_qty) > 0:
             trucks_map[tn]['items'][r.item_code] += float(r.required_qty)

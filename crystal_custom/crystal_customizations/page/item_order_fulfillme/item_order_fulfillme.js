@@ -61,7 +61,7 @@ class OrderFulfillmentManager {
 
 		this.page.add_field({
 			label: 'Search', fieldtype: 'Data', fieldname: 'search_query',
-			placeholder: 'Customer, order or item…',
+			placeholder: 'Truck, order, item, region, sales person…',
 			change: () => {
 				this.search_term = this.page.fields_dict.search_query.get_value() || '';
 				if (this.active_tab === 'trucks') {
@@ -188,10 +188,17 @@ class OrderFulfillmentManager {
 		if (this.search_term) {
 			const q = this.search_term.toLowerCase();
 			trucks = trucks.filter(t =>
-				(t.truck_number || '').toLowerCase().includes(q) ||
+				(t.truck_number     || '').toLowerCase().includes(q) ||
+				(t.delivery_regions || '').toLowerCase().includes(q) ||
 				(t.orders || []).some(o =>
-					(o.name          || '').toLowerCase().includes(q) ||
-					(o.customer_name || '').toLowerCase().includes(q)
+					(o.name            || '').toLowerCase().includes(q) ||
+					(o.customer_name   || '').toLowerCase().includes(q) ||
+					(o.delivery_region || '').toLowerCase().includes(q) ||
+					(o.sales_persons   || '').toLowerCase().includes(q)
+				) ||
+				(t.items || []).some(i =>
+					(i.item_code || '').toLowerCase().includes(q) ||
+					(i.item_name || '').toLowerCase().includes(q)
 				)
 			);
 		}
