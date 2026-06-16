@@ -194,12 +194,12 @@ def get_production_data(from_date=None, to_date=None):
             transaction_date,
             custom_delivery_region,
             custom_truck_number,
-            custom_paint_notes,
+            COALESCE(NULLIF(custom_paint_notes, ''), custom_additonal_notes) AS custom_paint_notes,
             workflow_state
         FROM `tabSales Order`
         WHERE docstatus != 2
           AND status NOT IN ('Completed', 'Closed')
-          AND IFNULL(custom_paint_notes, '') != ''
+          AND (IFNULL(custom_paint_notes, '') != '' OR IFNULL(custom_additonal_notes, '') != '')
         ORDER BY transaction_date DESC
         LIMIT 200
     """, as_dict=1)
