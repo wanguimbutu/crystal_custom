@@ -1,3 +1,10 @@
+## [1.15.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.2...v1.15.3) (2026-06-16)
+
+
+### Bug Fixes
+
+* apply date range filter to paint/colour specs in production overview ([35c36a2](https://github.com/wanguimbutu/crystal_custom/commit/35c36a2a82fc0ae6ec2d2322e78e188b16bedc6c))
+
 ## [1.15.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.1...v1.15.2) (2026-06-16)
 
 
