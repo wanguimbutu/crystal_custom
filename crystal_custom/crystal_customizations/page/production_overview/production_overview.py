@@ -157,6 +157,35 @@ def get_production_data(from_date=None, to_date=None):
             'bom_items':    bom_reqs,
         })
 
+    # ── Manufacturing Worksheets: In Process + Completed by planned date ─────────
+    ws_date_conds = ""
+    if from_date:
+        ws_date_conds += " AND wo.planned_start_date >= %(from_date)s"
+    if to_date:
+        ws_date_conds += " AND wo.planned_start_date <= %(to_date)s"
+
+    worksheets = frappe.db.sql(f"""
+        SELECT
+            wo.name,
+            wo.production_item,
+            wo.item_name,
+            wo.qty,
+            wo.produced_qty,
+            wo.status,
+            wo.planned_start_date,
+            wo.actual_start_date,
+            wo.actual_end_date,
+            wo.material_request  AS mr_name
+        FROM `tabWork Order` wo
+        WHERE wo.docstatus != 2
+          AND wo.status IN ('In Process', 'Completed')
+          {ws_date_conds}
+        ORDER BY
+            FIELD(wo.status, 'In Process', 'Completed'),
+            wo.planned_start_date DESC
+        LIMIT 500
+    """, date_params, as_dict=1)
+
     # ── Sales Orders with paint / colour notes ────────────────────────────────
     paint_orders = frappe.db.sql("""
         SELECT
@@ -179,6 +208,7 @@ def get_production_data(from_date=None, to_date=None):
         'mrs':          [dict(r) for r in mrs],
         'mr_items':     [dict(r) for r in mr_items],
         'work_orders':   wo_data,
+        'worksheets':   [dict(r) for r in worksheets],
         'paint_orders': [dict(r) for r in paint_orders],
     }
 

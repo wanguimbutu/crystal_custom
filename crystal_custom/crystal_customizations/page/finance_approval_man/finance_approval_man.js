@@ -220,9 +220,10 @@ class FinanceApprovalManager {
 				<td class="fa-amt">${format_currency(fin.credit_limit || 0)}</td>
 				<td><span class="fa-tag">${fin.payment_terms || '—'}</span></td>
 				<td>${has_pdc
-					? `<span class="fa-pdc-badge" title="${format_currency(fin.pdc_amount)}">
+					? `<span class="fa-pdc-badge">
 						${fin.pdc_count} payment${fin.pdc_count > 1 ? 's' : ''}
-					   </span>`
+					   </span>
+					   <div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px;">${format_currency(fin.pdc_amount)}</div>`
 					: '<span class="text-muted">—</span>'}
 				</td>
 				<td><span class="fa-tag">${o.custom_delivery_region || '—'}</span></td>

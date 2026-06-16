@@ -491,8 +491,9 @@ class DeliveryNoteManager {
             return;
         }
 
-        // Table view: only show draft (pending) orders; submitted orders belong in the Truck View
-        const table_slice = page_slice.filter(o => o.docstatus !== 1);
+        // Table view: draft orders + submitted orders on dispatched trucks (need DNs/invoices)
+        const in_table = o => o.docstatus !== 1 || o.custom_truck_closed == 1;
+        const table_slice = page_slice.filter(in_table);
         const table_groups = {};
         table_slice.forEach(o => {
             const k = o.custom_truck_number || '__no_truck__';
@@ -504,7 +505,7 @@ class DeliveryNoteManager {
             if (b === '__no_truck__') return -1;
             return a.localeCompare(b);
         });
-        const draft_count = all_filtered.filter(o => o.docstatus !== 1).length;
+        const draft_count = all_filtered.filter(in_table).length;
 
         let html = `<div class="delivery-orders-table">${summary}${view_toggle}
                 <div class="dm-selection-bar">

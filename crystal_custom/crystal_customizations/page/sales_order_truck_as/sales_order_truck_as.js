@@ -133,6 +133,9 @@ class TruckAssignmentManager {
 							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
 							callback: (cr) => {
 								try { this.closed_trucks = JSON.parse(cr.message || '[]') || []; } catch(e) {}
+								// Remove trucks from active grid if they're already in closed_trucks
+								const closed_tns = new Set(this.closed_trucks.map(ct => ct.truck_number));
+								this.available_trucks = this.available_trucks.filter(t => !closed_tns.has(t.truck_number));
 								this.load_data();
 							},
 							error: () => this.load_data(),

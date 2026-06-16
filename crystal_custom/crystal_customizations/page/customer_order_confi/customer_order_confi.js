@@ -149,12 +149,37 @@ class OrderConfirmationManager {
             },
             callback: (r) => {
                 this.submitted_orders = r.message || [];
-                this.render_orders();
+                this._attach_customer_phones();
             },
             error: () => {
                 this.submitted_orders = [];
                 this.render_orders();
             },
+        });
+    }
+
+    _attach_customer_phones() {
+        const all_orders = [...this.orders, ...this.submitted_orders];
+        const customers  = [...new Set(all_orders.map(o => o.customer).filter(Boolean))];
+        if (!customers.length) { this.render_orders(); return; }
+
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Customer',
+                fields: ['name', 'custom_phone_number'],
+                filters: [['Customer', 'name', 'in', customers]],
+                limit_page_length: customers.length,
+            },
+            callback: (r) => {
+                const phone_map = {};
+                (r.message || []).forEach(c => { phone_map[c.name] = c.custom_phone_number; });
+                all_orders.forEach(o => {
+                    if (!o.custom_phone_number) o.custom_phone_number = phone_map[o.customer] || '';
+                });
+                this.render_orders();
+            },
+            error: () => this.render_orders(),
         });
     }
 

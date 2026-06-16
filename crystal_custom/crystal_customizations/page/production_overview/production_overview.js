@@ -59,39 +59,45 @@ class ProductionOverview {
     // ── Render ────────────────────────────────────────────────────────────────
 
     render() {
-        const { mrs, mr_items, work_orders, paint_orders = [] } = this.data;
+        const { mrs, work_orders, paint_orders = [], worksheets = [] } = this.data;
 
         const pending_mrs  = mrs.filter(m => m.status !== 'Stopped' && m.status !== 'Cancelled');
-        const active_wos   = work_orders.filter(w => w.status !== 'Completed');
         const short_wos    = work_orders.filter(w => !w.can_start && w.status !== 'Completed');
         const agg_count    = this._aggregate_items().length;
+        const in_process   = worksheets.filter(w => w.status === 'In Process');
+        const completed    = worksheets.filter(w => w.status === 'Completed');
 
         const kpi = this._kpi_row([
             { label: 'Pending Requests',   value: pending_mrs.length,  color: '#667eea, #764ba2' },
-            { label: 'Active Work Orders', value: active_wos.length,   color: '#43e97b, #38f9d7' },
+            { label: 'In Process',         value: in_process.length,   color: '#43e97b, #38f9d7' },
             { label: 'Items to Produce',   value: agg_count,           color: '#f093fb, #f5576c' },
             { label: 'Colour Specs',       value: paint_orders.length, color: '#f59e0b, #d97706' },
         ]);
 
         const tabs = `
             <div class="po-tabs">
-                <button class="po-tab-btn ${this.active_tab === 'requests'   ? 'po-tab-active' : ''}" data-tab="requests">
+                <button class="po-tab-btn ${this.active_tab === 'requests'    ? 'po-tab-active' : ''}" data-tab="requests">
                     &#128203; Production Requests
                     <span class="po-tab-badge">${pending_mrs.length}</span>
                 </button>
-                <button class="po-tab-btn ${this.active_tab === 'aggregate'  ? 'po-tab-active' : ''}" data-tab="aggregate">
+                <button class="po-tab-btn ${this.active_tab === 'aggregate'   ? 'po-tab-active' : ''}" data-tab="aggregate">
                     &#128196; Aggregated Items
                     <span class="po-tab-badge">${agg_count}</span>
                 </button>
-                <button class="po-tab-btn ${this.active_tab === 'workorders' ? 'po-tab-active' : ''}" data-tab="workorders">
-                    &#9881; Work Orders
+                <button class="po-tab-btn ${this.active_tab === 'worksheets'  ? 'po-tab-active' : ''}" data-tab="worksheets">
+                    &#9881; Manufacturing Worksheets
+                    ${in_process.length ? `<span class="po-tab-badge" style="background:#f59e0b;">${in_process.length} active</span>` : ''}
+                    ${completed.length  ? `<span class="po-tab-badge" style="background:#10b981;margin-left:2px;">${completed.length} done</span>` : ''}
+                </button>
+                <button class="po-tab-btn ${this.active_tab === 'workorders'  ? 'po-tab-active' : ''}" data-tab="workorders">
+                    &#128203; MR Work Orders
                     <span class="po-tab-badge">${work_orders.length}</span>
                 </button>
-                <button class="po-tab-btn ${this.active_tab === 'materials'  ? 'po-tab-active' : ''}" data-tab="materials">
+                <button class="po-tab-btn ${this.active_tab === 'materials'   ? 'po-tab-active' : ''}" data-tab="materials">
                     &#128230; Material Readiness
                     <span class="po-tab-badge ${short_wos.length ? 'po-tab-badge-warn' : ''}">${short_wos.length}</span>
                 </button>
-                <button class="po-tab-btn ${this.active_tab === 'colours'    ? 'po-tab-active' : ''}" data-tab="colours">
+                <button class="po-tab-btn ${this.active_tab === 'colours'     ? 'po-tab-active' : ''}" data-tab="colours">
                     &#127758; Colour Specs
                     ${paint_orders.length ? `<span class="po-tab-badge po-tab-badge-warn">${paint_orders.length}</span>` : ''}
                 </button>
@@ -107,6 +113,7 @@ class ProductionOverview {
         const $content = this.container.find('#po-tab-content');
         if (this.active_tab === 'requests')   $content.html(this._render_requests_tab());
         if (this.active_tab === 'aggregate')  $content.html(this._render_aggregate_tab());
+        if (this.active_tab === 'worksheets') $content.html(this._render_worksheets_tab());
         if (this.active_tab === 'workorders') $content.html(this._render_workorders_tab());
         if (this.active_tab === 'materials')  $content.html(this._render_materials_tab());
         if (this.active_tab === 'colours')    $content.html(this._render_colours_tab());
@@ -123,15 +130,12 @@ class ProductionOverview {
             items_by_mr[i.mr_name].push(i);
         });
 
-        const wo_mr_set = new Set(this.data.work_orders.map(w => w.mr_name).filter(Boolean));
-
         if (!mrs.length) {
             return `<div class="po-empty">No production requests found.</div>`;
         }
 
         const cards = mrs.map(mr => {
             const items   = items_by_mr[mr.name] || [];
-            const has_wos = wo_mr_set.has(mr.name);
             const status_color = {
                 'Draft':             '#6b7280',
                 'Submitted':         '#3b82f6',
@@ -275,7 +279,86 @@ class ProductionOverview {
         </div>`;
     }
 
-    // ── Work Orders tab ───────────────────────────────────────────────────────
+    // ── Manufacturing Worksheets tab ──────────────────────────────────────────
+
+    _render_worksheets_tab() {
+        const worksheets = this.data.worksheets || [];
+        const in_process = worksheets.filter(w => w.status === 'In Process');
+        const completed  = worksheets.filter(w => w.status === 'Completed');
+
+        if (!worksheets.length) {
+            return `<div class="po-empty">No In Process or Completed work orders in the selected date range.<br>
+                <span style="font-size:12px;color:#9ca3af;">Date filter applies to Planned Start Date.</span></div>`;
+        }
+
+        const _ws_rows = (list) => list.map(wo => {
+            const pct = wo.qty > 0 ? Math.min(Math.round((flt(wo.produced_qty) / flt(wo.qty)) * 100), 100) : 0;
+            const bar_color = wo.status === 'Completed' ? '#10b981' : pct > 50 ? '#3b82f6' : '#f59e0b';
+            const date_col  = wo.status === 'Completed'
+                ? (wo.actual_end_date   ? frappe.datetime.str_to_user(wo.actual_end_date)   : '—')
+                : (wo.actual_start_date ? frappe.datetime.str_to_user(wo.actual_start_date) : '—');
+            const date_label = wo.status === 'Completed' ? 'Finished' : 'Started';
+            return `<tr>
+                <td>
+                    <a href="/app/work-order/${frappe.utils.escape_html(wo.name)}" target="_blank" class="po-mr-link">
+                        ${frappe.utils.escape_html(wo.name)}
+                    </a>
+                    ${wo.mr_name ? `<div style="font-size:10px;color:#9ca3af;">MR: ${frappe.utils.escape_html(wo.mr_name)}</div>` : ''}
+                </td>
+                <td>
+                    <strong>${frappe.utils.escape_html(wo.production_item)}</strong>
+                    <div style="font-size:11px;color:#6b7280;">${frappe.utils.escape_html(wo.item_name || '')}</div>
+                </td>
+                <td class="po-r">${flt(wo.qty, 2)}</td>
+                <td class="po-r"><strong>${flt(wo.produced_qty, 2)}</strong></td>
+                <td>
+                    <div class="po-progress-bar">
+                        <div class="po-progress-fill" style="width:${pct}%;background:${bar_color};"></div>
+                    </div>
+                    <div style="font-size:10px;color:#6b7280;text-align:right;">${pct}%</div>
+                </td>
+                <td style="font-size:11px;color:#6b7280;" title="${date_label}">${date_col}</td>
+                <td>
+                    <a href="/app/work-order/${frappe.utils.escape_html(wo.name)}" target="_blank"
+                       class="btn btn-xs btn-default">Open</a>
+                </td>
+            </tr>`;
+        }).join('');
+
+        const _ws_section = (label, list, header_color) => {
+            if (!list.length) return '';
+            return `
+                <div style="margin-bottom:28px;">
+                    <div style="font-size:12px;font-weight:700;color:#fff;background:${header_color};
+                                padding:6px 14px;border-radius:6px 6px 0 0;display:flex;align-items:center;gap:8px;">
+                        ${label}
+                        <span style="font-size:11px;font-weight:400;opacity:0.85;">${list.length} worksheet${list.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-bordered po-wo-table" style="margin:0;">
+                            <thead><tr>
+                                <th>Work Order</th><th>Item</th>
+                                <th class="po-r">Target Qty</th><th class="po-r">Produced</th>
+                                <th width="120px">Progress</th>
+                                <th width="90px">${list[0].status === 'Completed' ? 'Finished' : 'Started'}</th>
+                                <th width="60px"></th>
+                            </tr></thead>
+                            <tbody>${_ws_rows(list)}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+        };
+
+        return `<div>
+            <div style="font-size:11px;color:#9ca3af;margin-bottom:12px;">
+                &#128197; Date filter applies to <strong>Planned Start Date</strong>.
+            </div>
+            ${_ws_section('&#9881; In Process', in_process, '#f59e0b')}
+            ${_ws_section('&#10003; Completed', completed,  '#10b981')}
+        </div>`;
+    }
+
+    // ── Work Orders tab (MR-linked) ───────────────────────────────────────────
 
     _render_workorders_tab() {
         const { work_orders } = this.data;
@@ -545,7 +628,6 @@ class ProductionOverview {
     _download_csv() {
         const items = this._aggregate_items();
         const from_date = this.page.fields_dict.from_date.get_value() || '';
-        const to_date   = this.page.fields_dict.to_date.get_value()   || '';
 
         const esc = v => `"${String(v || '').replace(/"/g, '""')}"`;
         const header = ['#', 'Item Code', 'Description', 'Total Qty', 'UOM', 'Trucks', 'From Requests', 'Status'].map(esc).join(',');
