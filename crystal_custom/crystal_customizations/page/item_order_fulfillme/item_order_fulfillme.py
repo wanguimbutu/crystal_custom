@@ -65,14 +65,13 @@ def get_truck_fulfillment_data():
     Stock is always current (from tabBin at call time).
     """
     conditions = [
-        "so.docstatus IN (0, 1)",
-        "so.workflow_state IN ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')",
+        "so.docstatus != 2",
         "so.status NOT IN ('Completed', 'Closed')",
         "so.custom_truck_number IS NOT NULL",
         "so.custom_truck_number != ''",
         "soi.qty > IFNULL(soi.delivered_qty, 0)",
     ]
-    # No date filter, no closed filter — show all active trucks
+    # No workflow state filter — show every non-cancelled truck-assigned order
 
     where = " AND ".join(conditions)
 
@@ -135,8 +134,7 @@ def get_truck_fulfillment_data():
                          ORDER BY so.custom_delivery_region
                          SEPARATOR ', ')            AS delivery_regions
         FROM `tabSales Order` so
-        WHERE so.docstatus IN (0, 1)
-          AND so.workflow_state IN ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')
+        WHERE so.docstatus != 2
           AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
@@ -187,14 +185,13 @@ def get_truck_customer_data():
     Used by the Customer View tab.
     """
     conditions = [
-        "so.docstatus IN (0, 1)",
-        "so.workflow_state IN ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')",
+        "so.docstatus != 2",
         "so.status NOT IN ('Completed', 'Closed')",
         "so.custom_truck_number IS NOT NULL",
         "so.custom_truck_number != ''",
         "soi.qty > IFNULL(soi.delivered_qty, 0)",
     ]
-    # No date filter, no closed filter
+    # No workflow state or date filter
 
     where = " AND ".join(conditions)
 
