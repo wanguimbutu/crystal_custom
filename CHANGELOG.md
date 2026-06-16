@@ -1,3 +1,10 @@
+## [1.10.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.0...v1.10.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* remove non-existent custom_source_page column from MR query ([998aeba](https://github.com/wanguimbutu/crystal_custom/commit/998aeba9b9a2ac07cee1ada58adf53854cb22734))
+
 # [1.10.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.9.0...v1.10.0) (2026-06-16)
 
 
