@@ -580,9 +580,10 @@ class DeliveryNoteManager {
                     </td>
                     <td><span class="region-tag">${order.custom_delivery_region || '-'}</span></td>
                     <td>
-                        <button class="btn btn-sm btn-primary btn-create-dn" data-order="${order.name}">
-                            Create DN
-                        </button>
+                        ${order.docstatus === 1
+                            ? `<button class="btn btn-sm btn-primary btn-create-dn" data-order="${order.name}">Create DN</button>`
+                            : `<span class="dm-tc-pending-badge" title="${frappe.utils.escape_html(order.workflow_state || 'Draft')}">Pending</span>`
+                        }
                     </td>
                 </tr>
                 <tr class="order-details-row" data-order="${order.name}" style="display:none;">
