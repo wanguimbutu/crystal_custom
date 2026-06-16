@@ -436,6 +436,185 @@ class OrderFulfillmentManager {
 		</div>`;
 	}
 
+	_get_cv_trucks_and_stock() {
+		// Returns the current (possibly search-filtered) trucks + stock used by the customer view
+		return {
+			trucks: this.customer_data.trucks || [],
+			stock:  this.customer_data.stock  || {},
+		};
+	}
+
+	_print_customers_tab() {
+		const { trucks, stock } = this._get_cv_trucks_and_stock();
+		const today = frappe.datetime.str_to_user(frappe.datetime.get_today());
+
+		let truck_blocks = '';
+		trucks.forEach(truck => {
+			const tn = truck.truck_number;
+			let cust_blocks = '';
+
+			(truck.orders || []).forEach(order => {
+				const item_rows = (order.items || []).map((item, idx) => {
+					const ic        = item.item_code;
+					const alloc     = (this.allocations[ic] || {})[tn] || 0;
+					const covered   = Math.min(item.required_qty, alloc);
+					const short     = Math.max(0, item.required_qty - alloc);
+					const pct       = item.required_qty > 0
+						? Math.min(100, Math.round((covered / item.required_qty) * 100))
+						: 0;
+					return `<tr>
+						<td>${idx + 1}</td>
+						<td><strong>${frappe.utils.escape_html(ic)}</strong></td>
+						<td>${frappe.utils.escape_html(item.item_name)}</td>
+						<td style="text-align:right;">${item.required_qty.toFixed(2)} ${item.uom}</td>
+						<td style="text-align:right;">${alloc.toFixed(2)}</td>
+						<td style="text-align:right;color:${short > 0 ? '#dc2626' : '#059669'};">
+							${short > 0 ? `<strong>${short.toFixed(2)}</strong>` : '—'}
+						</td>
+						<td style="text-align:center;">${pct}%</td>
+						<td style="text-align:center;">___________</td>
+					</tr>`;
+				}).join('');
+
+				const all_covered = (order.items || []).every(i => {
+					const alloc = (this.allocations[i.item_code] || {})[tn] || 0;
+					return alloc >= i.required_qty;
+				});
+
+				cust_blocks += `
+				<div class="cv-cust-block">
+					<div class="cv-cust-head">
+						<span class="cv-cust-name">${frappe.utils.escape_html(order.customer_name)}</span>
+						<span class="cv-cust-meta">
+							${frappe.utils.escape_html(order.name)}
+							${order.grand_total ? ` &nbsp;·&nbsp; ${format_currency(order.grand_total, null, 0)}` : ''}
+							&nbsp;·&nbsp; <strong style="color:${all_covered ? '#059669' : '#d97706'}">
+								${all_covered ? 'Fully Covered' : 'Partial / Short'}
+							</strong>
+						</span>
+					</div>
+					<table>
+						<thead><tr>
+							<th>#</th><th>Item Code</th><th>Description</th>
+							<th style="text-align:right;">Required</th>
+							<th style="text-align:right;">Allocated</th>
+							<th style="text-align:right;">Short</th>
+							<th style="text-align:center;">Coverage</th>
+							<th style="text-align:center;">Received ✓</th>
+						</tr></thead>
+						<tbody>${item_rows}</tbody>
+					</table>
+					<div class="cv-sig">Received by: ___________________________ &nbsp;&nbsp; Signature: ___________________________</div>
+				</div>`;
+			});
+
+			truck_blocks += `
+			<div class="cv-truck-block">
+				<div class="cv-truck-head">
+					&#128666; ${frappe.utils.escape_html(tn)}
+					<span style="font-size:12px;font-weight:400;margin-left:12px;">
+						${(truck.orders || []).length} customer${(truck.orders || []).length !== 1 ? 's' : ''}
+					</span>
+				</div>
+				${cust_blocks}
+			</div>`;
+		});
+
+		const html = `<!DOCTYPE html><html>
+<head><meta charset="utf-8"><title>Customer Order View</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#111;}
+  h2{margin:0 0 4px;}
+  .meta{color:#555;margin-bottom:20px;font-size:11px;}
+  table{border-collapse:collapse;width:100%;margin-bottom:4px;}
+  th,td{border:1px solid #bbb;padding:6px 9px;}
+  th{background:#1e293b;color:#fff;text-align:left;font-size:11px;}
+  .cv-truck-block{margin-bottom:28px;page-break-before:auto;}
+  .cv-truck-head{background:#334155;color:#f1f5f9;padding:10px 14px;font-size:15px;font-weight:700;border-radius:4px 4px 0 0;margin-bottom:0;}
+  .cv-cust-block{margin-bottom:20px;border:1px solid #e2e8f0;border-radius:0 0 4px 4px;page-break-inside:avoid;}
+  .cv-cust-head{background:#f8fafc;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;}
+  .cv-cust-name{font-size:14px;font-weight:700;}
+  .cv-cust-meta{font-size:11px;color:#475569;}
+  .cv-sig{padding:8px 12px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;margin-top:4px;}
+  @media print{.no-print{display:none}body{margin:10px}.cv-truck-block{page-break-before:always;}.cv-truck-block:first-child{page-break-before:auto;}}
+</style>
+</head><body>
+<button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#1e293b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Print</button>
+<h2>CUSTOMER ORDER VIEW</h2>
+<div class="meta">Date: ${today} &nbsp;|&nbsp; Trucks: ${trucks.length} &nbsp;|&nbsp; Customers: ${trucks.reduce((s, t) => s + (t.orders || []).length, 0)}</div>
+${truck_blocks}
+<p style="margin-top:20px;font-size:10px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
+</body></html>`;
+
+		const w = window.open('', '_blank');
+		w.document.write(html);
+		w.document.close();
+	}
+
+	_download_customers_tab() {
+		const { trucks, stock } = this._get_cv_trucks_and_stock();
+		const today = frappe.datetime.get_today();
+
+		// Flat Excel: one row per order-item combination
+		let rows = '';
+		trucks.forEach(truck => {
+			const tn = truck.truck_number;
+			(truck.orders || []).forEach(order => {
+				(order.items || []).forEach(item => {
+					const ic    = item.item_code;
+					const alloc = (this.allocations[ic] || {})[tn] || 0;
+					const short = Math.max(0, item.required_qty - alloc);
+					const pct   = item.required_qty > 0
+						? Math.min(100, Math.round((Math.min(item.required_qty, alloc) / item.required_qty) * 100))
+						: 0;
+					rows += `<tr>
+						<td>${frappe.utils.escape_html(tn)}</td>
+						<td>${frappe.utils.escape_html(order.name)}</td>
+						<td>${frappe.utils.escape_html(order.customer_name)}</td>
+						<td>${frappe.utils.escape_html(ic)}</td>
+						<td>${frappe.utils.escape_html(item.item_name)}</td>
+						<td>${item.required_qty.toFixed(2)}</td>
+						<td>${item.uom}</td>
+						<td>${alloc.toFixed(2)}</td>
+						<td>${short > 0 ? short.toFixed(2) : 0}</td>
+						<td>${pct}</td>
+					</tr>`;
+				});
+			});
+		});
+
+		const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+			xmlns:x="urn:schemas-microsoft-com:office:excel"
+			xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8">
+<style>
+	table{border-collapse:collapse}
+	th,td{border:1px solid #ddd;padding:7px 10px;font-family:sans-serif;font-size:12px}
+	th{background:#1e293b;color:#fff;font-weight:bold}
+</style></head><body>
+<h2 style="font-family:sans-serif">Customer Order View — ${today}</h2>
+<table>
+	<thead><tr>
+		<th>Truck</th><th>Order</th><th>Customer</th>
+		<th>Item Code</th><th>Description</th>
+		<th>Required Qty</th><th>UOM</th>
+		<th>Allocated</th><th>Short</th><th>Coverage %</th>
+	</tr></thead>
+	<tbody>${rows}</tbody>
+</table>
+</body></html>`;
+
+		const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+		const a    = document.createElement('a');
+		a.href     = URL.createObjectURL(blob);
+		a.download = `Customer_Order_View_${today}.xls`;
+		a.style.display = 'none';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		frappe.show_alert({ message: __('Customer view downloaded'), indicator: 'green' });
+	}
+
 	_render_stock_tab() {
 		const item_summary = this._compute_item_summary();
 
@@ -603,6 +782,10 @@ class OrderFulfillmentManager {
 		<div class="tf-kpi-row">
 			${this._kpi('Trucks', trucks.length, '#8b5cf6')}
 			${this._kpi('Customers', total_orders, '#667eea')}
+		</div>
+		<div style="display:flex;gap:8px;margin-bottom:14px;">
+			<button class="btn btn-sm btn-default tf-cv-print-btn">&#128438; Print Customer View</button>
+			<button class="btn btn-sm btn-default tf-cv-dl-btn">&#8659; Download Excel</button>
 		</div>`;
 
 		trucks.forEach(truck => {
@@ -850,6 +1033,14 @@ class OrderFulfillmentManager {
 		this.container.off('click.tf-dl-closed').on('click.tf-dl-closed', '.tf-dl-closed-btn', function () {
 			const ct = self.closed_trucks[parseInt($(this).data('idx'), 10)];
 			if (ct) self._download_closed_truck(ct);
+		});
+
+		// Customer view — print and download
+		this.container.off('click.tf-cv-print').on('click.tf-cv-print', '.tf-cv-print-btn', () => {
+			this._print_customers_tab();
+		});
+		this.container.off('click.tf-cv-dl').on('click.tf-cv-dl', '.tf-cv-dl-btn', () => {
+			this._download_customers_tab();
 		});
 	}
 
