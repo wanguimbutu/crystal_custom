@@ -18,6 +18,7 @@ class SalesOrderStatusPage {
 		this.view_mode = 'orders'; // 'orders' | 'trucks'
 		this.truck_meta = {};      // keyed by truck_number → {driver_name, capacity_kg}
 		this.closed_trucks = [];
+		this._sps = new Set();
 		this.setup_page();
 		this.set_default_dates();
 		this.load_data();
@@ -37,8 +38,17 @@ class SalesOrderStatusPage {
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
 			options: 'Sales Person',
-			change: () => { this.active_state_filter = null; this.current_page = 1; this.load_data(); }
+			placeholder: 'Add…',
+			change: () => {
+				const v = this.page.fields_dict.sales_person.get_value();
+				if (!v) return;
+				this._sps.add(v);
+				setTimeout(() => this.page.fields_dict.sales_person.set_value(''), 50);
+				this._render_sp_pills();
+				this.active_state_filter = null; this.current_page = 1; this.load_data();
+			}
 		});
+		this._sp_pills_wrap = $('<div class="sp-pills-wrap"></div>').appendTo(this.page.page_form);
 		this.page.add_field({
 			label: 'Delivery Region', fieldtype: 'Link', fieldname: 'delivery_region',
 			options: 'Delivery Region',
@@ -85,7 +95,7 @@ class SalesOrderStatusPage {
 			args: {
 				from_date,
 				to_date,
-				sales_person:    this.page.fields_dict.sales_person.get_value()    || null,
+				sales_persons:   this._sps.size ? [...this._sps] : null,
 				delivery_region: this.page.fields_dict.delivery_region.get_value() || null,
 			},
 			callback: (r) => {
@@ -477,6 +487,21 @@ class SalesOrderStatusPage {
 				? 'No orders match the selected stage filter.'
 				: 'No sales orders in the selected date range.'}
 		</div>`;
+	}
+
+	_render_sp_pills() {
+		if (!this._sp_pills_wrap) return;
+		if (!this._sps.size) { this._sp_pills_wrap.empty(); return; }
+		const self = this;
+		const html = Array.from(this._sps).map(sp =>
+			`<span class="sp-pill">${frappe.utils.escape_html(sp)}<span class="sp-rm" data-sp="${frappe.utils.escape_html(sp)}">&times;</span></span>`
+		).join('');
+		this._sp_pills_wrap.html(`<style>.sp-pills-wrap{padding:4px 8px 2px;display:flex;flex-wrap:wrap;gap:4px;min-height:4px;}.sp-pill{background:#dbeafe;color:#1d4ed8;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:3px;}.sp-rm{cursor:pointer;font-size:13px;line-height:1;margin-left:2px;color:#2563eb;font-weight:bold;}</style>${html}`);
+		this._sp_pills_wrap.find('.sp-rm').on('click', function () {
+			self._sps.delete($(this).data('sp'));
+			self._render_sp_pills();
+			self.active_state_filter = null; self.current_page = 1; self.load_data();
+		});
 	}
 
 	_loading_html() {

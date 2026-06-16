@@ -18,6 +18,7 @@ class TruckAssignmentManager {
 		this.selected_orders = new Set();
 		this.saved_meta = {};
 		this.closed_trucks = [];
+		this._sps = new Set();
 		this.setup_page();
 		this.load_trucks_from_orders();
 	}
@@ -45,8 +46,17 @@ class TruckAssignmentManager {
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
 			options: 'Sales Person',
-			change: () => this.load_data(),
+			placeholder: 'Add…',
+			change: () => {
+				const v = this.page.fields_dict.sales_person.get_value();
+				if (!v) return;
+				this._sps.add(v);
+				setTimeout(() => this.page.fields_dict.sales_person.set_value(''), 50);
+				this._render_sp_pills();
+				this.load_data();
+			}
 		});
+		this._sp_pills_wrap = $('<div class="sp-pills-wrap"></div>').appendTo(this.page.page_form);
 		this.page.add_field({
 			label: 'Search', fieldtype: 'Data', fieldname: 'search_query',
 			placeholder: 'Customer or order no…',
@@ -138,7 +148,6 @@ class TruckAssignmentManager {
 		this.container.html(this._loading_html());
 		const from = this.page.fields_dict.from_date.get_value();
 		const to   = this.page.fields_dict.to_date.get_value();
-		const sp   = this.page.fields_dict.sales_person.get_value();
 
 		const fields = [
 			'name', 'customer', 'customer_name', 'transaction_date',
@@ -153,7 +162,7 @@ class TruckAssignmentManager {
 			['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
 			['Sales Order', 'custom_truck_closed', '!=', 1],
 		];
-		if (sp) base_filters.push(['Sales Team', 'sales_person', '=', sp]);
+		if (this._sps.size) base_filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
 		// Truck-assigned orders: ignore date filter so they always remain visible
 		const truck_filters = [
@@ -1124,6 +1133,23 @@ ${driver_cols}
 		document.body.removeChild(a);
 
 		frappe.show_alert({ message: __('Manifest downloaded for {0}', [truck_number]), indicator: 'green' });
+	}
+
+	// ── SP Pills ──────────────────────────────────────────────────────────────
+
+	_render_sp_pills() {
+		if (!this._sp_pills_wrap) return;
+		if (!this._sps.size) { this._sp_pills_wrap.empty(); return; }
+		const self = this;
+		const html = Array.from(this._sps).map(sp =>
+			`<span class="sp-pill">${frappe.utils.escape_html(sp)}<span class="sp-rm" data-sp="${frappe.utils.escape_html(sp)}">&times;</span></span>`
+		).join('');
+		this._sp_pills_wrap.html(`<style>.sp-pills-wrap{padding:4px 8px 2px;display:flex;flex-wrap:wrap;gap:4px;min-height:4px;}.sp-pill{background:#dbeafe;color:#1d4ed8;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:3px;}.sp-rm{cursor:pointer;font-size:13px;line-height:1;margin-left:2px;color:#2563eb;font-weight:bold;}</style>${html}`);
+		this._sp_pills_wrap.find('.sp-rm').on('click', function () {
+			self._sps.delete($(this).data('sp'));
+			self._render_sp_pills();
+			self.load_data();
+		});
 	}
 
 	// ── Styles ────────────────────────────────────────────────────────────────

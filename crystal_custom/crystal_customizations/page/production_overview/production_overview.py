@@ -3,15 +3,25 @@ from frappe.utils import flt
 
 
 @frappe.whitelist()
-def get_production_data():
+def get_production_data(from_date=None, to_date=None):
     """
     Returns everything the production page needs in one call:
-    - Manufacture Material Requests (not cancelled)
+    - Manufacture Material Requests (not cancelled, not stopped)
     - Work Orders linked to those MRs
     - BOM-level raw material requirements + current bin stock for each WO
+    - Truck assignments per item_code (from active SOs)
     """
+    date_conds = ""
+    date_params = {}
+    if from_date:
+        date_conds += " AND mr.transaction_date >= %(from_date)s"
+        date_params['from_date'] = from_date
+    if to_date:
+        date_conds += " AND mr.transaction_date <= %(to_date)s"
+        date_params['to_date'] = to_date
+
     # ── Material Requests (Manufacture) ───────────────────────────────────────
-    mrs = frappe.db.sql("""
+    mrs = frappe.db.sql(f"""
         SELECT
             mr.name,
             mr.transaction_date,
@@ -20,9 +30,11 @@ def get_production_data():
         FROM `tabMaterial Request` mr
         WHERE mr.material_request_type = 'Manufacture'
           AND mr.docstatus != 2
+          AND mr.status NOT IN ('Stopped', 'Cancelled')
+          {date_conds}
         ORDER BY mr.transaction_date DESC
         LIMIT 200
-    """, as_dict=1)
+    """, date_params, as_dict=1)
 
     mr_names = [r.name for r in mrs]
 
@@ -41,6 +53,28 @@ def get_production_data():
             WHERE mri.parent IN %(names)s
             ORDER BY mri.parent, mri.idx
         """, {'names': mr_names}, as_dict=1)
+
+    # ── Truck lookup per item_code ─────────────────────────────────────────────
+    item_codes = list({i.item_code for i in mr_items})
+    truck_map = {}
+    if item_codes:
+        truck_rows = frappe.db.sql("""
+            SELECT
+                soi.item_code,
+                GROUP_CONCAT(DISTINCT so.custom_truck_number
+                             ORDER BY so.custom_truck_number SEPARATOR ', ') AS trucks
+            FROM `tabSales Order Item` soi
+            JOIN `tabSales Order` so ON so.name = soi.parent
+            WHERE so.docstatus = 1
+              AND so.status NOT IN ('Completed', 'Closed', 'Cancelled')
+              AND IFNULL(so.custom_truck_number, '') != ''
+              AND soi.item_code IN %(codes)s
+            GROUP BY soi.item_code
+        """, {'codes': item_codes}, as_dict=1)
+        truck_map = {r.item_code: r.trucks for r in truck_rows}
+
+    for i in mr_items:
+        i['trucks'] = truck_map.get(i.item_code, '') or ''
 
     # ── Work Orders linked to those MRs ───────────────────────────────────────
     work_orders = []
@@ -67,8 +101,6 @@ def get_production_data():
             ORDER BY wo.creation DESC
         """, {'names': mr_names}, as_dict=1)
 
-    wo_names = [w.name for w in work_orders]
-
     # ── BOM raw material requirements per Work Order ──────────────────────────
     bom_items = []
     if work_orders:
@@ -87,13 +119,10 @@ def get_production_data():
                   AND bi.docstatus = 1
             """, {'boms': boms}, as_dict=1)
 
-    # For each BOM item, scale qty to the WO qty and fetch bin stock
-    # Build: { bom_no: [items...] }
     bom_map = {}
     for bi in bom_items:
         bom_map.setdefault(bi.bom_no, []).append(bi)
 
-    # Collect all item_codes we need stock for
     all_item_codes = list({bi.item_code for bi in bom_items})
     stock_map = {}
     if all_item_codes:
@@ -105,7 +134,6 @@ def get_production_data():
         """, {'codes': all_item_codes}, as_dict=1)
         stock_map = {b.item_code: flt(b.actual_qty) for b in bins}
 
-    # Build full WO data with scaled BOM requirements
     wo_data = []
     for wo in work_orders:
         scale = flt(wo.qty)
@@ -129,7 +157,7 @@ def get_production_data():
             'bom_items':    bom_reqs,
         })
 
-    # ── Sales Orders with paint / colour notes (active, not closed) ──────────
+    # ── Sales Orders with paint / colour notes ────────────────────────────────
     paint_orders = frappe.db.sql("""
         SELECT
             name,
@@ -153,6 +181,14 @@ def get_production_data():
         'work_orders':   wo_data,
         'paint_orders': [dict(r) for r in paint_orders],
     }
+
+
+@frappe.whitelist()
+def close_request(mr_name):
+    """Stop a Material Request so it moves out of the active production list."""
+    frappe.db.set_value('Material Request', mr_name, 'status', 'Stopped')
+    frappe.db.commit()
+    return 'ok'
 
 
 @frappe.whitelist()

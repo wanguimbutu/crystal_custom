@@ -105,7 +105,7 @@ class OrderFulfillmentManager {
 			})),
 			new Promise(resolve => frappe.call({
 				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_truck_fulfillment_data',
-				args: { from_date, to_date },
+				// no date args — trucks always match truck assignment regardless of date filter
 				callback: r => { this.truck_data = r.message || { trucks: [], stock: {} }; resolve(); },
 				error: () => resolve(),
 			})),
@@ -119,7 +119,7 @@ class OrderFulfillmentManager {
 			})),
 			new Promise(resolve => frappe.call({
 				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_truck_customer_data',
-				args: { from_date, to_date },
+				// no date args — trucks always match truck assignment
 				callback: r => { this.customer_data = r.message || { trucks: [], stock: {} }; resolve(); },
 				error: () => resolve(),
 			})),
@@ -218,8 +218,9 @@ class OrderFulfillmentManager {
 			</div>`;
 		}
 
-		// Trucks with shortages first, then fully allocated, then empty
+		// Active trucks first (with shortages first among those), then closed trucks
 		trucks = [...trucks].sort((a, b) => {
+			if (a.is_closed !== b.is_closed) return a.is_closed ? 1 : -1;
 			const a_short = a.items.length > 0 && this._truck_has_shortage(a);
 			const b_short = b.items.length > 0 && this._truck_has_shortage(b);
 			if (a_short !== b_short) return b_short ? 1 : -1;
@@ -253,14 +254,17 @@ class OrderFulfillmentManager {
 			</div>
 		</div>`;
 
-		if (this.closed_trucks.length) {
+		// Legacy dispatched trucks (from KV store) — show only those not in current data
+		const current_tns = new Set(trucks.map(t => t.truck_number));
+		const legacy_closed = this.closed_trucks.filter(ct => !current_tns.has(ct.truck_number));
+		if (legacy_closed.length) {
 			html += `<div class="tf-section tf-closed-section">
 				<div class="tf-section-header">
 					Dispatched Trucks
-					<span class="tf-tab-badge">${this.closed_trucks.length}</span>
+					<span class="tf-tab-badge">${legacy_closed.length}</span>
 				</div>
 				<div class="tf-trucks-grid">
-					${this.closed_trucks.map((ct, idx) => this._render_closed_truck_card(ct, idx)).join('')}
+					${legacy_closed.map((ct, idx) => this._render_closed_truck_card(ct, idx)).join('')}
 				</div>
 			</div>`;
 		}
@@ -400,8 +404,15 @@ class OrderFulfillmentManager {
 				        title="Remove from truck">Remove</button>
 			</div>`).join('');
 
+		const closed_html = truck.is_closed ? `
+			<span class="tf-closed-badge">&#10006; CLOSED</span>
+			<button class="btn btn-xs btn-success tf-reopen-truck-btn" data-truck="${frappe.utils.escape_html(tn)}"
+			        style="margin-left:8px;">
+				&#8635; Reopen
+			</button>` : '';
+
 		return `
-		<div class="tf-truck-card">
+		<div class="tf-truck-card${truck.is_closed ? ' tf-truck-card-closed' : ''}">
 			<div class="tf-truck-head">
 				<div>
 					<span class="tf-truck-num">${frappe.utils.escape_html(tn)}</span>
@@ -409,6 +420,7 @@ class OrderFulfillmentManager {
 						${truck.order_count} order${truck.order_count !== 1 ? 's' : ''}
 						${truck.total_weight ? ` &nbsp;·&nbsp; ${truck.total_weight.toFixed(0)} kg` : ''}
 					</span>
+					${closed_html}
 				</div>
 				<span class="tf-status-badge" id="tf-status-${sid}" style="background:${status_color}">
 					${status_label}
@@ -1043,6 +1055,24 @@ ${truck_blocks}
 			if (ct) self._download_closed_truck(ct);
 		});
 
+		// Reopen closed truck
+		this.container.off('click.tf-reopen').on('click.tf-reopen', '.tf-reopen-truck-btn', function () {
+			const tn = $(this).data('truck');
+			frappe.confirm(
+				__('Reopen truck {0}? This will unmark all its orders as closed and return it to active status.', [tn]),
+				() => {
+					frappe.call({
+						method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.reopen_truck',
+						args: { truck_number: tn },
+						callback: () => {
+							frappe.show_alert({ message: __('Truck {0} reopened', [tn]), indicator: 'green' });
+							self.load_data();
+						},
+					});
+				}
+			);
+		});
+
 		// Customer view — print and download
 		this.container.off('click.tf-cv-print').on('click.tf-cv-print', '.tf-cv-print-btn', () => {
 			this._print_customers_tab();
@@ -1420,6 +1450,21 @@ ${truck_blocks}
 			overflow: hidden;
 			background: #fff;
 			box-shadow: 0 1px 4px rgba(0,0,0,.05);
+		}
+		.tf-truck-card-closed {
+			border-color: #f59e0b;
+			opacity: 0.85;
+		}
+		.tf-closed-badge {
+			display: inline-block;
+			background: #f59e0b;
+			color: #fff;
+			font-size: 10px;
+			font-weight: 700;
+			border-radius: 10px;
+			padding: 2px 8px;
+			margin-left: 8px;
+			vertical-align: middle;
 		}
 		.tf-truck-head {
 			display: flex;

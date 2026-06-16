@@ -18,6 +18,7 @@ class SalesOrderManager {
 		this.current_page = 1;
 		this.page_size = 50;
 		this.search_term = '';
+		this._sps = new Set();
 		this.setup_page();
 		this.load_data();
 	}
@@ -45,8 +46,17 @@ class SalesOrderManager {
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
 			options: 'Sales Person',
-			change: () => this.load_data(),
+			placeholder: 'Add…',
+			change: () => {
+				const v = this.page.fields_dict.sales_person.get_value();
+				if (!v) return;
+				this._sps.add(v);
+				setTimeout(() => this.page.fields_dict.sales_person.set_value(''), 50);
+				this._render_sp_pills();
+				this.load_data();
+			}
 		});
+		this._sp_pills_wrap = $('<div class="sp-pills-wrap"></div>').appendTo(this.page.page_form);
 		this.page.add_field({
 			label: 'Search', fieldtype: 'Data', fieldname: 'search_query',
 			placeholder: 'Customer or order no…',
@@ -74,11 +84,10 @@ class SalesOrderManager {
 		this.doc_cache  = {};
 		this.$wrap.html(this._spinner());
 
-		const sp = this.page.fields_dict.sales_person.get_value();
 		const filters = [
 			['Sales Order', 'docstatus', '=', 0],
 		];
-		if (sp) filters.push(['Sales Team', 'sales_person', '=', sp]);
+		if (this._sps.size) filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
 		frappe.call({
 			method: 'frappe.client.get_list',
@@ -606,6 +615,23 @@ Add a note explaining what has changed — Finance will see this alongside the o
 			error: () => {
 				frappe.msgprint({ title: __('Error'), message: __('Failed to send orders to Finance'), indicator: 'red' });
 			},
+		});
+	}
+
+	// ── SP Pills ──────────────────────────────────────────────────────────────
+
+	_render_sp_pills() {
+		if (!this._sp_pills_wrap) return;
+		if (!this._sps.size) { this._sp_pills_wrap.empty(); return; }
+		const self = this;
+		const html = Array.from(this._sps).map(sp =>
+			`<span class="sp-pill">${frappe.utils.escape_html(sp)}<span class="sp-rm" data-sp="${frappe.utils.escape_html(sp)}">&times;</span></span>`
+		).join('');
+		this._sp_pills_wrap.html(`<style>.sp-pills-wrap{padding:4px 8px 2px;display:flex;flex-wrap:wrap;gap:4px;min-height:4px;}.sp-pill{background:#dbeafe;color:#1d4ed8;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:3px;}.sp-rm{cursor:pointer;font-size:13px;line-height:1;margin-left:2px;color:#2563eb;font-weight:bold;}</style>${html}`);
+		this._sp_pills_wrap.find('.sp-rm').on('click', function () {
+			self._sps.delete($(this).data('sp'));
+			self._render_sp_pills();
+			self.load_data();
 		});
 	}
 

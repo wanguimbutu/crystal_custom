@@ -18,6 +18,7 @@ class StockOrderSortManager {
 		this.active_tab = 'stock';
 		this.current_page = 1;
 		this.page_size = 50;
+		this._sps = new Set();
 		this.setup_page();
 		this.load_trucks();
 	}
@@ -45,8 +46,17 @@ class StockOrderSortManager {
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
 			options: 'Sales Person',
-			change: () => this.load_data(),
+			placeholder: 'Add…',
+			change: () => {
+				const v = this.page.fields_dict.sales_person.get_value();
+				if (!v) return;
+				this._sps.add(v);
+				setTimeout(() => this.page.fields_dict.sales_person.set_value(''), 50);
+				this._render_sp_pills();
+				this.load_data();
+			},
 		});
+		this._sp_pills_wrap = $('<div class="sp-pills-wrap"></div>').appendTo(this.page.page_form);
 
 		this.page.set_primary_action('Create Material Request', () => this.create_material_request(), 'octicon octicon-plus');
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
@@ -83,11 +93,10 @@ class StockOrderSortManager {
 
 	load_data() {
 		this.container.html(this._loading_html());
-		const sp = this.page.fields_dict.sales_person.get_value();
 
 		frappe.call({
 			method: 'crystal_custom.crystal_customizations.page.stock_order_sort.stock_order_sort.get_orders_with_stock_summary',
-			args: { sales_person: sp || '' },
+			args: { sales_persons: this._sps.size ? [...this._sps] : [] },
 			callback: (r) => {
 				this.orders = r.message || [];
 				this.orders.forEach(o => {
@@ -676,6 +685,23 @@ class StockOrderSortManager {
 			<span class="sos-pg-info">Showing ${start}–${end} of ${total} &nbsp;·&nbsp; Page ${this.current_page} of ${total_pages}</span>
 			<button class="btn btn-xs btn-default sos-pg-next" ${this.current_page >= total_pages ? 'disabled' : ''}>Next &rsaquo;</button>
 		</div>`;
+	}
+
+	// ── SP Pills ──────────────────────────────────────────────────────────────
+
+	_render_sp_pills() {
+		if (!this._sp_pills_wrap) return;
+		if (!this._sps.size) { this._sp_pills_wrap.empty(); return; }
+		const self = this;
+		const html = Array.from(this._sps).map(sp =>
+			`<span class="sp-pill">${frappe.utils.escape_html(sp)}<span class="sp-rm" data-sp="${frappe.utils.escape_html(sp)}">&times;</span></span>`
+		).join('');
+		this._sp_pills_wrap.html(`<style>.sp-pills-wrap{padding:4px 8px 2px;display:flex;flex-wrap:wrap;gap:4px;min-height:4px;}.sp-pill{background:#dbeafe;color:#1d4ed8;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:3px;}.sp-rm{cursor:pointer;font-size:13px;line-height:1;margin-left:2px;color:#2563eb;font-weight:bold;}</style>${html}`);
+		this._sp_pills_wrap.find('.sp-rm').on('click', function () {
+			self._sps.delete($(this).data('sp'));
+			self._render_sp_pills();
+			self.load_data();
+		});
 	}
 
 	// ── Styles ────────────────────────────────────────────────────────────────

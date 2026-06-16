@@ -58,10 +58,11 @@ def get_sales_order_fulfillment(from_date=None, to_date=None):
 
 
 @frappe.whitelist()
-def get_truck_fulfillment_data(from_date=None, to_date=None):
+def get_truck_fulfillment_data():
     """
-    Return items grouped by truck for orders at Pending Customer Order Reconfirmation
-    that have a truck assigned. Also returns current stock per unique item.
+    Return items grouped by truck — NOT date-filtered so the truck list always
+    matches truck assignment. Includes closed trucks (is_closed=True).
+    Stock is always current (from tabBin at call time).
     """
     conditions = [
         "so.docstatus = 0",
@@ -69,17 +70,9 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
         "so.status NOT IN ('Completed', 'Closed')",
         "so.custom_truck_number IS NOT NULL",
         "so.custom_truck_number != ''",
-        "IFNULL(so.custom_truck_closed, 0) != 1",
         "soi.qty > IFNULL(soi.delivered_qty, 0)",
     ]
-    params = {}
-
-    if from_date:
-        conditions.append("so.transaction_date >= %(from_date)s")
-        params['from_date'] = from_date
-    if to_date:
-        conditions.append("so.transaction_date <= %(to_date)s")
-        params['to_date'] = to_date
+    # No date filter, no closed filter — show all active trucks
 
     where = " AND ".join(conditions)
 
@@ -89,6 +82,7 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
             so.name                                             AS sales_order,
             so.customer_name,
             so.custom_paint_notes,
+            MAX(IFNULL(so.custom_truck_closed, 0))              AS is_closed,
             soi.item_code,
             soi.item_name,
             SUM(soi.qty - IFNULL(soi.delivered_qty, 0))        AS required_qty,
@@ -99,12 +93,12 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
         WHERE {where}
         GROUP BY so.custom_truck_number, so.name, soi.item_code
         ORDER BY so.custom_truck_number, soi.item_code
-    """, params, as_dict=1)
+    """, as_dict=1)
 
     if not rows:
         return {'trucks': [], 'stock': {}}
 
-    # Unique items for one stock lookup
+    # Unique items for one stock lookup (always current)
     unique_items = list({r.item_code for r in rows})
     item_ph = ', '.join(['%s'] * len(unique_items))
     stock_rows = frappe.db.sql(
@@ -112,55 +106,39 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
         f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
         unique_items, as_dict=1,
     )
-    stock_map   = {s.item_code: float(s.available_qty) for s in stock_rows}
-    item_names  = {r.item_code: r.item_name for r in rows}
-    item_uoms   = {r.item_code: r.uom       for r in rows}
+    stock_map  = {s.item_code: float(s.available_qty) for s in stock_rows}
+    item_names = {r.item_code: r.item_name for r in rows}
+    item_uoms  = {r.item_code: r.uom       for r in rows}
 
-    # Group by truck → item (aggregate across orders in that truck)
     from collections import defaultdict
-    trucks_map = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float)})
+    trucks_map = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float), 'is_closed': False})
     for r in rows:
         tn = r.truck_number
         trucks_map[tn]['orders'][r.sales_order] = {
-            'name': r.sales_order,
+            'name':          r.sales_order,
             'customer_name': r.customer_name or r.sales_order,
             'paint_notes':   r.custom_paint_notes or '',
         }
         trucks_map[tn]['items'][r.item_code] += float(r.required_qty)
+        if r.is_closed:
+            trucks_map[tn]['is_closed'] = True
 
-    # Truck meta (weight + value)
-    meta_rows = frappe.db.sql(f"""
+    # Truck meta (weight + value), no date filter
+    meta_rows = frappe.db.sql("""
         SELECT
-            so.custom_truck_number  AS truck_number,
+            so.custom_truck_number   AS truck_number,
             SUM(so.total_net_weight) AS total_weight,
             SUM(so.grand_total)      AS total_value,
-            COUNT(so.name)           AS order_count
+            COUNT(so.name)           AS order_count,
+            MAX(IFNULL(so.custom_truck_closed, 0)) AS is_closed
         FROM `tabSales Order` so
         WHERE so.docstatus = 0
           AND so.workflow_state = 'Pending Customer Order Reconfirmation'
           AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
-          AND IFNULL(so.custom_truck_closed, 0) != 1
         GROUP BY so.custom_truck_number
-    """, as_dict=1) if params == {} else frappe.db.sql(f"""
-        SELECT
-            so.custom_truck_number  AS truck_number,
-            SUM(so.total_net_weight) AS total_weight,
-            SUM(so.grand_total)      AS total_value,
-            COUNT(so.name)           AS order_count
-        FROM `tabSales Order` so
-        WHERE so.docstatus = 0
-          AND so.workflow_state = 'Pending Customer Order Reconfirmation'
-          AND so.status NOT IN ('Completed', 'Closed')
-          AND so.custom_truck_number IS NOT NULL
-          AND so.custom_truck_number != ''
-          AND IFNULL(so.custom_truck_closed, 0) != 1
-          {'AND so.transaction_date >= %(from_date)s' if from_date else ''}
-          {'AND so.transaction_date <= %(to_date)s'   if to_date   else ''}
-        GROUP BY so.custom_truck_number
-    """, params, as_dict=1)
-
+    """, as_dict=1)
     meta_map = {r.truck_number: r for r in meta_rows}
 
     trucks = []
@@ -173,6 +151,7 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
             'orders':       list(data['orders'].values()),
             'total_weight': float(meta.get('total_weight') or 0),
             'total_value':  float(meta.get('total_value')  or 0),
+            'is_closed':    bool(data['is_closed']),
             'items': [
                 {
                     'item_code':    ic,
@@ -197,11 +176,10 @@ def get_truck_fulfillment_data(from_date=None, to_date=None):
 
 
 @frappe.whitelist()
-def get_truck_customer_data(from_date=None, to_date=None):
+def get_truck_customer_data():
     """
-    Return per-order item breakdown grouped by truck.
-    Each truck has a list of orders; each order has its pending items.
-    Also returns stock levels for every unique item.
+    Return per-order item breakdown grouped by truck — NOT date-filtered.
+    Includes closed trucks. Stock is always current.
     Used by the Customer View tab.
     """
     conditions = [
@@ -210,16 +188,9 @@ def get_truck_customer_data(from_date=None, to_date=None):
         "so.status NOT IN ('Completed', 'Closed')",
         "so.custom_truck_number IS NOT NULL",
         "so.custom_truck_number != ''",
-        "IFNULL(so.custom_truck_closed, 0) != 1",
         "soi.qty > IFNULL(soi.delivered_qty, 0)",
     ]
-    params = {}
-    if from_date:
-        conditions.append("so.transaction_date >= %(from_date)s")
-        params['from_date'] = from_date
-    if to_date:
-        conditions.append("so.transaction_date <= %(to_date)s")
-        params['to_date'] = to_date
+    # No date filter, no closed filter
 
     where = " AND ".join(conditions)
 
@@ -232,6 +203,7 @@ def get_truck_customer_data(from_date=None, to_date=None):
             so.grand_total,
             so.total_net_weight,
             so.custom_paint_notes,
+            IFNULL(so.custom_truck_closed, 0)                  AS is_closed,
             soi.item_code,
             soi.item_name,
             SUM(soi.qty - IFNULL(soi.delivered_qty, 0))        AS required_qty,
@@ -241,7 +213,7 @@ def get_truck_customer_data(from_date=None, to_date=None):
         WHERE {where}
         GROUP BY so.custom_truck_number, so.name, soi.item_code
         ORDER BY so.custom_truck_number, so.customer_name, so.name, soi.item_code
-    """, params, as_dict=1)
+    """, as_dict=1)
 
     if not rows:
         return {'trucks': [], 'stock': {}}
@@ -272,6 +244,7 @@ def get_truck_customer_data(from_date=None, to_date=None):
                 'grand_total':     float(r.grand_total or 0),
                 'total_net_weight': float(r.total_net_weight or 0),
                 'paint_notes':     r.custom_paint_notes or '',
+                'is_closed':       bool(r.is_closed),
                 'items':           [],
             }
         trucks_map[tn][on]['items'].append({
@@ -283,13 +256,38 @@ def get_truck_customer_data(from_date=None, to_date=None):
 
     trucks = []
     for tn, orders_dict in trucks_map.items():
+        orders_list = list(orders_dict.values())
         trucks.append({
             'truck_number': tn,
-            'orders':       list(orders_dict.values()),
+            'is_closed':    any(o.get('is_closed') for o in orders_list),
+            'orders':       orders_list,
         })
 
     stock = {ic: float(stock_map.get(ic, 0)) for ic in unique_items}
     return {'trucks': trucks, 'stock': stock}
+
+
+@frappe.whitelist()
+def reopen_truck(truck_number):
+    """
+    Reopen a closed truck: set custom_truck_closed=0 on all its orders
+    and remove it from the crystal_closed_trucks KV store.
+    """
+    import json as _json
+    frappe.db.sql(
+        "UPDATE `tabSales Order` SET custom_truck_closed = 0 WHERE custom_truck_number = %s",
+        truck_number
+    )
+    # Remove from closed trucks list if present
+    closed_raw = frappe.db.get_default('crystal_closed_trucks') or '[]'
+    try:
+        closed = _json.loads(closed_raw)
+    except Exception:
+        closed = []
+    closed = [ct for ct in closed if ct.get('truck_number') != truck_number]
+    frappe.db.set_default('crystal_closed_trucks', _json.dumps(closed))
+    frappe.db.commit()
+    return 'ok'
 
 
 @frappe.whitelist()

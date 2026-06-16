@@ -4,7 +4,7 @@ from collections import defaultdict
 
 
 @frappe.whitelist()
-def get_orders_with_stock_summary(sales_person=None):
+def get_orders_with_stock_summary(sales_persons=None):
     """
     Return all Sales Orders at Pending Customer Order Reconfirmation with a
     per-order stock status:
@@ -18,11 +18,14 @@ def get_orders_with_stock_summary(sales_person=None):
     ]
     params = {}
 
-    if sales_person:
-        conditions.append(
-            "so.name IN (SELECT parent FROM `tabSales Team` WHERE sales_person = %(sales_person)s)"
-        )
-        params["sales_person"] = sales_person
+    if sales_persons:
+        if isinstance(sales_persons, str):
+            sales_persons = [sales_persons] if sales_persons else []
+        if sales_persons:
+            placeholders = ', '.join(f'%(sp{i})s' for i in range(len(sales_persons)))
+            conditions.append(f"so.name IN (SELECT parent FROM `tabSales Team` WHERE sales_person IN ({placeholders}))")
+            for i, sp in enumerate(sales_persons):
+                params[f"sp{i}"] = sp
 
     where = " AND ".join(conditions)
 

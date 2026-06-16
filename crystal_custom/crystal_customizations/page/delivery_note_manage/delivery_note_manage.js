@@ -23,6 +23,7 @@ class DeliveryNoteManager {
         this.orders_page = 1;
         this.dns_page = 1;
         this.invoices_page = 1;
+        this._sps = new Set();
         this.setup_page();
         this.set_default_dates();
         this.load_data();
@@ -67,12 +68,19 @@ class DeliveryNoteManager {
         });
 
         this.page.add_field({
-            label: 'Sales Person',
-            fieldtype: 'Link',
-            fieldname: 'sales_person',
+            label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
             options: 'Sales Person',
-            change: () => { this.orders_page = 1; this.dns_page = 1; this.invoices_page = 1; this.load_data(); }
+            placeholder: 'Add…',
+            change: () => {
+                const v = this.page.fields_dict.sales_person.get_value();
+                if (!v) return;
+                this._sps.add(v);
+                setTimeout(() => this.page.fields_dict.sales_person.set_value(''), 50);
+                this._render_sp_pills();
+                this.orders_page = 1; this.dns_page = 1; this.invoices_page = 1; this.load_data();
+            }
         });
+        this._sp_pills_wrap = $('<div class="sp-pills-wrap"></div>').appendTo(this.page.page_form);
 
         this.page.set_primary_action('Loading Sheet', () => this.generate_loading_sheet(), 'octicon octicon-list-unordered');
         this.page.add_button('Packing List', () => this.generate_packing_list());
@@ -170,7 +178,6 @@ class DeliveryNoteManager {
 
         $('#dm-tab-pending').html(this.loading_html('orders'));
 
-        const sp_orders = this.page.fields_dict.sales_person.get_value();
         const fields = ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
                         'custom_delivery_region', 'custom_phone_number', 'delivery_date',
                         'per_delivered', 'status', 'workflow_state', 'docstatus',
@@ -181,7 +188,7 @@ class DeliveryNoteManager {
             ['Sales Order', 'per_delivered', '<', 100],
             ['Sales Order', 'status', '!=', 'Closed'],
         ];
-        if (sp_orders) submitted_base.push(['Sales Team', 'sales_person', '=', sp_orders]);
+        if (this._sps.size) submitted_base.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
         // Submitted truck-assigned orders: no date filter so they always appear
         const truck_filters = [
@@ -195,13 +202,13 @@ class DeliveryNoteManager {
             ['Sales Order', 'transaction_date', 'between', [from_date, to_date]],
         ];
 
-        // Draft (pending) truck-assigned orders: show in truck view as "Pending"
+        // Draft (pending) truck-assigned orders: include closed trucks so they show
+        // until all orders are invoiced and have delivery notes
         const draft_truck_filters = [
             ['Sales Order', 'docstatus', '=', 0],
             ['Sales Order', 'custom_truck_number', '!=', ''],
-            ['Sales Order', 'custom_truck_closed', '!=', 1],
         ];
-        if (sp_orders) draft_truck_filters.push(['Sales Team', 'sales_person', '=', sp_orders]);
+        if (this._sps.size) draft_truck_filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
         let truck_rows = [], unassigned_rows = [], draft_truck_rows = [], raw_meta = [], raw_closed = [];
         let truck_done = false, unassigned_done = false, draft_done = false, meta_done = false, closed_done = false;
@@ -297,12 +304,11 @@ class DeliveryNoteManager {
 
         $('#dm-tab-dns').html(this.loading_html('delivery notes'));
 
-        const sp_dn = this.page.fields_dict.sales_person.get_value();
         const dn_filters = [
             ['Delivery Note', 'docstatus', '=', 1],
             ['Delivery Note', 'posting_date', 'between', [from_date, to_date]]
         ];
-        if (sp_dn) dn_filters.push(['Sales Team', 'sales_person', '=', sp_dn]);
+        if (this._sps.size) dn_filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
         frappe.call({
             method: 'frappe.client.get_list',
@@ -333,13 +339,12 @@ class DeliveryNoteManager {
 
         $('#dm-tab-invoices').html(this.loading_html('sales invoices'));
 
-        const sp_inv = this.page.fields_dict.sales_person.get_value();
         const inv_filters = [
             ['Sales Invoice', 'docstatus', '!=', 2],
             ['Sales Invoice', 'posting_date', 'between', [from_date, to_date]],
             ['Sales Invoice Item', 'delivery_note', '!=', '']
         ];
-        if (sp_inv) inv_filters.push(['Sales Team', 'sales_person', '=', sp_inv]);
+        if (this._sps.size) inv_filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
         frappe.call({
             method: 'frappe.client.get_list',
@@ -661,17 +666,17 @@ class DeliveryNoteManager {
     }
 
     _render_dm_truck_cards(orders) {
-        // Separate active-truck orders from closed-truck orders
+        // Group all truck-assigned orders together (including closed trucks)
+        // Closed trucks show inline with a badge until fully invoiced
         const truck_map = {};
         const no_truck  = [];
         orders.forEach(o => {
-            if (o.custom_truck_number && !o.custom_truck_closed) {
+            if (o.custom_truck_number) {
                 if (!truck_map[o.custom_truck_number]) truck_map[o.custom_truck_number] = [];
                 truck_map[o.custom_truck_number].push(o);
-            } else if (!o.custom_truck_number) {
+            } else {
                 no_truck.push(o);
             }
-            // custom_truck_closed orders are rendered via the closed_trucks section below
         });
 
         const _truck_card_html = (truck_num, t_orders, meta, is_closed) => {
@@ -731,42 +736,59 @@ class DeliveryNoteManager {
             </div>`;
         };
 
-        // ── Active trucks from live orders ──────────────────────────────────────
+        // ── All trucks from live orders (active + closed shown together) ──────────
         const truck_numbers = Object.keys(truck_map).sort();
         let html = '';
 
         if (truck_numbers.length) {
-            html += '<div class="dm-truck-grid">';
-            truck_numbers.forEach(truck_num => {
-                html += _truck_card_html(truck_num, truck_map[truck_num], this.truck_meta[truck_num], false);
-            });
-            html += '</div>';
+            // Active trucks first, then closed
+            const active_tns = truck_numbers.filter(tn =>
+                truck_map[tn].every(o => !o.custom_truck_closed)
+            );
+            const closed_tns = truck_numbers.filter(tn =>
+                truck_map[tn].some(o => o.custom_truck_closed)
+            );
+
+            if (active_tns.length) {
+                html += '<div class="dm-truck-grid">';
+                active_tns.forEach(tn => {
+                    html += _truck_card_html(tn, truck_map[tn], this.truck_meta[tn], false);
+                });
+                html += '</div>';
+            }
+
+            if (closed_tns.length) {
+                html += `<div style="margin-top:20px;">
+                    <div style="font-weight:700;font-size:12px;color:#78350f;margin-bottom:10px;letter-spacing:.5px;text-transform:uppercase;background:#fef3c7;padding:6px 12px;border-radius:6px;">
+                        &#128666; Closed Trucks — Pending Invoicing/Delivery Notes (${closed_tns.length})
+                    </div>
+                    <div class="dm-truck-grid">`;
+                closed_tns.forEach(tn => {
+                    html += _truck_card_html(tn, truck_map[tn], this.truck_meta[tn], true);
+                });
+                html += '</div></div>';
+            }
         }
 
-        // ── Dispatched (closed) trucks ──────────────────────────────────────────
-        const closed_trucks = this.closed_trucks || [];
+        // ── Legacy dispatched trucks (from KV store, not in live orders) ──────────
+        const closed_trucks = (this.closed_trucks || []).filter(ct => !truck_numbers.includes(ct.truck_number));
         if (closed_trucks.length) {
             html += `<div style="margin-top:24px;">
                 <div style="font-weight:700;font-size:13px;color:#475569;margin-bottom:10px;letter-spacing:.5px;text-transform:uppercase;">
-                    &#128666; Dispatched Trucks (${closed_trucks.length})
+                    &#128666; Fully Dispatched Trucks (${closed_trucks.length})
                 </div>
                 <div class="dm-truck-grid">`;
 
             closed_trucks.forEach(ct => {
-                // Use live orders if they loaded, fall back to closure record order list
-                const live_orders = orders.filter(o => o.custom_truck_number === ct.truck_number && o.custom_truck_closed);
-                const display_orders = live_orders.length
-                    ? live_orders
-                    : (ct.orders || []).map(o => ({
-                        name:                o.name,
-                        customer_name:       o.customer_name,
-                        custom_delivery_region: o.delivery_region || '',
-                        grand_total:         0,
-                        total_net_weight:    0,
-                        delivery_date:       null,
-                        transaction_date:    null,
-                    }));
-
+                const display_orders = (ct.orders || []).map(o => ({
+                    name:                o.name,
+                    customer_name:       o.customer_name,
+                    custom_delivery_region: o.delivery_region || '',
+                    grand_total:         0,
+                    total_net_weight:    0,
+                    delivery_date:       null,
+                    transaction_date:    null,
+                }));
                 html += _truck_card_html(ct.truck_number, display_orders,
                     { driver_name: ct.driver_name, capacity_kg: ct.capacity_kg }, true);
             });
@@ -820,7 +842,7 @@ class DeliveryNoteManager {
 
     _generate_truck_doc(truck_num, doc_type) {
         const truck_orders = this.orders.filter(o =>
-            o.custom_truck_number === truck_num && !o.custom_truck_closed && o.docstatus === 1
+            o.custom_truck_number === truck_num && o.docstatus === 1
         );
         if (!truck_orders.length) {
             frappe.msgprint(__('No submitted orders found for truck {0}', [truck_num]));
@@ -1688,6 +1710,23 @@ ${customer_blocks}
                 return;
             }
             selected.forEach(name => self.print_document('Sales Invoice', name));
+        });
+    }
+
+    // ─── SP Pills ─────────────────────────────────────────────────────────────
+
+    _render_sp_pills() {
+        if (!this._sp_pills_wrap) return;
+        if (!this._sps.size) { this._sp_pills_wrap.empty(); return; }
+        const self = this;
+        const html = Array.from(this._sps).map(sp =>
+            `<span class="sp-pill">${frappe.utils.escape_html(sp)}<span class="sp-rm" data-sp="${frappe.utils.escape_html(sp)}">&times;</span></span>`
+        ).join('');
+        this._sp_pills_wrap.html(`<style>.sp-pills-wrap{padding:4px 8px 2px;display:flex;flex-wrap:wrap;gap:4px;min-height:4px;}.sp-pill{background:#dbeafe;color:#1d4ed8;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:3px;}.sp-rm{cursor:pointer;font-size:13px;line-height:1;margin-left:2px;color:#2563eb;font-weight:bold;}</style>${html}`);
+        this._sp_pills_wrap.find('.sp-rm').on('click', function () {
+            self._sps.delete($(this).data('sp'));
+            self._render_sp_pills();
+            self.load_data();
         });
     }
 
