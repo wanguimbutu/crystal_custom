@@ -1,3 +1,10 @@
+## [1.14.6](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.5...v1.14.6) (2026-06-16)
+
+
+### Bug Fixes
+
+* mirror truck assignment filters exactly in order fulfillment ([68186e3](https://github.com/wanguimbutu/crystal_custom/commit/68186e38ed0a76fcadf6bc3c72eccd9f4b5cae64))
+
 ## [1.14.5](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.4...v1.14.5) (2026-06-16)
 
 
