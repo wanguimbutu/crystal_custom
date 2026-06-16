@@ -1,3 +1,10 @@
+## [1.10.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.1...v1.10.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* remove all paint_manufacture app references from production overview ([92e32e8](https://github.com/wanguimbutu/crystal_custom/commit/92e32e87cd73db3e5cde592def4185db8d2ef7c7))
+
 ## [1.10.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.10.0...v1.10.1) (2026-06-16)
 
 
