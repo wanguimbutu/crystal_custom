@@ -491,11 +491,9 @@ class DeliveryNoteManager {
             return;
         }
 
-        // Table view: draft orders + submitted orders on dispatched trucks (need DNs/invoices)
-        const in_table = o => o.docstatus !== 1 || o.custom_truck_closed == 1;
-        const table_slice = page_slice.filter(in_table);
+        // Table view: all orders regardless of docstatus or truck_closed
         const table_groups = {};
-        table_slice.forEach(o => {
+        page_slice.forEach(o => {
             const k = o.custom_truck_number || '__no_truck__';
             if (!table_groups[k]) table_groups[k] = [];
             table_groups[k].push(o);
@@ -505,13 +503,12 @@ class DeliveryNoteManager {
             if (b === '__no_truck__') return -1;
             return a.localeCompare(b);
         });
-        const draft_count = all_filtered.filter(in_table).length;
 
         let html = `<div class="delivery-orders-table">${summary}${view_toggle}
                 <div class="dm-selection-bar">
                     <label class="dm-sel-all-label">
                         <input type="checkbox" id="dm-select-all" style="width:15px;height:15px;accent-color:#667eea;">
-                        Select All (${draft_count})
+                        Select All (${all_filtered.length})
                     </label>
                     <span class="dm-sel-count" id="dm-sel-count">${this.selected_orders.size} selected</span>
                 </div>
@@ -582,7 +579,9 @@ class DeliveryNoteManager {
                     <td><span class="region-tag">${order.custom_delivery_region || '-'}</span></td>
                     <td>
                         ${order.docstatus === 1
-                            ? `<button class="btn btn-sm btn-primary btn-create-dn" data-order="${order.name}">Create DN</button>`
+                            ? (order.per_delivered >= 100
+                                ? `<span class="dm-done-badge">&#10003; Done</span>`
+                                : `<button class="btn btn-sm btn-primary btn-create-dn" data-order="${order.name}">Create DN</button>`)
                             : `<span class="dm-tc-pending-badge" title="${frappe.utils.escape_html(order.workflow_state || 'Draft')}">Pending</span>`
                         }
                     </td>
@@ -604,7 +603,6 @@ class DeliveryNoteManager {
         this.attach_pending_events();
         this._attach_pagination_events('#dm-tab-pending', 'orders_page', all_filtered.length, () => this.render_pending_orders());
     }
-    ca
 
     attach_pending_events() {
         const self = this;
@@ -1892,6 +1890,7 @@ ${customer_blocks}
                 }
                 .dm-pg-info { font-size: 13px; color: #6b7280; }
                 .dm-pg-bar .btn { min-width: 70px; }
+                .dm-done-badge { display:inline-block; padding:3px 10px; background:#dcfce7; color:#166534; border:1px solid #86efac; border-radius:10px; font-size:11px; font-weight:700; }
             </style>
         `;
     }
