@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.4.0...v1.5.0) (2026-06-16)
+
+
+### Features
+
+* auto-close trucks + Stock Overview tab in Order Fulfillment ([404c922](https://github.com/wanguimbutu/crystal_custom/commit/404c922f346a4a64e889d88f1eabf73ca71ef205))
+
 # [1.4.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.3.0...v1.4.0) (2026-06-15)
 
 
