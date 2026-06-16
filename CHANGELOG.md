@@ -1,3 +1,10 @@
+## [1.15.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.0...v1.15.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* delivery note manager table view shows all truck-assigned orders ([cb93e01](https://github.com/wanguimbutu/crystal_custom/commit/cb93e017cfb2ae91326835c983fa367bdf707a34))
+
 # [1.15.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.6...v1.15.0) (2026-06-16)
 
 
