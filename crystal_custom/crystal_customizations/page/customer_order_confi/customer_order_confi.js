@@ -15,6 +15,7 @@ class OrderConfirmationManager {
         this.submitted_orders = [];
         this.called_orders = new Set();
         this.not_picked_orders = new Set();
+        this._editor_items = {};
         this.current_page = 1;
         this.page_size = 50;
         this.setup_page();
@@ -842,52 +843,234 @@ class OrderConfirmationManager {
 
     load_order_items(order_name) {
         const $container = $(`.order-details-row[data-order="${order_name}"] .order-details-container`);
-        
+        $container.html('<div class="loading">Loading…</div>');
         frappe.call({
             method: 'frappe.client.get',
-            args: {
-                doctype: 'Sales Order',
-                name: order_name
-            },
+            args: { doctype: 'Sales Order', name: order_name },
             callback: (r) => {
                 if (r.message) {
-                    this.render_order_items($container, order_name, r.message.items, r.message.custom_call_notes);
+                    this._editor_items[order_name] = r.message.items.map(i => ({ ...i }));
+                    this.render_order_editor($container, order_name, this._editor_items[order_name]);
                 }
             }
         });
     }
 
-    render_order_items($container, order_name, items, call_notes) {
-        let html = '<div class="items-list" style="max-width: 100%;">';
-        
-        items.forEach((item, idx) => {
-            html += `
-                <div class="item-row">
-                    <div class="item-header">${item.item_code} - ${item.item_name || ''}</div>
-                    <div class="item-details">
-                        <span><strong>Qty:</strong> ${item.qty} ${item.uom || ''}</span>
-                        <span><strong>Rate:</strong> ${format_currency(item.rate)}</span>
-                        <span><strong>Amount:</strong> ${format_currency(item.amount)}</span>
-                        ${item.weight_per_unit ? `<span><strong>Weight:</strong> ${item.weight_per_unit} ${item.weight_uom || 'kg'}</span>` : ''}
-                        ${item.weight_per_unit ? `<span><strong>Total Weight:</strong> ${(item.weight_per_unit * item.qty).toFixed(2)} ${item.weight_uom || 'kg'}</span>` : ''}
-                    </div>
+    render_order_editor($container, order_name, items) {
+        const rows = items.map((item, idx) => this._item_editor_row(item, idx)).join('');
+        $container.html(`
+            <div class="oc-editor">
+                <table class="table table-bordered oc-editor-table">
+                    <thead><tr>
+                        <th>Item Code</th><th>Description</th>
+                        <th width="110px">Qty</th><th width="110px">Rate</th>
+                        <th width="110px">Amount</th><th width="40px"></th>
+                    </tr></thead>
+                    <tbody class="oc-items-tbody">${rows}</tbody>
+                </table>
+                <div class="oc-editor-actions">
+                    <button class="btn btn-xs btn-default oc-add-item-btn">+ Add Item</button>
+                    <span style="flex:1;"></span>
+                    <button class="btn btn-sm btn-primary oc-save-btn">Save Changes</button>
+                    <button class="btn btn-sm btn-danger oc-cancel-order-btn">Cancel Order</button>
+                    <span class="oc-save-status"></span>
                 </div>
-            `;
+            </div>
+            <style>
+                .oc-editor-table { margin-bottom: 8px !important; font-size: 13px; }
+                .oc-editor-table th { background: #1e293b; color: #fff !important; font-size: 11px; padding: 8px 10px !important; border: none !important; }
+                .oc-editor-table td { padding: 7px 10px !important; vertical-align: middle !important; }
+                .oc-editor-actions { display: flex; gap: 8px; align-items: center; padding: 6px 0; flex-wrap: wrap; }
+                .oc-save-status { font-size: 12px; color: #6b7280; }
+                .oc-qty-input { width: 80px; text-align: right; }
+                .oc-item-row-new td { background: #f0fdf4; }
+            </style>
+        `);
+        this._attach_editor_events($container, order_name);
+    }
+
+    _item_editor_row(item, idx) {
+        const delivered = flt(item.delivered_qty);
+        const is_new    = !item.name;
+        return `<tr class="oc-item-row ${is_new ? 'oc-item-row-new' : ''}"
+                    data-name="${frappe.utils.escape_html(item.name || '')}"
+                    data-idx="${idx}">
+            <td><strong>${frappe.utils.escape_html(item.item_code)}</strong></td>
+            <td>${frappe.utils.escape_html(item.item_name || '')}</td>
+            <td>
+                <input type="number" class="form-control input-sm oc-qty-input"
+                       value="${item.qty}" min="${delivered}" step="0.001"
+                       ${delivered > 0 ? `title="Minimum ${delivered} already delivered"` : ''}>
+            </td>
+            <td>${format_currency(item.rate, null, 2)}</td>
+            <td class="oc-row-amount">${format_currency(flt(item.qty) * flt(item.rate), null, 0)}</td>
+            <td style="text-align:center;">
+                ${delivered > 0
+                    ? `<span style="font-size:10px;color:#9ca3af;">Del.</span>`
+                    : `<button class="btn btn-xs btn-danger oc-remove-row-btn" title="Remove item">✕</button>`}
+            </td>
+        </tr>`;
+    }
+
+    _attach_editor_events($container, order_name) {
+        const self = this;
+
+        // Live amount recalc
+        $container.on('input', '.oc-qty-input', function () {
+            const $row = $(this).closest('tr');
+            const idx  = parseInt($row.data('idx'), 10);
+            const qty  = parseFloat($(this).val()) || 0;
+            const items = self._editor_items[order_name];
+            if (items && items[idx]) items[idx].qty = qty;
+            const rate = items && items[idx] ? flt(items[idx].rate) : 0;
+            $row.find('.oc-row-amount').text(format_currency(qty * rate, null, 0));
         });
-        
-        html += '</div>';
-        
-        // Add notes section if order has notes
-        if (call_notes) {
-            html += `
-                <div class="notes-section">
-                    <h4>📝 Call Notes</h4>
-                    <div class="notes-display">${call_notes}</div>
-                </div>
-            `;
+
+        // Remove item row
+        $container.on('click', '.oc-remove-row-btn', function () {
+            const $row = $(this).closest('tr');
+            const idx  = parseInt($row.data('idx'), 10);
+            const items = self._editor_items[order_name];
+            if (items) items.splice(idx, 1);
+            // Re-render tbody
+            const rows = (self._editor_items[order_name] || []).map((item, i) => self._item_editor_row(item, i)).join('');
+            $container.find('.oc-items-tbody').html(rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">No items</td></tr>');
+            self._attach_editor_events($container, order_name);
+        });
+
+        // Add item
+        $container.on('click', '.oc-add-item-btn', function () {
+            self._show_add_item_dialog(order_name, $container);
+        });
+
+        // Save changes
+        $container.on('click', '.oc-save-btn', function () {
+            self._save_order_changes(order_name, $container);
+        });
+
+        // Cancel order
+        $container.on('click', '.oc-cancel-order-btn', function () {
+            frappe.confirm(
+                __('Cancel order {0}? This cannot be undone.', [order_name]),
+                () => self._do_cancel_order(order_name)
+            );
+        });
+    }
+
+    _show_add_item_dialog(order_name, $container) {
+        const d = new frappe.ui.Dialog({
+            title: __('Add Item'),
+            fields: [
+                { label: 'Item Code', fieldname: 'item_code', fieldtype: 'Link', options: 'Item', reqd: 1,
+                  onchange: function () {
+                      const ic = d.get_value('item_code');
+                      if (!ic) return;
+                      frappe.call({
+                          method: 'crystal_custom.crystal_customizations.page.customer_order_confi.customer_order_confi.get_item_details',
+                          args: { item_code: ic },
+                          callback: r => {
+                              if (!r.message) return;
+                              d.set_value('item_name', r.message.item_name);
+                              d.set_value('uom',       r.message.uom);
+                              d.set_value('rate',      r.message.rate);
+                          },
+                      });
+                  }
+                },
+                { label: 'Description', fieldname: 'item_name', fieldtype: 'Data', read_only: 1 },
+                { label: 'Qty',  fieldname: 'qty',  fieldtype: 'Float', default: 1 },
+                { label: 'Rate', fieldname: 'rate', fieldtype: 'Currency' },
+                { label: 'UOM',  fieldname: 'uom',  fieldtype: 'Data', read_only: 1 },
+            ],
+            primary_action_label: __('Add'),
+            primary_action: (vals) => {
+                if (!vals.item_code || !vals.qty) {
+                    frappe.msgprint(__('Item and Qty are required'));
+                    return;
+                }
+                const items = this._editor_items[order_name] = this._editor_items[order_name] || [];
+                items.push({
+                    name:            null,
+                    item_code:       vals.item_code,
+                    item_name:       vals.item_name || vals.item_code,
+                    qty:             flt(vals.qty),
+                    delivered_qty:   0,
+                    rate:            flt(vals.rate),
+                    amount:          flt(vals.qty) * flt(vals.rate),
+                    uom:             vals.uom || '',
+                    weight_per_unit: 0,
+                });
+                const rows = items.map((item, i) => this._item_editor_row(item, i)).join('');
+                $container.find('.oc-items-tbody').html(rows);
+                this._attach_editor_events($container, order_name);
+                d.hide();
+            },
+        });
+        d.show();
+    }
+
+    _save_order_changes(order_name, $container) {
+        const items = this._editor_items[order_name] || [];
+        if (!items.length) {
+            frappe.msgprint(__('An order must have at least one item. Use Cancel Order to remove it entirely.'));
+            return;
         }
-        
-        $container.html(html);
+
+        const payload = items.map(i => ({
+            name:      i.name || null,
+            item_code: i.item_code,
+            qty:       flt(i.qty),
+            rate:      flt(i.rate),
+            uom:       i.uom || '',
+        }));
+
+        $container.find('.oc-save-status').text('Saving…');
+        frappe.call({
+            method: 'crystal_custom.crystal_customizations.page.customer_order_confi.customer_order_confi.save_order_changes',
+            args: { order_name, items_json: JSON.stringify(payload) },
+            callback: r => {
+                if (!r.message || r.message.status !== 'ok') return;
+                const msg = r.message;
+
+                // Update local items list with server-assigned names for new rows
+                this._editor_items[order_name] = msg.items;
+
+                // Refresh the tbody so new items have server names
+                const rows = msg.items.map((item, i) => this._item_editor_row(item, i)).join('');
+                $container.find('.oc-items-tbody').html(rows);
+                this._attach_editor_events($container, order_name);
+
+                // Update the order row's displayed amount
+                const $amount = $(`.order-row[data-order="${order_name}"] .amount-badge`);
+                $amount.text(format_currency(msg.grand_total));
+
+                // Update local orders array
+                const o = this.orders.find(x => x.name === order_name);
+                if (o) { o.grand_total = msg.grand_total; o.total_net_weight = msg.total_net_weight; }
+
+                $container.find('.oc-save-status').text('✓ Saved');
+                setTimeout(() => $container.find('.oc-save-status').text(''), 3000);
+                frappe.show_alert({ message: __('Order {0} updated', [order_name]), indicator: 'green' });
+            },
+            error: () => { $container.find('.oc-save-status').text('Save failed'); },
+        });
+    }
+
+    _do_cancel_order(order_name) {
+        frappe.call({
+            method: 'crystal_custom.crystal_customizations.page.customer_order_confi.customer_order_confi.cancel_order',
+            args: { order_name },
+            callback: r => {
+                if (!r.message) return;
+                // Remove from local list and re-render
+                this.orders = this.orders.filter(o => o.name !== order_name);
+                delete this._editor_items[order_name];
+                this.called_orders.delete(order_name);
+                this.not_picked_orders.delete(order_name);
+                frappe.show_alert({ message: __('Order {0} cancelled', [order_name]), indicator: 'orange' });
+                this.render_orders();
+            },
+        });
     }
 
     mark_as_called(order_name, $btn) {
