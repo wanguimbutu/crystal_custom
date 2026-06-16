@@ -225,6 +225,7 @@ class DeliveryNoteManager {
             const draft_new = draft_truck_rows.filter(o => !seen.has(o.name));
             this.orders = [...truck_rows, ...unassigned_new, ...draft_new];
             this.render_pending_orders();
+            this._check_auto_close();
         };
 
         frappe.call({
@@ -268,6 +269,23 @@ class DeliveryNoteManager {
                 closed_done = true; try_render();
             },
             error: () => { raw_closed = []; this.closed_trucks = []; closed_done = true; try_render(); },
+        });
+    }
+
+    _check_auto_close() {
+        frappe.call({
+            method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.check_and_auto_close_trucks',
+            callback: r => {
+                const closed = r.message || [];
+                if (closed.length) {
+                    frappe.show_alert({
+                        message: __('Auto-closed {0} truck(s) — all orders fully delivered & billed: {1}',
+                            [closed.length, closed.join(', ')]),
+                        indicator: 'green',
+                    }, 10);
+                    this.load_pending_orders();
+                }
+            },
         });
     }
 

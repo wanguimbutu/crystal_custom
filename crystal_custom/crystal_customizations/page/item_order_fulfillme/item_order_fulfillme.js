@@ -67,6 +67,8 @@ class OrderFulfillmentManager {
 				this.search_term = this.page.fields_dict.search_query.get_value() || '';
 				if (this.active_tab === 'trucks') {
 					this.container.find('#tf-trucks-pane').html(this._render_trucks_tab());
+				} else if (this.active_tab === 'stock') {
+					this.container.find('#tf-stock-pane').html(this._render_stock_tab());
 				} else if (this.active_tab === 'customers') {
 					this.container.find('#tf-customers-pane').html(this._render_customers_tab());
 				} else {
@@ -146,11 +148,17 @@ class OrderFulfillmentManager {
 
 		const cust_badge = this.customer_data.trucks.reduce((s, t) => s + t.orders.length, 0);
 
+		const stock_badge = Object.keys(this._compute_item_summary()).length;
+
 		let html = `${this._styles()}
 		<div class="tf-tabs">
 			<button class="tf-tab-btn ${this.active_tab === 'trucks'   ? 'active' : ''}" data-tab="trucks">
-				Truck Fulfillment
+				Trucks
 				${trucks_badge ? `<span class="tf-tab-badge">${trucks_badge}</span>` : ''}
+			</button>
+			<button class="tf-tab-btn ${this.active_tab === 'stock'    ? 'active' : ''}" data-tab="stock">
+				Stock Overview
+				${stock_badge ? `<span class="tf-tab-badge">${stock_badge}</span>` : ''}
 			</button>
 			<button class="tf-tab-btn ${this.active_tab === 'customers' ? 'active' : ''}" data-tab="customers">
 				Customer View
@@ -164,6 +172,9 @@ class OrderFulfillmentManager {
 		<div class="tf-tab-content">
 			<div class="tf-tab-pane ${this.active_tab === 'trucks'    ? 'active' : ''}" id="tf-trucks-pane">
 				${this._render_trucks_tab()}
+			</div>
+			<div class="tf-tab-pane ${this.active_tab === 'stock'     ? 'active' : ''}" id="tf-stock-pane">
+				${this._render_stock_tab()}
 			</div>
 			<div class="tf-tab-pane ${this.active_tab === 'customers' ? 'active' : ''}" id="tf-customers-pane">
 				${this._render_customers_tab()}
@@ -234,16 +245,9 @@ class OrderFulfillmentManager {
 
 		<div class="tf-section">
 			<div class="tf-section-header">
-				Item Stock Overview
+				Truck Allocations
 				<span class="tf-header-note">Allocate stock to trucks using the inputs in each truck card</span>
 			</div>
-			<div id="tf-item-overview">
-				${this._render_item_overview(item_summary)}
-			</div>
-		</div>
-
-		<div class="tf-section">
-			<div class="tf-section-header">Truck Allocations</div>
 			<div class="tf-trucks-grid" id="tf-trucks-grid">
 				${trucks.map(t => this._render_truck_card(t, item_summary)).join('')}
 			</div>
@@ -430,6 +434,53 @@ class OrderFulfillmentManager {
 				<tbody>${rows}</tbody>
 			</table>` : '<div class="tf-empty">No pending items in this truck.</div>'}
 		</div>`;
+	}
+
+	_render_stock_tab() {
+		const item_summary = this._compute_item_summary();
+
+		if (this.search_term) {
+			const q = this.search_term.toLowerCase();
+			const filtered = {};
+			Object.entries(item_summary).forEach(([ic, s]) => {
+				if (ic.toLowerCase().includes(q) || (s.item_name || '').toLowerCase().includes(q))
+					filtered[ic] = s;
+			});
+			return this._render_stock_tab_html(filtered);
+		}
+
+		return this._render_stock_tab_html(item_summary);
+	}
+
+	_render_stock_tab_html(item_summary) {
+		const items       = Object.values(item_summary).sort((a, b) => b.total_short - a.total_short);
+		const total_items = items.length;
+		const items_ok    = items.filter(s => s.total_short <= 0).length;
+		const items_short = total_items - items_ok;
+
+		if (!items.length) {
+			return `<div class="alert alert-info" style="margin-top:20px;">
+				<strong>${this.search_term ? 'No items match your search.' : 'No items — assign orders to trucks first.'}</strong>
+			</div>`;
+		}
+
+		let html = `
+		<div class="tf-kpi-row">
+			${this._kpi('Items', total_items, '#667eea')}
+			${this._kpi('Fully Stocked', items_ok, '#10b981')}
+			${this._kpi('With Shortages', items_short, items_short > 0 ? '#ef4444' : '#9ca3af')}
+		</div>
+		<div class="tf-section">
+			<div class="tf-section-header">
+				Item Stock Overview
+				<span class="tf-header-note">Stock vs requirements across all active trucks</span>
+			</div>
+			<div id="tf-item-overview">
+				${this._render_item_overview(item_summary)}
+			</div>
+		</div>`;
+
+		return html;
 	}
 
 	_render_closed_truck_card(ct, idx) {
