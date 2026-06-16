@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.8.2...v1.9.0) (2026-06-16)
+
+
+### Features
+
+* Production Overview page ([863bbec](https://github.com/wanguimbutu/crystal_custom/commit/863bbecde25a24789ab5344d85dcef07349020de))
+
 ## [1.8.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.8.1...v1.8.2) (2026-06-16)
 
 
