@@ -1,3 +1,10 @@
+## [1.14.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.1...v1.14.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* remove workflow state filter from order fulfillment queries ([a06b878](https://github.com/wanguimbutu/crystal_custom/commit/a06b8781ba7e6ad8272a8c6c684273336425e796))
+
 ## [1.14.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.14.0...v1.14.1) (2026-06-16)
 
 
