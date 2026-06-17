@@ -19,6 +19,7 @@ class TruckAssignmentManager {
 		this.saved_meta = {};
 		this.closed_trucks = [];
 		this._sps = new Set();
+		this._regions = new Set();
 		this.setup_page();
 		this.load_trucks_from_orders();
 	}
@@ -39,10 +40,19 @@ class TruckAssignmentManager {
 			change: () => this.load_data(),
 		});
 		this.page.add_field({
-			label: 'Delivery Region', fieldtype: 'Link', fieldname: 'delivery_region',
+			label: 'Region', fieldtype: 'Link', fieldname: 'delivery_region',
 			options: 'Delivery Region',
-			change: () => { this.current_page = 1; this.render_view(); },
+			placeholder: 'Add…',
+			change: () => {
+				const v = this.page.fields_dict.delivery_region.get_value();
+				if (!v) return;
+				this._regions.add(v);
+				setTimeout(() => this.page.fields_dict.delivery_region.set_value(''), 50);
+				this._render_region_pills();
+				this.current_page = 1; this.render_view();
+			},
 		});
+		this._region_pills_wrap = $('<div class="region-pills-wrap"></div>').appendTo(this.page.page_form);
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
 			options: 'Sales Person',
@@ -248,8 +258,9 @@ class TruckAssignmentManager {
 	}
 
 	get_filtered_orders() {
-		const region = this.page.fields_dict.delivery_region.get_value();
-		let orders = region ? this.orders.filter(o => o.custom_delivery_region === region) : this.orders;
+		let orders = this._regions.size
+			? this.orders.filter(o => this._regions.has(o.custom_delivery_region))
+			: this.orders;
 		if (this.search_term) {
 			const q = this.search_term.toLowerCase();
 			orders = orders.filter(o =>
@@ -1167,6 +1178,21 @@ ${driver_cols}
 			self._sps.delete($(this).data('sp'));
 			self._render_sp_pills();
 			self.load_data();
+		});
+	}
+
+	_render_region_pills() {
+		if (!this._region_pills_wrap) return;
+		if (!this._regions.size) { this._region_pills_wrap.empty(); return; }
+		const self = this;
+		const html = Array.from(this._regions).map(r =>
+			`<span class="rg-pill">${frappe.utils.escape_html(r)}<span class="rg-rm" data-rg="${frappe.utils.escape_html(r)}">&times;</span></span>`
+		).join('');
+		this._region_pills_wrap.html(`<style>.region-pills-wrap{padding:4px 8px 2px;display:flex;flex-wrap:wrap;gap:4px;min-height:4px;}.rg-pill{background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:12px;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:3px;}.rg-rm{cursor:pointer;font-size:13px;line-height:1;margin-left:2px;color:#16a34a;font-weight:bold;}</style>${html}`);
+		this._region_pills_wrap.find('.rg-rm').on('click', function () {
+			self._regions.delete($(this).data('rg'));
+			self._render_region_pills();
+			self.current_page = 1; self.render_view();
 		});
 	}
 

@@ -63,8 +63,8 @@ class WeightConsolidationManager {
 		this.container.html(this._loading_html());
 
 		const filters = [
-			['Sales Order', 'docstatus', '=', 0],
-			['Sales Order', 'workflow_state', 'in', ['', 'Proceed To Order']],
+			['Sales Order', 'docstatus', '!=', 2],
+			['Sales Order', 'status', 'not in', ['Completed', 'Closed', 'Cancelled']],
 		];
 		if (this._sps.size) filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
@@ -75,7 +75,8 @@ class WeightConsolidationManager {
 				fields: [
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
-					'total_net_weight', 'workflow_state',
+					'total_net_weight', 'workflow_state', 'status',
+					'per_delivered', 'per_billed',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -115,7 +116,7 @@ class WeightConsolidationManager {
 					<div class="wc-empty-sub">
 						${this.orders.length
 							? 'No orders match the current filters.'
-							: 'No new sales orders in this date range.'}
+							: 'No open sales orders without delivery notes/invoices in this date range.'}
 					</div>
 				</div>`);
 			return;
@@ -205,7 +206,7 @@ class WeightConsolidationManager {
 					<td class="wc-owner">${frappe.user.full_name(o.owner) || o.owner}</td>
 					<td class="wc-r wc-weight${wt === 0 ? ' wc-zero' : ''}">${wt > 0 ? wt.toFixed(1) : '—'}</td>
 					<td class="wc-r wc-amount">${format_currency(o.grand_total)}</td>
-					<td><span class="wc-badge wc-badge-ready">Ready</span></td>
+					<td>${this._status_badge(o)}</td>
 				</tr>`;
 			});
 		});
@@ -331,6 +332,20 @@ class WeightConsolidationManager {
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
+
+	_status_badge(o) {
+		const s = o.status || o.workflow_state || '';
+		if (o.docstatus === 0 || o.docstatus === '0') {
+			return `<span class="wc-badge" style="background:#fef9c3;color:#854d0e;">${frappe.utils.escape_html(s || 'Draft')}</span>`;
+		}
+		if ((o.per_delivered || 0) > 0 && (o.per_delivered || 0) < 100) {
+			return `<span class="wc-badge" style="background:#dbeafe;color:#1d4ed8;">Part. Delivered</span>`;
+		}
+		if ((o.per_billed || 0) > 0 && (o.per_billed || 0) < 100) {
+			return `<span class="wc-badge" style="background:#ede9fe;color:#5b21b6;">Part. Billed</span>`;
+		}
+		return `<span class="wc-badge wc-badge-ready">${frappe.utils.escape_html(s || 'Active')}</span>`;
+	}
 
 	_kpi(label, value, color, icon) {
 		return `<div class="wc-kpi" style="border-top:4px solid ${color}">
