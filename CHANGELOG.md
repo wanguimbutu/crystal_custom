@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.16.0...v1.17.0) (2026-06-17)
+
+
+### Features
+
+* new-order tracking with highlights, New Only LS/PL buttons, per-truck/new MR in order fulfilment ([5a2579f](https://github.com/wanguimbutu/crystal_custom/commit/5a2579ffccac2ccfaf2b29a3073fd0a708cd284f))
+
 # [1.16.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.3...v1.16.0) (2026-06-17)
 
 
