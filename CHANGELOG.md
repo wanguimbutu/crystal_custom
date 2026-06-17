@@ -1,3 +1,10 @@
+# [1.18.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.17.1...v1.18.0) (2026-06-17)
+
+
+### Features
+
+* multi-select region filter + weight consolidation shows all open orders ([d4569cf](https://github.com/wanguimbutu/crystal_custom/commit/d4569cfde821ddb6fff00b01472deb7662cd208e))
+
 ## [1.17.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.17.0...v1.17.1) (2026-06-17)
 
 
