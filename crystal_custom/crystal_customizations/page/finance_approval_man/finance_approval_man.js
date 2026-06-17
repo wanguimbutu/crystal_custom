@@ -186,13 +186,15 @@ class FinanceApprovalManager {
 			const has_pdc    = (fin.pdc_count || 0) > 0;
 			const has_overdue = (fin.overdue || 0) > 0;
 			const is_resub   = !!o.custom_resubmission_note;
+			const is_debt_block = (fin.outstanding || 0) > 0 && !has_pdc;
 
 			html += `
-			<tr class="fa-row ${over_limit ? 'fa-row-warn' : ''} ${is_resub ? 'fa-row-resub' : ''}" data-order="${o.name}">
+			<tr class="fa-row ${over_limit ? 'fa-row-warn' : ''} ${is_resub ? 'fa-row-resub' : ''} ${is_debt_block ? 'fa-row-debt' : ''}" data-order="${o.name}">
 				<td><input type="checkbox" class="fa-chk" data-order="${o.name}" data-owner="${o.owner}"></td>
 				<td>
 					<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
 					${is_resub ? '<span class="fa-resub-badge">Re-submitted</span>' : ''}
+					${is_debt_block ? '<span class="fa-debt-badge">&#9888; Debt — No Payment</span>' : ''}
 					${o.custom_finance_rejection_note ? `
 					<div class="fa-note fa-note-rejection">
 						<span class="fa-note-label">Prev. rejection:</span>
@@ -291,10 +293,59 @@ class FinanceApprovalManager {
 		const selected = this._get_selected();
 		if (!selected.length) { frappe.msgprint(__('Select at least one order.')); return; }
 
-		frappe.confirm(
-			__('Approve {0} order(s) and send to Customer Confirmation?', [selected.length]),
-			() => this._do_approve(selected.map(s => s.order))
-		);
+		// Debt check: flag customers with outstanding balance and no payment entry coverage
+		const debt_blocks = [];
+		selected.forEach(s => {
+			const order = this.orders.find(o => o.name === s.order);
+			if (!order) return;
+			const fin = this.financials[order.customer] || {};
+			const outstanding = fin.outstanding || 0;
+			const pdc_amount  = fin.pdc_amount  || 0;
+			if (outstanding > 0 && pdc_amount <= 0) {
+				debt_blocks.push({
+					order:       order.name,
+					customer:    order.customer_name || order.customer,
+					outstanding,
+				});
+			}
+		});
+
+		if (debt_blocks.length) {
+			const list_html = debt_blocks.map(b =>
+				`<li><strong>${frappe.utils.escape_html(b.customer)}</strong>`
+				+ ` (${frappe.utils.escape_html(b.order)})`
+				+ ` — Outstanding: <strong style="color:#dc2626;">${format_currency(b.outstanding)}</strong></li>`
+			).join('');
+
+			const d = new frappe.ui.Dialog({
+				title: __('Outstanding Debt — No Payment Coverage'),
+				primary_action_label: __('Override & Approve'),
+				primary_action: () => {
+					d.hide();
+					this._do_approve(selected.map(s => s.order));
+				},
+				secondary_action_label: __('Cancel'),
+				secondary_action: () => d.hide(),
+			});
+			d.$body.html(`
+				<p style="margin-bottom:10px;">
+					${debt_blocks.length === 1
+						? 'This customer has'
+						: 'These customers have'}
+					outstanding debt with <strong>no payment entry</strong> on record to cover it:
+				</p>
+				<ul style="margin-bottom:14px;">${list_html}</ul>
+				<p style="color:#6b7280;font-size:12px;">
+					You can override this check and approve anyway, or cancel to review first.
+				</p>
+			`);
+			d.show();
+		} else {
+			frappe.confirm(
+				__('Approve {0} order(s) and send to Customer Confirmation?', [selected.length]),
+				() => this._do_approve(selected.map(s => s.order))
+			);
+		}
 	}
 
 	_do_approve(order_names) {
@@ -485,12 +536,27 @@ class FinanceApprovalManager {
 		.fa-row:hover { background: #f8fafc !important; }
 		.fa-row-warn { border-left: 3px solid #ef4444 !important; background: #fff5f5; }
 		.fa-row-resub { border-left: 3px solid #8b5cf6 !important; }
+		.fa-row-debt { border-left: 3px solid #dc2626 !important; background: #fef2f2; }
 		.fa-resub-badge {
 			display: inline-block;
 			margin-left: 6px;
 			padding: 1px 7px;
 			background: #ede9fe;
 			color: #6d28d9;
+			border-radius: 3px;
+			font-size: 10px;
+			font-weight: 700;
+			vertical-align: middle;
+			text-transform: uppercase;
+			letter-spacing: .3px;
+		}
+		.fa-debt-badge {
+			display: inline-block;
+			margin-left: 6px;
+			padding: 1px 7px;
+			background: #fee2e2;
+			color: #991b1b;
+			border: 1px solid #fca5a5;
 			border-radius: 3px;
 			font-size: 10px;
 			font-weight: 700;

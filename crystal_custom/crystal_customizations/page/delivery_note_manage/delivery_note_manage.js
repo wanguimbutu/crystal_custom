@@ -890,7 +890,7 @@ class DeliveryNoteManager {
             <tr>
                 <td>${idx + 1}</td>
                 <td><strong>${item.item_code}</strong></td>
-                <td>${item.item_name}</td>
+                <td><strong>${item.item_name}</strong></td>
                 <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
                 <td>${item.uom}</td>
                 <td style="text-align:right;">${item.weight > 0 ? item.weight.toFixed(2) : '—'}</td>
@@ -1007,11 +1007,11 @@ class DeliveryNoteManager {
   th{background:#1e293b;color:#fff;text-align:left;font-size:11px;}
   tfoot td{background:#f1f5f9;font-weight:700;}
   .customer-block{margin-bottom:28px;page-break-inside:avoid;}
-  .cust-header{background:#334155;color:#f1f5f9;padding:9px 12px;border-radius:4px 4px 0 0;display:flex;justify-content:space-between;align-items:center;}
-  .cust-name{font-size:14px;font-weight:700;}
+  .cust-header{background:#334155;color:#f1f5f9;padding:9px 12px;border-radius:4px 4px 0 0;display:flex;justify-content:space-between;align-items:center;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .cust-name{font-size:15px;font-weight:800;}
   .cust-meta{font-size:11px;color:#94a3b8;}
   .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;}
-  @media print{.no-print{display:none}body{margin:10px}}
+  @media print{.no-print{display:none}body{margin:10px}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 </style></head><body>
 <button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#1e293b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Print</button>
 <h2>PACKING LIST</h2>
@@ -1125,7 +1125,7 @@ ${customer_blocks}
             <tr>
                 <td>${idx + 1}</td>
                 <td><strong>${item.item_code}</strong></td>
-                <td>${item.item_name}</td>
+                <td><strong>${item.item_name}</strong></td>
                 <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
                 <td>${item.uom}</td>
                 <td style="text-align:right;">${item.weight > 0 ? item.weight.toFixed(2) : '—'}</td>
