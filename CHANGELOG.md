@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.3...v1.16.0) (2026-06-17)
+
+
+### Features
+
+* bold item names in print docs + debt check on finance approval ([a369de5](https://github.com/wanguimbutu/crystal_custom/commit/a369de5275da3dab2b9485c4de98741c0b2271c3))
+
 ## [1.15.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.15.2...v1.15.3) (2026-06-16)
 
 
