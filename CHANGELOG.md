@@ -1,3 +1,10 @@
+## [1.18.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.18.0...v1.18.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* weight consolidation shows only orders with no DN and no invoice ([7ddefbf](https://github.com/wanguimbutu/crystal_custom/commit/7ddefbf3c23c06a547902b377a570c4d18a1b3f7))
+
 # [1.18.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.17.1...v1.18.0) (2026-06-17)
 
 
