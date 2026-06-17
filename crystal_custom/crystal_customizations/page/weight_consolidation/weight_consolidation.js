@@ -64,7 +64,8 @@ class WeightConsolidationManager {
 
 		const filters = [
 			['Sales Order', 'docstatus', '!=', 2],
-			['Sales Order', 'status', 'not in', ['Completed', 'Closed', 'Cancelled']],
+			['Sales Order', 'per_delivered', '=', 0],
+			['Sales Order', 'per_billed', '=', 0],
 		];
 		if (this._sps.size) filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
@@ -75,8 +76,7 @@ class WeightConsolidationManager {
 				fields: [
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
-					'total_net_weight', 'workflow_state', 'status',
-					'per_delivered', 'per_billed',
+					'total_net_weight', 'workflow_state', 'docstatus',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -334,17 +334,11 @@ class WeightConsolidationManager {
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
 	_status_badge(o) {
-		const s = o.status || o.workflow_state || '';
 		if (o.docstatus === 0 || o.docstatus === '0') {
-			return `<span class="wc-badge" style="background:#fef9c3;color:#854d0e;">${frappe.utils.escape_html(s || 'Draft')}</span>`;
+			const label = o.workflow_state || 'Draft';
+			return `<span class="wc-badge" style="background:#fef9c3;color:#854d0e;">${frappe.utils.escape_html(label)}</span>`;
 		}
-		if ((o.per_delivered || 0) > 0 && (o.per_delivered || 0) < 100) {
-			return `<span class="wc-badge" style="background:#dbeafe;color:#1d4ed8;">Part. Delivered</span>`;
-		}
-		if ((o.per_billed || 0) > 0 && (o.per_billed || 0) < 100) {
-			return `<span class="wc-badge" style="background:#ede9fe;color:#5b21b6;">Part. Billed</span>`;
-		}
-		return `<span class="wc-badge wc-badge-ready">${frappe.utils.escape_html(s || 'Active')}</span>`;
+		return `<span class="wc-badge wc-badge-ready">Submitted</span>`;
 	}
 
 	_kpi(label, value, color, icon) {
