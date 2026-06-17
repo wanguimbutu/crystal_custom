@@ -225,6 +225,9 @@ class DeliveryNoteManager {
                 }
             });
 
+            // Fresh data — drop any stale selections from previous load
+            this.selected_orders.clear();
+
             // Merge: submitted truck + submitted unassigned + draft truck (deduplicate by name)
             const seen = new Set(truck_rows.map(o => o.name));
             const unassigned_new = unassigned_rows.filter(o => !seen.has(o.name));
@@ -389,6 +392,11 @@ class DeliveryNoteManager {
         }
     }
 
+    _selected_count() {
+        const filtered = this.get_filtered_orders();
+        return filtered.filter(o => this.selected_orders.has(o.name)).length;
+    }
+
     get_filtered_orders() {
         return this.orders.filter(order => {
             if (this.filters.customer && order.customer !== this.filters.customer) return false;
@@ -510,7 +518,7 @@ class DeliveryNoteManager {
                         <input type="checkbox" id="dm-select-all" style="width:15px;height:15px;accent-color:#667eea;">
                         Select All (${all_filtered.length})
                     </label>
-                    <span class="dm-sel-count" id="dm-sel-count">${this.selected_orders.size} selected</span>
+                    <span class="dm-sel-count" id="dm-sel-count">${this._selected_count()} selected</span>
                 </div>
 
                 <div class="table-wrapper">
@@ -614,7 +622,7 @@ class DeliveryNoteManager {
                 checked ? self.selected_orders.add(o.name) : self.selected_orders.delete(o.name);
             });
             $('#dm-tab-pending .dm-order-chk').prop('checked', checked);
-            $('#dm-sel-count').text(`${self.selected_orders.size} selected`);
+            $('#dm-sel-count').text(`${self._selected_count()} selected`);
         });
 
         // Individual checkbox
@@ -622,7 +630,7 @@ class DeliveryNoteManager {
             const name = $(this).data('order');
             $(this).is(':checked') ? self.selected_orders.add(name) : self.selected_orders.delete(name);
             $(this).closest('tr').toggleClass('dm-row-selected', $(this).is(':checked'));
-            $('#dm-sel-count').text(`${self.selected_orders.size} selected`);
+            $('#dm-sel-count').text(`${self._selected_count()} selected`);
         });
 
         // Expand toggle
