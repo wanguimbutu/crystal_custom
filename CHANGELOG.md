@@ -1,3 +1,10 @@
+## [1.17.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.17.0...v1.17.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* selection count in Delivery Note Manager now reflects visible filtered orders ([d0b5d7e](https://github.com/wanguimbutu/crystal_custom/commit/d0b5d7e7ecb13bf72bb5e5bad149a81befe70e3e))
+
 # [1.17.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.16.0...v1.17.0) (2026-06-17)
 
 
