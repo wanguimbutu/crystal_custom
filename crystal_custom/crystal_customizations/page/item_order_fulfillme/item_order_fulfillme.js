@@ -17,6 +17,8 @@ class OrderFulfillmentManager {
 		this.allocations   = {};   // { item_code: { truck_number: qty } }
 		this.search_term   = '';
 		this._alloc_save_timer = null;
+		this.selected_trucks   = new Set();
+		this.truck_snapshot    = this._load_snapshot();
 		this.setup_page();
 		this._load_allocations_then_data();
 	}
@@ -222,6 +224,7 @@ class OrderFulfillmentManager {
 		const total_items  = Object.keys(item_summary).length;
 		const items_ok     = Object.values(item_summary).filter(s => s.total_short <= 0).length;
 		const items_short  = total_items - items_ok;
+		const new_count    = this._count_new_orders();
 
 		return `
 		<div class="tf-kpi-row">
@@ -229,6 +232,14 @@ class OrderFulfillmentManager {
 			${this._kpi('Items Needed', total_items, '#667eea')}
 			${this._kpi('Fully Stocked', items_ok, '#10b981')}
 			${this._kpi('With Shortages', items_short, items_short > 0 ? '#ef4444' : '#9ca3af')}
+		</div>
+		<div class="tf-truck-actions">
+			<button class="btn btn-sm btn-default tf-mr-selected-btn">&#128203; MR for Selected Trucks</button>
+			${new_count > 0
+				? `<button class="btn btn-sm tf-mr-new-btn" style="background:#10b981;color:#fff;border-color:#10b981;">&#9733; MR for ${new_count} New Order${new_count !== 1 ? 's' : ''}</button>`
+				: ''}
+			<button class="btn btn-sm btn-default tf-mark-reviewed-btn">&#10003; Mark All as Reviewed</button>
+			${new_count > 0 ? `<span class="tf-new-notice">${new_count} newly added order${new_count !== 1 ? 's' : ''} highlighted in green</span>` : ''}
 		</div>
 		<div class="tf-section">
 			<div class="tf-section-header">
@@ -359,10 +370,13 @@ class OrderFulfillmentManager {
 			: fully_allocated ? '#10b981'
 			: '#ef4444';
 
-		const orders_html = (truck.orders || []).map(o => `
-			<div class="tf-order-row${o.paint_notes ? ' tf-order-row-paint' : ''}">
+		const orders_html = (truck.orders || []).map(o => {
+			const is_new = this._is_order_new(tn, o.name);
+			return `
+			<div class="tf-order-row${o.paint_notes ? ' tf-order-row-paint' : ''}${is_new ? ' tf-order-row-new' : ''}">
 				<div style="flex:1;min-width:0;">
 					<a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${o.name}</a>
+					${is_new ? '<span class="tf-new-badge">NEW</span>' : ''}
 					<span class="tf-order-cust">${frappe.utils.escape_html(o.customer_name)}</span>
 					${o.paint_notes ? `<span class="tf-paint-warn-badge">&#9888; Paint Note</span>` : ''}
 					${o.paint_notes ? `<div class="tf-paint-notes-banner">&#127758; <strong>Colour / Paint:</strong> ${frappe.utils.escape_html(o.paint_notes)}</div>` : ''}
@@ -370,22 +384,35 @@ class OrderFulfillmentManager {
 				<button class="btn btn-xs btn-danger btn-remove-order"
 				        data-order="${o.name}" data-truck="${frappe.utils.escape_html(tn)}"
 				        title="Remove from truck">Remove</button>
-			</div>`).join('');
+			</div>`;
+		}).join('');
+
+		const truck_new_count = (truck.orders || []).filter(o => this._is_order_new(tn, o.name)).length;
 
 		return `
 		<div class="tf-truck-card">
 			<div class="tf-truck-head">
-				<div>
-					<span class="tf-truck-num">${frappe.utils.escape_html(tn)}</span>
-					<span class="tf-truck-meta">
-						${truck.order_count} order${truck.order_count !== 1 ? 's' : ''}
-						${truck.total_weight ? ` &nbsp;·&nbsp; ${truck.total_weight.toFixed(0)} kg` : ''}
-					</span>
-					${truck.delivery_regions ? `<span class="tf-truck-region-tag">&#128205; ${frappe.utils.escape_html(truck.delivery_regions)}</span>` : ''}
+				<div style="display:flex;align-items:center;gap:8px;">
+					<input type="checkbox" class="tf-truck-chk"
+					       data-truck="${frappe.utils.escape_html(tn)}"
+					       ${this.selected_trucks.has(tn) ? 'checked' : ''}
+					       style="width:15px;height:15px;accent-color:#667eea;cursor:pointer;flex-shrink:0;">
+					<div>
+						<span class="tf-truck-num">${frappe.utils.escape_html(tn)}</span>
+						<span class="tf-truck-meta">
+							${truck.order_count} order${truck.order_count !== 1 ? 's' : ''}
+							${truck.total_weight ? ` &nbsp;·&nbsp; ${truck.total_weight.toFixed(0)} kg` : ''}
+							${truck_new_count > 0 ? ` &nbsp;·&nbsp; <span style="color:#10b981;font-weight:700;">${truck_new_count} new</span>` : ''}
+						</span>
+						${truck.delivery_regions ? `<span class="tf-truck-region-tag">&#128205; ${frappe.utils.escape_html(truck.delivery_regions)}</span>` : ''}
+					</div>
 				</div>
-				<span class="tf-status-badge" id="tf-status-${sid}" style="background:${status_color}">
-					${status_label}
-				</span>
+				<div style="display:flex;align-items:center;gap:6px;">
+					<button class="btn btn-xs btn-default tf-truck-mr-btn" data-truck="${frappe.utils.escape_html(tn)}" title="Create MR for this truck's shortages">&#128203; MR</button>
+					<span class="tf-status-badge" id="tf-status-${sid}" style="background:${status_color}">
+						${status_label}
+					</span>
+				</div>
 			</div>
 
 			${truck.orders && truck.orders.length ? `
@@ -900,6 +927,37 @@ ${truck_blocks}
 			self._remove_order_from_truck($(this).data('order'), $(this).data('truck'));
 		});
 
+		// Truck checkbox selection
+		this.container.off('change.tf-chk').on('change.tf-chk', '.tf-truck-chk', function () {
+			const tn = $(this).data('truck');
+			$(this).is(':checked') ? self.selected_trucks.add(tn) : self.selected_trucks.delete(tn);
+		});
+
+		// Per-truck MR button
+		this.container.off('click.tf-tmr').on('click.tf-tmr', '.tf-truck-mr-btn', function () {
+			self._create_mr_for_trucks([$(this).data('truck')]);
+		});
+
+		// Selected trucks MR
+		this.container.off('click.tf-smr').on('click.tf-smr', '.tf-mr-selected-btn', function () {
+			const selected = Array.from(self.selected_trucks);
+			if (!selected.length) { frappe.msgprint(__('Tick at least one truck checkbox first.')); return; }
+			self._create_mr_for_trucks(selected);
+		});
+
+		// New orders MR
+		this.container.off('click.tf-nmr').on('click.tf-nmr', '.tf-mr-new-btn', function () {
+			self._create_mr_for_new_items();
+		});
+
+		// Mark all as reviewed
+		this.container.off('click.tf-rev').on('click.tf-rev', '.tf-mark-reviewed-btn', function () {
+			self._save_snapshot();
+			frappe.show_alert({ message: __('All orders marked as reviewed — new badges cleared'), indicator: 'green' });
+			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
+			self._attach_events();
+		});
+
 		// Summary tab: create MR button
 		this.container.off('click.tf-mr').on('click.tf-mr', '.btn-create-mr-summary', () => {
 			this._create_mr_from_summary();
@@ -1056,6 +1114,7 @@ ${truck_blocks}
 								]),
 								indicator: 'green',
 							});
+							this._save_snapshot();
 						}
 					},
 				});
@@ -1085,6 +1144,121 @@ ${truck_blocks}
 					}
 				},
 				error: () => frappe.msgprint({ title: __('Error'), message: __('No shortages found'), indicator: 'red' }),
+			})
+		);
+	}
+
+	// ── Snapshot (new-order tracking via localStorage) ────────────────────────
+
+	_load_snapshot() {
+		try { return JSON.parse(localStorage.getItem('crystal_truck_snapshot') || 'null') || {}; }
+		catch(e) { return {}; }
+	}
+
+	_has_snapshot() {
+		return localStorage.getItem('crystal_truck_snapshot') !== null;
+	}
+
+	_save_snapshot() {
+		const snap = {};
+		this.truck_data.trucks.forEach(t => {
+			snap[t.truck_number] = (t.orders || []).map(o => o.name);
+		});
+		localStorage.setItem('crystal_truck_snapshot', JSON.stringify(snap));
+		this.truck_snapshot = snap;
+	}
+
+	_is_order_new(truck_number, order_name) {
+		if (!this._has_snapshot()) return false;
+		const snap = this.truck_snapshot[truck_number];
+		if (snap === undefined) return true; // new truck since last review
+		return !snap.includes(order_name);
+	}
+
+	_count_new_orders() {
+		let n = 0;
+		this.truck_data.trucks.forEach(t => {
+			(t.orders || []).forEach(o => { if (this._is_order_new(t.truck_number, o.name)) n++; });
+		});
+		return n;
+	}
+
+	// ── Per-truck / selective MR creation ────────────────────────────────────
+
+	_create_mr_for_trucks(truck_numbers) {
+		const set = new Set(truck_numbers);
+		const item_totals = {};
+		this.truck_data.trucks.filter(t => set.has(t.truck_number)).forEach(truck => {
+			truck.items.forEach(item => {
+				const alloc = (this.allocations[item.item_code] || {})[truck.truck_number] || 0;
+				const short = Math.max(0, item.required_qty - alloc);
+				if (short <= 0) return;
+				if (!item_totals[item.item_code]) {
+					item_totals[item.item_code] = { item_code: item.item_code, item_name: item.item_name, shortage_qty: 0, uom: item.uom };
+				}
+				item_totals[item.item_code].shortage_qty += short;
+			});
+		});
+		const shortage_items = Object.values(item_totals);
+		if (!shortage_items.length) {
+			frappe.msgprint(__('No shortages in the selected truck(s).'));
+			return;
+		}
+		frappe.confirm(
+			__('Create Material Request for {0} item(s) across {1} selected truck(s)?', [shortage_items.length, truck_numbers.length]),
+			() => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.create_requisition_from_shortage_items',
+				args: { shortage_items: JSON.stringify(shortage_items) },
+				freeze: true, freeze_message: __('Creating Material Request…'),
+				callback: (r) => {
+					if (r.message) {
+						frappe.msgprint({
+							title: __('Requisition Created'),
+							message: __('Material Request <a href="/app/material-request/{0}" target="_blank">{0}</a> created', [r.message]),
+							indicator: 'green',
+						});
+					}
+				},
+			})
+		);
+	}
+
+	_create_mr_for_new_items() {
+		const item_totals = {};
+		this.customer_data.trucks.forEach(truck => {
+			const tn = truck.truck_number;
+			(truck.orders || []).forEach(order => {
+				if (!this._is_order_new(tn, order.name)) return;
+				(order.items || []).forEach(item => {
+					if (item.required_qty <= 0) return;
+					if (!item_totals[item.item_code]) {
+						item_totals[item.item_code] = { item_code: item.item_code, item_name: item.item_name, shortage_qty: 0, uom: item.uom };
+					}
+					item_totals[item.item_code].shortage_qty += item.required_qty;
+				});
+			});
+		});
+		const shortage_items = Object.values(item_totals);
+		if (!shortage_items.length) {
+			frappe.msgprint(__('No items found in new orders — click "Mark All as Reviewed" first if this is unexpected.'));
+			return;
+		}
+		frappe.confirm(
+			__('Create Material Request for {0} item(s) from newly added orders?', [shortage_items.length]),
+			() => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.create_requisition_from_shortage_items',
+				args: { shortage_items: JSON.stringify(shortage_items) },
+				freeze: true, freeze_message: __('Creating Material Request…'),
+				callback: (r) => {
+					if (r.message) {
+						frappe.msgprint({
+							title: __('Requisition Created'),
+							message: __('Material Request <a href="/app/material-request/{0}" target="_blank">{0}</a> created', [r.message]),
+							indicator: 'green',
+						});
+						this._save_snapshot();
+					}
+				},
 			})
 		);
 	}
@@ -1322,6 +1496,20 @@ ${truck_blocks}
 		.cv-paint-alert { background: #fef3c7; border-bottom: 1px solid #fcd34d;
 			padding: 8px 14px; font-size: 13px; color: #78350f; font-weight: 600; }
 		.cv-cust-block-paint { border-color: #f59e0b !important; border-width: 2px !important; }
+
+		/* New-order highlighting */
+		.tf-order-row-new { background: #f0fdf4 !important; border-left: 3px solid #10b981; padding-left: 9px !important; }
+		.tf-new-badge {
+			display: inline-block; padding: 1px 6px; background: #10b981; color: #fff;
+			border-radius: 8px; font-size: 10px; font-weight: 700; vertical-align: middle;
+			margin-left: 5px; letter-spacing: .3px;
+		}
+		.tf-truck-actions {
+			display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+			margin-bottom: 14px; padding: 10px 14px;
+			background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+		}
+		.tf-new-notice { font-size: 12px; color: #10b981; font-weight: 600; margin-left: 6px; }
 		</style>`;
 	}
 }

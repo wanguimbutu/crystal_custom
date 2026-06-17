@@ -654,6 +654,15 @@ class DeliveryNoteManager {
             e.stopPropagation();
             self._generate_truck_doc($(this).data('truck'), 'packing_list');
         });
+        // New-only variants
+        $('#dm-tab-pending').find('.dm-tc-ls-new-btn').off('click').on('click', function(e) {
+            e.stopPropagation();
+            self._generate_truck_doc($(this).data('truck'), 'loading_sheet', true);
+        });
+        $('#dm-tab-pending').find('.dm-tc-pl-new-btn').off('click').on('click', function(e) {
+            e.stopPropagation();
+            self._generate_truck_doc($(this).data('truck'), 'packing_list', true);
+        });
 
         // View toggle
         $('#dm-tab-pending').find('.dm-view-btn').off('click').on('click', function() {
@@ -732,6 +741,8 @@ class DeliveryNoteManager {
                 <div class="dm-tc-doc-actions" data-truck="${frappe.utils.escape_html(truck_num)}">
                     <button class="btn btn-xs btn-default dm-tc-ls-btn" data-truck="${frappe.utils.escape_html(truck_num)}">&#128203; Loading Sheet</button>
                     <button class="btn btn-xs btn-default dm-tc-pl-btn" data-truck="${frappe.utils.escape_html(truck_num)}">&#128230; Packing List</button>
+                    <button class="btn btn-xs dm-tc-ls-new-btn" data-truck="${frappe.utils.escape_html(truck_num)}" style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;" title="Loading sheet for newly added orders only">&#11088; New Only LS</button>
+                    <button class="btn btn-xs dm-tc-pl-new-btn" data-truck="${frappe.utils.escape_html(truck_num)}" style="background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;" title="Packing list for newly added orders only">&#11088; New Only PL</button>
                 </div>` : ''}
             </div>`;
         };
@@ -840,7 +851,7 @@ class DeliveryNoteManager {
 
     // ─── Per-truck Loading Sheet / Packing List ──────────────────────────────
 
-    _generate_truck_doc(truck_num, doc_type) {
+    _generate_truck_doc(truck_num, doc_type, new_only = false) {
         const truck_orders = this.orders.filter(o =>
             o.custom_truck_number === truck_num && o.docstatus === 1
         );
@@ -848,8 +859,19 @@ class DeliveryNoteManager {
             frappe.msgprint(__('No submitted orders found for truck {0}', [truck_num]));
             return;
         }
-        const order_names = truck_orders.map(o => o.name);
-        const orders_map  = {};
+        const all_order_names = truck_orders.map(o => o.name);
+        const new_order_names = this._get_new_ls_orders(truck_num, all_order_names);
+
+        const order_names = new_only
+            ? all_order_names.filter(n => new_order_names.has(n))
+            : all_order_names;
+
+        if (new_only && !order_names.length) {
+            frappe.msgprint(__('No new orders for truck {0} — generate a doc first to establish the baseline.', [truck_num]));
+            return;
+        }
+
+        const orders_map = {};
         truck_orders.forEach(o => { orders_map[o.name] = o; });
 
         frappe.call({
@@ -865,17 +887,20 @@ class DeliveryNoteManager {
                         const qty = i.qty || 0;
                         if (qty <= 0) return;
                         if (!agg[i.item_code]) {
-                            agg[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom, weight: 0, amount: 0 };
+                            agg[i.item_code] = { item_code: i.item_code, item_name: i.item_name, qty: 0, uom: i.uom, weight: 0, amount: 0, is_new: false };
                         }
                         agg[i.item_code].qty    += qty;
                         agg[i.item_code].weight += qty * (i.weight_per_unit || 0);
                         agg[i.item_code].amount += qty * (i.rate || 0);
+                        if (new_order_names.has(i.parent)) agg[i.item_code].is_new = true;
                     });
                     const items = Object.values(agg).sort((a, b) => a.item_code.localeCompare(b.item_code));
-                    this._print_loading_sheet_for_truck(truck_num, order_names, items);
+                    this._print_loading_sheet_for_truck(truck_num, order_names, items, new_order_names);
                 } else {
-                    this._print_packing_list_for_truck(truck_num, order_names, raw_items, orders_map);
+                    this._print_packing_list_for_truck(truck_num, order_names, raw_items, orders_map, new_order_names);
                 }
+                // Save snapshot so these orders become "old" on next generation
+                this._save_ls_snapshot(truck_num, all_order_names);
             },
         });
     }
@@ -885,10 +910,11 @@ class DeliveryNoteManager {
         const meta       = this.truck_meta[truck_num] || {};
         const total_qty    = items.reduce((s, i) => s + i.qty, 0);
         const total_weight = items.reduce((s, i) => s + i.weight, 0);
+        const has_new      = items.some(i => i.is_new);
 
         const rows = items.map((item, idx) => `
-            <tr>
-                <td>${idx + 1}</td>
+            <tr style="${item.is_new ? 'background:#f0fdf4;' : ''}">
+                <td>${idx + 1}${item.is_new ? ' <span style="background:#10b981;color:#fff;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;vertical-align:middle;">NEW</span>' : ''}</td>
                 <td><strong>${item.item_code}</strong></td>
                 <td><strong>${item.item_name}</strong></td>
                 <td style="text-align:right;"><strong>${item.qty.toFixed(2)}</strong></td>
@@ -920,6 +946,9 @@ class DeliveryNoteManager {
   &nbsp;|&nbsp; Orders: <strong>${order_names.length}</strong>
   &nbsp;|&nbsp; Items: <strong>${items.length}</strong>
 </div>
+${has_new ? `<div style="margin-bottom:10px;padding:6px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;font-size:11px;color:#166534;">
+  <strong>&#9646;</strong> Rows shaded green are from newly added orders since last loading sheet.
+</div>` : ''}
 <table>
   <thead><tr>
     <th width="4%">#</th><th width="13%">Item Code</th><th width="32%">Description</th>
@@ -938,7 +967,7 @@ class DeliveryNoteManager {
         w.document.close();
     }
 
-    _print_packing_list_for_truck(truck_num, order_names, raw_items, orders_map) {
+    _print_packing_list_for_truck(truck_num, order_names, raw_items, orders_map, new_order_names = new Set()) {
         const today = frappe.datetime.str_to_user(frappe.datetime.get_today());
         const meta  = this.truck_meta[truck_num] || {};
 
@@ -956,10 +985,12 @@ class DeliveryNoteManager {
             .filter(n => order_items[n])
             .sort((a, b) => ((orders_map[a] || {}).customer_name || '').localeCompare((orders_map[b] || {}).customer_name || ''));
 
+        const has_new = new_order_names.size > 0 && sorted_orders.some(n => new_order_names.has(n));
         let customer_blocks = '';
         sorted_orders.forEach(order_name => {
-            const o     = orders_map[order_name] || { customer_name: order_name };
-            const items = order_items[order_name] || [];
+            const o       = orders_map[order_name] || { customer_name: order_name };
+            const is_new  = new_order_names.has(order_name);
+            const items   = order_items[order_name] || [];
             const subtotal_weight = items.reduce((s, i) => s + i.pending_qty * (i.weight_per_unit || 0), 0);
             const subtotal_qty    = items.reduce((s, i) => s + i.pending_qty, 0);
 
@@ -973,10 +1004,14 @@ class DeliveryNoteManager {
                     <td style="text-align:right;">${(item.pending_qty * (item.weight_per_unit || 0)).toFixed(2)}</td>
                 </tr>`).join('');
 
+            const head_bg = is_new ? '#065f46' : '#334155';
             customer_blocks += `
             <div class="customer-block">
-                <div class="cust-header">
-                    <span class="cust-name">${o.customer_name || order_name}</span>
+                <div class="cust-header" style="background:${head_bg};">
+                    <span class="cust-name">
+                        ${o.customer_name || order_name}
+                        ${is_new ? ' <span style="background:#10b981;color:#fff;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;vertical-align:middle;">NEW</span>' : ''}
+                    </span>
                     <span class="cust-meta">
                         ${order_name}
                         ${o.custom_delivery_region ? ` &nbsp;·&nbsp; ${o.custom_delivery_region}` : ''}
@@ -1021,6 +1056,9 @@ class DeliveryNoteManager {
   ${meta.driver_name ? ` &nbsp;|&nbsp; Driver: <strong>${meta.driver_name}</strong>` : ''}
   &nbsp;|&nbsp; Customers: <strong>${sorted_orders.length}</strong>
 </div>
+${has_new ? `<div style="margin-bottom:14px;padding:6px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;font-size:11px;color:#166534;">
+  <strong>&#9646;</strong> Customer blocks with a darker green header are newly added orders since the last packing list.
+</div>` : ''}
 
 ${customer_blocks}
 
@@ -1314,6 +1352,26 @@ ${customer_blocks}
         });
         html += '</div>';
         $container.html(html);
+    }
+
+    // ─── Loading-Sheet snapshot (new-order tracking) ─────────────────────────
+
+    _load_ls_snapshot() {
+        try { return JSON.parse(localStorage.getItem('crystal_ls_snapshot') || '{}'); }
+        catch(e) { return {}; }
+    }
+
+    _save_ls_snapshot(truck_num, order_names) {
+        const snap = this._load_ls_snapshot();
+        snap[truck_num] = order_names;
+        localStorage.setItem('crystal_ls_snapshot', JSON.stringify(snap));
+    }
+
+    _get_new_ls_orders(truck_num, order_names) {
+        const snap = this._load_ls_snapshot();
+        const existing = snap[truck_num];
+        if (!existing) return new Set(); // no prior snapshot — treat all as existing on first run
+        return new Set(order_names.filter(n => !existing.includes(n)));
     }
 
     create_delivery_note(order_name) {
