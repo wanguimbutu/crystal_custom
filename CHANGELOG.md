@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.21.0...v1.22.0) (2026-06-18)
+
+
+### Features
+
+* Crystal Truck Plan doctype + Nairobi region pre-fulfillment bucket ([7f81b04](https://github.com/wanguimbutu/crystal_custom/commit/7f81b04a06126e04d0c76733058c6118faf57a61))
+
 # [1.21.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.20.0...v1.21.0) (2026-06-18)
 
 
