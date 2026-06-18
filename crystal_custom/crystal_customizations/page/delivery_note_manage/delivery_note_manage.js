@@ -1021,13 +1021,12 @@ ${has_new ? `<div style="margin-bottom:10px;padding:6px 10px;background:#f0fdf4;
                     <td style="text-align:right;">${(item.pending_qty * (item.weight_per_unit || 0)).toFixed(2)}</td>
                 </tr>`).join('');
 
-            const head_bg = is_new ? '#065f46' : '#334155';
             customer_blocks += `
             <div class="customer-block">
-                <div class="cust-header" style="background:${head_bg};">
+                <div class="cust-header">
                     <span class="cust-name">
                         ${o.customer_name || order_name}
-                        ${is_new ? ' <span style="background:#10b981;color:#fff;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;vertical-align:middle;">NEW</span>' : ''}
+                        ${is_new ? ' (NEW)' : ''}
                     </span>
                     <span class="cust-meta">
                         ${order_name}
@@ -1051,21 +1050,21 @@ ${has_new ? `<div style="margin-bottom:10px;padding:6px 10px;background:#f0fdf4;
         w.document.write(`<!DOCTYPE html><html>
 <head><meta charset="utf-8"><title>Packing List — ${truck_num}</title>
 <style>
-  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#111;}
+  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#000;}
   h2{margin:0 0 4px;}
-  .meta{color:#555;margin-bottom:20px;font-size:11px;}
+  .meta{color:#000;margin-bottom:20px;font-size:11px;}
   table{border-collapse:collapse;width:100%;margin-bottom:4px;}
-  th,td{border:1px solid #bbb;padding:6px 9px;}
-  th{background:#1e293b;color:#fff;text-align:left;font-size:11px;}
-  tfoot td{background:#f1f5f9;font-weight:700;}
+  th,td{border:1px solid #000;padding:6px 9px;}
+  th{background:#fff;color:#000;text-align:left;font-size:11px;font-weight:bold;}
+  tfoot td{font-weight:700;border-top:2px solid #000;}
   .customer-block{margin-bottom:28px;page-break-inside:avoid;}
-  .cust-header{background:#334155;color:#f1f5f9;padding:9px 12px;border-radius:4px 4px 0 0;display:flex;justify-content:space-between;align-items:center;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  .cust-name{font-size:15px;font-weight:800;}
-  .cust-meta{font-size:11px;color:#94a3b8;}
-  .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;}
-  @media print{.no-print{display:none}body{margin:10px}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+  .cust-header{border:1px solid #000;border-bottom:2px solid #000;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;}
+  .cust-name{font-size:15px;font-weight:800;color:#000;}
+  .cust-meta{font-size:11px;color:#000;}
+  .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#000;border-top:1px dashed #000;}
+  @media print{.no-print{display:none}body{margin:10px}}
 </style></head><body>
-<button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#1e293b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Print</button>
+<button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#fff;color:#000;border:1px solid #000;border-radius:4px;cursor:pointer;">Print</button>
 <h2>PACKING LIST</h2>
 <div class="meta">
   Date: ${today}
@@ -1073,8 +1072,8 @@ ${has_new ? `<div style="margin-bottom:10px;padding:6px 10px;background:#f0fdf4;
   ${meta.driver_name ? ` &nbsp;|&nbsp; Driver: <strong>${meta.driver_name}</strong>` : ''}
   &nbsp;|&nbsp; Customers: <strong>${sorted_orders.length}</strong>
 </div>
-${has_new ? `<div style="margin-bottom:14px;padding:6px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;font-size:11px;color:#166534;">
-  <strong>&#9646;</strong> Customer blocks with a darker green header are newly added orders since the last packing list.
+${has_new ? `<div style="margin-bottom:14px;padding:6px 10px;border:1px solid #000;font-size:11px;">
+  * Orders marked (NEW) are newly added since the last packing list.
 </div>` : ''}
 
 ${customer_blocks}
@@ -1304,22 +1303,22 @@ ${customer_blocks}
             const html = `<!DOCTYPE html><html>
 <head><meta charset="utf-8"><title>Packing List</title>
 <style>
-  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#111;}
+  body{font-family:Arial,sans-serif;font-size:12px;margin:20px;color:#000;}
   h2{margin:0 0 4px;}
-  .meta{color:#555;margin-bottom:20px;font-size:11px;}
+  .meta{color:#000;margin-bottom:20px;font-size:11px;}
   table{border-collapse:collapse;width:100%;margin-bottom:4px;}
-  th,td{border:1px solid #bbb;padding:6px 9px;}
-  th{background:#1e293b;color:#fff;text-align:left;font-size:11px;}
-  tfoot td{background:#f1f5f9;font-weight:700;}
+  th,td{border:1px solid #000;padding:6px 9px;}
+  th{background:#fff;color:#000;text-align:left;font-size:11px;font-weight:bold;}
+  tfoot td{font-weight:700;border-top:2px solid #000;}
   .customer-block{margin-bottom:28px;page-break-inside:avoid;}
-  .cust-header{background:#334155;color:#f1f5f9;padding:9px 12px;border-radius:4px 4px 0 0;margin-bottom:0;display:flex;justify-content:space-between;align-items:center;}
-  .cust-name{font-size:14px;font-weight:700;}
-  .cust-meta{font-size:11px;color:#94a3b8;}
-  .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#475569;border-top:1px dashed #cbd5e1;}
+  .cust-header{border:1px solid #000;border-bottom:2px solid #000;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;}
+  .cust-name{font-size:14px;font-weight:700;color:#000;}
+  .cust-meta{font-size:11px;color:#000;}
+  .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#000;border-top:1px dashed #000;}
   @media print{.no-print{display:none}body{margin:10px}}
 </style>
 </head><body>
-<button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#1e293b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Print</button>
+<button class="no-print" onclick="window.print()" style="float:right;padding:6px 16px;background:#fff;color:#000;border:1px solid #000;border-radius:4px;cursor:pointer;">Print</button>
 <h2>PACKING LIST</h2>
 <div class="meta">
   Date: ${today}
