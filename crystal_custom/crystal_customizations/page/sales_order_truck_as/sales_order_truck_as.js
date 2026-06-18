@@ -992,6 +992,24 @@ class TruckAssignmentManager {
 					args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
 				});
 
+				// Persist as a submitted Crystal Truck Plan doctype for permanent record
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.create_truck_plan',
+					args: {
+						truck_number: truck_number,
+						driver_name:  truck_info.driver_name || '',
+						capacity_kg:  truck_info.capacity_kg || 0,
+						orders_json:  JSON.stringify(truck_orders.map(o => ({
+							name:            o.name,
+							customer_name:   o.customer_name || o.customer || '',
+							delivery_region: o.custom_delivery_region || '',
+							grand_total:     o.grand_total || 0,
+							total_net_weight: o.total_net_weight || 0,
+						}))),
+						closed_from: 'Truck Assignment',
+					},
+				});
+
 				// Remove from active list and persist truck meta
 				this.available_trucks = this.available_trucks.filter(t => t.truck_number !== truck_number);
 				this._save_truck_meta();

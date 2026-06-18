@@ -20,6 +20,7 @@ class OrderFulfillmentManager {
 		this.selected_trucks   = new Set();
 		this.truck_snapshot    = this._load_snapshot();
 		this._closed_trucks    = this._load_closed_trucks();
+		this._prefill_regions  = this._load_prefill_regions();
 		this.setup_page();
 		this._load_allocations_then_data();
 	}
@@ -80,6 +81,23 @@ class OrderFulfillmentManager {
 			},
 		});
 
+		this.page.add_field({
+			label: 'Pre-Fulfilment Region', fieldtype: 'Link', fieldname: 'prefill_region',
+			options: 'Delivery Region',
+			placeholder: 'Add…',
+			change: () => {
+				const v = this.page.fields_dict.prefill_region.get_value();
+				if (!v) return;
+				this._prefill_regions.add(v);
+				setTimeout(() => this.page.fields_dict.prefill_region.set_value(''), 50);
+				this._save_prefill_regions();
+				this._render_prefill_pills();
+				this.load_data();
+			},
+		});
+		this._prefill_pills_wrap = $('<div class="region-pills-wrap"></div>').appendTo(this.page.page_form);
+		setTimeout(() => this._render_prefill_pills(), 100);
+
 		this.page.set_primary_action('Create Requisition', () => this.create_requisition(), 'octicon octicon-plus');
 		this.page.add_button('Auto Allocate', () => this.auto_allocate());
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
@@ -96,6 +114,15 @@ class OrderFulfillmentManager {
 		const to_date   = this.page.fields_dict.to_date.get_value();
 
 		const prev_stock = this.truck_data ? { ...this.truck_data.stock } : {};
+
+		const region_promise = this._prefill_regions.size
+			? new Promise(resolve => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_region_fulfillment_data',
+				args: { regions_json: JSON.stringify([...this._prefill_regions]) },
+				callback: r => resolve(r.message || { trucks: [], stock: {} }),
+				error: () => resolve({ trucks: [], stock: {} }),
+			}))
+			: Promise.resolve({ trucks: [], stock: {} });
 
 		Promise.all([
 			new Promise(resolve => frappe.call({
@@ -114,7 +141,13 @@ class OrderFulfillmentManager {
 				callback: r => { this.customer_data = r.message || { trucks: [], stock: {} }; resolve(); },
 				error: () => resolve(),
 			})),
-		]).then(() => {
+			region_promise,
+		]).then(([,,,region_data]) => {
+			// Prepend virtual region bucket trucks and merge their stock
+			if (region_data.trucks.length) {
+				this.truck_data.trucks = [...region_data.trucks, ...this.truck_data.trucks];
+				Object.assign(this.truck_data.stock, region_data.stock);
+			}
 			const changed = Object.keys(this.truck_data.stock).filter(ic => {
 				const old_qty = (prev_stock[ic] || {}).available_qty;
 				const new_qty = (this.truck_data.stock[ic] || {}).available_qty;
@@ -126,8 +159,8 @@ class OrderFulfillmentManager {
 					indicator: 'orange',
 				}, 6);
 			}
-			// Prune closed trucks that no longer exist in the data
-			const live_truck_nums = new Set(this.truck_data.trucks.map(t => t.truck_number));
+			// Prune closed trucks that no longer exist in the data (exclude virtual region buckets)
+			const live_truck_nums = new Set(this.truck_data.trucks.filter(t => !t.is_region_bucket).map(t => t.truck_number));
 			[...this._closed_trucks].forEach(tn => {
 				if (!live_truck_nums.has(tn)) this._closed_trucks.delete(tn);
 			});
@@ -192,11 +225,11 @@ class OrderFulfillmentManager {
 	}
 
 	_render_trucks_tab() {
-		let trucks = this.truck_data.trucks;
+		let all_trucks = this.truck_data.trucks;
 
 		if (this.search_term) {
 			const q = this.search_term.toLowerCase();
-			trucks = trucks.filter(t =>
+			all_trucks = all_trucks.filter(t =>
 				(t.truck_number     || '').toLowerCase().includes(q) ||
 				(t.delivery_regions || '').toLowerCase().includes(q) ||
 				(t.orders || []).some(o =>
@@ -212,7 +245,10 @@ class OrderFulfillmentManager {
 			);
 		}
 
-		if (!trucks.length) {
+		const region_buckets = all_trucks.filter(t => t.is_region_bucket);
+		let trucks = all_trucks.filter(t => !t.is_region_bucket);
+
+		if (!trucks.length && !region_buckets.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
 				<strong>${this.search_term ? 'No trucks match your search.' : 'No active trucks with assigned orders'}</strong>
 				${!this.search_term ? ' — assign orders to trucks in the Truck Assignment page first.' : ''}
@@ -250,6 +286,17 @@ class OrderFulfillmentManager {
 			</div>
 		</div>` : '';
 
+		const region_section = region_buckets.length ? `
+		<div class="tf-section" style="margin-bottom:24px;">
+			<div class="tf-section-header" style="background:#0f766e;">
+				&#128205; Pre-Fulfillment Regions (${region_buckets.length})
+				<span class="tf-header-note" style="color:#99f6e4;">Orders without a truck assignment yet — prepare stock for these regions</span>
+			</div>
+			<div class="tf-trucks-grid">
+				${region_buckets.map(t => this._render_truck_card(t, item_summary, false)).join('')}
+			</div>
+		</div>` : '';
+
 		return `
 		<div class="tf-kpi-row">
 			${this._kpi('Active Trucks', open_trucks.length, '#8b5cf6')}
@@ -265,6 +312,7 @@ class OrderFulfillmentManager {
 			<button class="btn btn-sm btn-default tf-mark-reviewed-btn">&#10003; Mark All as Reviewed</button>
 			${new_count > 0 ? `<span class="tf-new-notice">${new_count} newly added order${new_count !== 1 ? 's' : ''} highlighted in green</span>` : ''}
 		</div>
+		${region_section}
 		<div class="tf-section">
 			<div class="tf-section-header">
 				Active Trucks (${open_trucks.length})
@@ -354,6 +402,7 @@ class OrderFulfillmentManager {
 	}
 
 	_render_truck_card(truck, item_summary, is_closed = false) {
+		if (truck.is_region_bucket) return this._render_region_bucket_card(truck, item_summary);
 		const tn  = truck.truck_number;
 		const sid = this._sid(tn);
 
@@ -466,6 +515,85 @@ class OrderFulfillmentManager {
 				</tr></thead>
 				<tbody>${rows}</tbody>
 			</table>` : '<div class="tf-empty">No pending items in this truck.</div>'}
+		</div>`;
+	}
+
+	_render_region_bucket_card(truck, item_summary) {
+		const tn  = truck.truck_number;
+		const sid = this._sid(tn);
+		const region = truck.region_label || tn;
+
+		let fully_stocked = true;
+		let rows = '';
+		truck.items.forEach(item => {
+			const ic    = item.item_code;
+			const stock = (this.truck_data.stock[item.item_code] || {}).available_qty || 0;
+			const short = Math.max(0, item.required_qty - stock);
+			if (short > 0) fully_stocked = false;
+			const isic = this._sid(ic);
+			rows += `<tr>
+				<td><strong>${frappe.utils.escape_html(ic)}</strong></td>
+				<td class="tf-item-name">${frappe.utils.escape_html(item.item_name)}</td>
+				<td class="tf-r">${item.required_qty.toFixed(2)} ${item.uom}</td>
+				<td class="tf-r">${stock.toFixed(2)}</td>
+				<td class="tf-r tf-short-cell ${short > 0 ? 'tf-short' : 'tf-ok'}">
+					${short > 0 ? `<strong>${short.toFixed(2)}</strong>` : '—'}
+				</td>
+			</tr>`;
+		});
+
+		const orders_html = (truck.orders || []).map(o => `
+			<div class="tf-order-row">
+				<div style="flex:1;min-width:0;">
+					<a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${o.name}</a>
+					<span class="tf-order-cust">${frappe.utils.escape_html(o.customer_name)}</span>
+					${o.paint_notes ? `<span class="tf-paint-warn-badge">&#9888; Paint Note</span>` : ''}
+					${o.paint_notes ? `<div class="tf-paint-notes-banner">&#127758; <strong>Colour / Paint:</strong> ${frappe.utils.escape_html(o.paint_notes)}</div>` : ''}
+				</div>
+			</div>`).join('');
+
+		const status_label = fully_stocked ? 'In Stock' : 'Has Shortages';
+		const status_color = fully_stocked ? '#10b981' : '#ef4444';
+
+		return `
+		<div class="tf-truck-card" style="border-color:#0d9488;">
+			<div class="tf-truck-head" style="background:#0f766e;">
+				<div style="display:flex;align-items:center;gap:8px;">
+					<span style="font-size:18px;">&#128205;</span>
+					<div>
+						<span class="tf-truck-num">${frappe.utils.escape_html(region)}</span>
+						<span class="tf-truck-meta">
+							${truck.order_count} order${truck.order_count !== 1 ? 's' : ''} &nbsp;·&nbsp;
+							<em>Pre-fulfillment — no truck assigned yet</em>
+						</span>
+					</div>
+				</div>
+				<div style="display:flex;align-items:center;gap:6px;">
+					<button class="btn btn-xs btn-default tf-truck-mr-btn" data-truck="${frappe.utils.escape_html(tn)}" title="Create MR for this region's shortages">&#128203; MR</button>
+					<span class="tf-status-badge" style="background:${status_color}">${status_label}</span>
+				</div>
+			</div>
+
+			${truck.orders && truck.orders.length ? `
+			<div class="tf-orders-section">
+				<div class="tf-orders-toggle" data-sid="${sid}">
+					▸ Orders in this region (${truck.orders.length})
+				</div>
+				<div class="tf-orders-list" id="tf-orders-list-${sid}" style="display:none;">
+					${orders_html}
+				</div>
+			</div>` : ''}
+
+			${truck.items.length ? `
+			<table class="tf-card-table">
+				<thead><tr>
+					<th>Item</th><th>Name</th>
+					<th class="tf-r">Required</th>
+					<th class="tf-r">In Stock</th>
+					<th class="tf-r">Short</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>` : '<div class="tf-empty">No pending items.</div>'}
 		</div>`;
 	}
 
@@ -997,6 +1125,32 @@ ${truck_blocks}
 			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
 			self._attach_events();
 			frappe.show_alert({ message: __('Truck {0} marked as complete', [tn]), indicator: 'green' });
+
+			// Persist as a submitted Crystal Truck Plan for permanent record
+			const truck_meta = (self.truck_data.trucks || []).find(t => t.truck_number === tn) || {};
+			const cv_truck   = ((self.customer_data || {}).trucks || []).find(t => t.truck_number === tn) || {};
+			const orders_map = {};
+			(cv_truck.orders || []).forEach(o => { orders_map[o.name] = o; });
+			const order_list = (truck_meta.orders || []).map(o => {
+				const cv = orders_map[o.name] || {};
+				return {
+					name:             o.name,
+					customer_name:    o.customer_name || '',
+					delivery_region:  o.delivery_region || '',
+					grand_total:      cv.grand_total      || 0,
+					total_net_weight: cv.total_net_weight || 0,
+				};
+			});
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.create_truck_plan',
+				args: {
+					truck_number: tn,
+					driver_name:  '',
+					capacity_kg:  0,
+					orders_json:  JSON.stringify(order_list),
+					closed_from:  'Order Fulfillment',
+				},
+			});
 		});
 		this.container.off('click.tf-reopen').on('click.tf-reopen', '.tf-truck-reopen-btn', function () {
 			const tn = $(this).data('truck');
@@ -1201,6 +1355,35 @@ ${truck_blocks}
 		localStorage.setItem('crystal_tf_closed_trucks', JSON.stringify([...this._closed_trucks]));
 	}
 
+	_load_prefill_regions() {
+		try { return new Set(JSON.parse(localStorage.getItem('crystal_tf_prefill_regions') || '[]')); }
+		catch(e) { return new Set(); }
+	}
+
+	_save_prefill_regions() {
+		localStorage.setItem('crystal_tf_prefill_regions', JSON.stringify([...this._prefill_regions]));
+	}
+
+	_render_prefill_pills() {
+		if (!this._prefill_pills_wrap) return;
+		if (!this._prefill_regions.size) { this._prefill_pills_wrap.empty(); return; }
+		const self = this;
+		const html = Array.from(this._prefill_regions).map(r =>
+			`<span class="rg-pill" style="background:#ccfbf1;color:#0f766e;border-color:#5eead4;">${frappe.utils.escape_html(r)}<span class="pf-rm" data-rg="${frappe.utils.escape_html(r)}">&times;</span></span>`
+		).join('');
+		this._prefill_pills_wrap.html(`<style>
+			.rg-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:12px;border:1px solid #6ee7b7;background:#d1fae5;color:#065f46;margin:2px 4px 2px 0;cursor:default;}
+			.pf-rm{cursor:pointer;font-size:14px;line-height:1;opacity:.6;}
+			.pf-rm:hover{opacity:1;}
+		</style>${html}`);
+		this._prefill_pills_wrap.find('.pf-rm').on('click', function () {
+			self._prefill_regions.delete($(this).data('rg'));
+			self._save_prefill_regions();
+			self._render_prefill_pills();
+			self.load_data();
+		});
+	}
+
 	_load_snapshot() {
 		try { return JSON.parse(localStorage.getItem('crystal_truck_snapshot') || 'null') || {}; }
 		catch(e) { return {}; }
@@ -1212,7 +1395,7 @@ ${truck_blocks}
 
 	_save_snapshot() {
 		const snap = {};
-		this.truck_data.trucks.forEach(t => {
+		this.truck_data.trucks.filter(t => !t.is_region_bucket).forEach(t => {
 			snap[t.truck_number] = (t.orders || []).map(o => o.name);
 		});
 		localStorage.setItem('crystal_truck_snapshot', JSON.stringify(snap));
@@ -1228,7 +1411,7 @@ ${truck_blocks}
 
 	_count_new_orders() {
 		let n = 0;
-		this.truck_data.trucks.forEach(t => {
+		this.truck_data.trucks.filter(t => !t.is_region_bucket).forEach(t => {
 			(t.orders || []).forEach(o => { if (this._is_order_new(t.truck_number, o.name)) n++; });
 		});
 		return n;

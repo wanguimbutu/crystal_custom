@@ -285,6 +285,115 @@ def get_truck_customer_data():
 
 
 @frappe.whitelist()
+def get_region_fulfillment_data(regions_json):
+    """
+    Return items for orders that have NO truck assigned yet, filtered by region.
+    Returns the same structure as get_truck_fulfillment_data so the frontend
+    can render them as virtual "pre-fulfillment" truck cards.
+    Each virtual truck_number = '📍 <REGION>'.
+    """
+    import json
+    regions = json.loads(regions_json) if isinstance(regions_json, str) else regions_json
+    if not regions:
+        return {'trucks': [], 'stock': {}}
+
+    ACTIVE_WORKFLOW = ('Pending Finance Approval',
+                       'Pending Customer Order Reconfirmation',
+                       'Order Confirmed')
+
+    _notes_col = _get_notes_col()
+    _notes_expr = f'so.`{_notes_col}`' if _notes_col else "''"
+
+    rows = frappe.db.sql(f"""
+        SELECT
+            so.custom_delivery_region                                       AS delivery_region,
+            so.name                                                         AS sales_order,
+            so.customer_name,
+            {_notes_expr}                                                   AS custom_paint_notes,
+            (SELECT GROUP_CONCAT(DISTINCT st.sales_person ORDER BY st.sales_person SEPARATOR ', ')
+             FROM `tabSales Team` st WHERE st.parent = so.name)            AS sales_persons,
+            soi.item_code,
+            soi.item_name,
+            GREATEST(0, SUM(soi.qty - IFNULL(soi.delivered_qty, 0)))       AS required_qty,
+            soi.uom,
+            IFNULL(soi.weight_per_unit, 0)                                  AS weight_per_unit
+        FROM `tabSales Order` so
+        INNER JOIN `tabSales Order Item` soi ON soi.parent = so.name
+        WHERE so.docstatus IN (0, 1)
+          AND so.workflow_state IN %(wf)s
+          AND so.status NOT IN ('Completed', 'Closed')
+          AND (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
+          AND so.custom_delivery_region IN %(regions)s
+        GROUP BY so.custom_delivery_region, so.name, soi.item_code
+        ORDER BY so.custom_delivery_region, soi.item_code
+    """, {'wf': ACTIVE_WORKFLOW, 'regions': tuple(regions)}, as_dict=1)
+
+    if not rows:
+        return {'trucks': [], 'stock': {}}
+
+    unique_items = list({r.item_code for r in rows if float(r.required_qty) > 0})
+    stock_map = {}
+    if unique_items:
+        item_ph = ', '.join(['%s'] * len(unique_items))
+        stock_rows = frappe.db.sql(
+            f"SELECT item_code, IFNULL(SUM(actual_qty),0) AS available_qty "
+            f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
+            unique_items, as_dict=1,
+        )
+        stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
+    item_names = {r.item_code: r.item_name for r in rows}
+    item_uoms  = {r.item_code: r.uom       for r in rows}
+
+    from collections import defaultdict
+    buckets = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float)})
+    for r in rows:
+        region = r.delivery_region or 'Unknown'
+        buckets[region]['orders'][r.sales_order] = {
+            'name':            r.sales_order,
+            'customer_name':   r.customer_name or r.sales_order,
+            'paint_notes':     r.custom_paint_notes or '',
+            'delivery_region': r.custom_delivery_region or '',
+            'sales_persons':   r.sales_persons or '',
+        }
+        if float(r.required_qty) > 0:
+            buckets[region]['items'][r.item_code] += float(r.required_qty)
+
+    trucks = []
+    for region in sorted(buckets.keys()):
+        data = buckets[region]
+        virtual_truck_number = f'\U0001f4cd {region}'
+        trucks.append({
+            'truck_number':     virtual_truck_number,
+            'is_region_bucket': True,
+            'region_label':     region,
+            'order_count':      len(data['orders']),
+            'orders':           list(data['orders'].values()),
+            'total_weight':     0,
+            'total_value':      0,
+            'delivery_regions': region,
+            'items': [
+                {
+                    'item_code':    ic,
+                    'item_name':    item_names.get(ic, ic),
+                    'required_qty': qty,
+                    'uom':          item_uoms.get(ic, ''),
+                }
+                for ic, qty in sorted(data['items'].items())
+            ],
+        })
+
+    stock = {
+        ic: {
+            'available_qty': stock_map.get(ic, 0),
+            'item_name':     item_names.get(ic, ic),
+            'uom':           item_uoms.get(ic, ''),
+        }
+        for ic in unique_items
+    }
+    return {'trucks': trucks, 'stock': stock}
+
+
+@frappe.whitelist()
 def close_truck(truck_number):
     """
     Manually close a truck from the Order Fulfillment page:

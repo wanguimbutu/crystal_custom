@@ -36,6 +36,37 @@ def get_closed_trucks():
 
 
 @frappe.whitelist()
+def create_truck_plan(truck_number, driver_name, capacity_kg, orders_json, closed_from):
+    """Create and submit a Crystal Truck Plan for permanent data persistence."""
+    import json
+    orders = json.loads(orders_json)
+
+    doc = frappe.get_doc({
+        'doctype': 'Crystal Truck Plan',
+        'truck_number': truck_number,
+        'plan_date': frappe.utils.today(),
+        'driver_name': driver_name or '',
+        'capacity_kg': float(capacity_kg or 0),
+        'closed_from': closed_from,
+        'orders': [
+            {
+                'doctype': 'Crystal Truck Plan Order',
+                'sales_order': o.get('name') or o.get('sales_order', ''),
+                'customer_name': o.get('customer_name', ''),
+                'delivery_region': o.get('delivery_region') or o.get('custom_delivery_region', ''),
+                'grand_total': float(o.get('grand_total', 0)),
+                'total_net_weight': float(o.get('total_net_weight', 0)),
+            }
+            for o in orders
+        ],
+    })
+    doc.insert(ignore_permissions=True)
+    doc.submit()
+    frappe.db.commit()
+    return doc.name
+
+
+@frappe.whitelist()
 def check_and_auto_close_trucks():
     """
     Check every active truck. If ALL assigned submitted orders are fully
