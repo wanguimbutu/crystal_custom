@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.18.1...v1.19.0) (2026-06-18)
+
+
+### Features
+
+* per-truck Done/Reopen buttons in Order Fulfillment ([cdd3e0d](https://github.com/wanguimbutu/crystal_custom/commit/cdd3e0df0cb4f6bdd9756e3184f58487e7087eb4))
+
 ## [1.18.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.18.0...v1.18.1) (2026-06-17)
 
 
