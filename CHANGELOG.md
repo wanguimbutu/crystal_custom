@@ -1,3 +1,10 @@
+# [1.21.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.20.0...v1.21.0) (2026-06-18)
+
+
+### Features
+
+* case-insensitive truck search + customer list at bottom of loading sheet ([5f66e1d](https://github.com/wanguimbutu/crystal_custom/commit/5f66e1d3d67593fcc3c3fa11be61e475c82fd2e6))
+
 # [1.20.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.19.1...v1.20.0) (2026-06-18)
 
 
