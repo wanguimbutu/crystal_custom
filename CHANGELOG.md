@@ -1,3 +1,10 @@
+## [1.19.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.19.0...v1.19.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* remove all colors from packing list for dot matrix printer compatibility ([a609a89](https://github.com/wanguimbutu/crystal_custom/commit/a609a89cb6b9d73268b3fec863f7e12b3b34f1c8)), closes [#000](https://github.com/wanguimbutu/crystal_custom/issues/000)
+
 # [1.19.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.18.1...v1.19.0) (2026-06-18)
 
 
