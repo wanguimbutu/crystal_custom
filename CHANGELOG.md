@@ -1,3 +1,10 @@
+## [1.24.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.24.0...v1.24.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* use custom get_orders endpoint to avoid client get_list field restriction ([b03cdae](https://github.com/wanguimbutu/crystal_custom/commit/b03cdaecebdfa9508e2bb9ef07720c25268f531c))
+
 # [1.24.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.23.0...v1.24.0) (2026-06-18)
 
 
