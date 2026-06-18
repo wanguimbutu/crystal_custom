@@ -2,6 +2,53 @@ import frappe
 
 
 @frappe.whitelist()
+def get_orders(sales_persons_json=None):
+    """
+    Return draft Sales Orders at Proceed To Order / blank workflow state,
+    including custom_is_pre_fulfillment if the column exists.
+    Uses server-side frappe.db to avoid the field-permission check that
+    frappe.client.get_list applies to custom fields not yet in the meta cache.
+    """
+    import json
+    sps = json.loads(sales_persons_json) if sales_persons_json else []
+
+    has_pf = frappe.db.has_column('Sales Order', 'custom_is_pre_fulfillment')
+    pf_expr = 'IFNULL(so.custom_is_pre_fulfillment, 0) AS custom_is_pre_fulfillment' if has_pf else '0 AS custom_is_pre_fulfillment'
+
+    sp_join  = ''
+    sp_where = ''
+    params   = {}
+    if sps:
+        sp_join  = 'INNER JOIN `tabSales Team` st ON st.parent = so.name'
+        sp_ph    = ', '.join([f'%(sp{i})s' for i in range(len(sps))])
+        sp_where = f'AND st.sales_person IN ({sp_ph})'
+        params   = {f'sp{i}': sp for i, sp in enumerate(sps)}
+
+    rows = frappe.db.sql(f"""
+        SELECT DISTINCT
+            so.name,
+            so.customer,
+            so.customer_name,
+            so.transaction_date,
+            so.grand_total,
+            so.custom_delivery_region,
+            so.owner,
+            so.workflow_state,
+            so.custom_finance_rejection_note,
+            so.custom_paint_notes,
+            {pf_expr}
+        FROM `tabSales Order` so
+        {sp_join}
+        WHERE so.docstatus = 0
+          AND (so.workflow_state IS NULL OR so.workflow_state = '' OR so.workflow_state = 'Proceed To Order')
+          {sp_where}
+        ORDER BY so.transaction_date DESC
+        LIMIT 500
+    """, params, as_dict=1)
+    return rows
+
+
+@frappe.whitelist()
 def notify_finance_of_new_orders(order_names):
     """
     Notify all Accounts Manager / Finance Manager users that new orders

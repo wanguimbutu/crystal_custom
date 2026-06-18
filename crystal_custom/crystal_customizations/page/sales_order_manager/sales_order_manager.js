@@ -84,32 +84,13 @@ class SalesOrderManager {
 		this.doc_cache  = {};
 		this.$wrap.html(this._spinner());
 
-		const filters = [
-			['Sales Order', 'docstatus', '=', 0],
-		];
-		if (this._sps.size) filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
-
 		frappe.call({
-			method: 'frappe.client.get_list',
+			method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.get_orders',
 			args: {
-				doctype: 'Sales Order',
-				fields: [
-					'name', 'customer', 'customer_name', 'transaction_date',
-					'grand_total', 'custom_delivery_region', 'owner',
-					'workflow_state', 'custom_finance_rejection_note',
-					'custom_paint_notes', 'custom_is_pre_fulfillment',
-				],
-				filters,
-				order_by: 'transaction_date desc',
-				limit_page_length: 500,
+				sales_persons_json: this._sps.size ? JSON.stringify([...this._sps]) : null,
 			},
 			callback: (r) => {
-				const all = r.message || [];
-				this.orders = all.filter(o =>
-					!o.workflow_state ||
-					o.workflow_state === '' ||
-					o.workflow_state === 'Proceed To Order'
-				);
+				this.orders = r.message || [];
 				this.current_page = 1;
 				this.render();
 			},
