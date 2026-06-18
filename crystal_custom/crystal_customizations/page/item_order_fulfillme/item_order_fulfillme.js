@@ -282,7 +282,7 @@ class OrderFulfillmentManager {
 	_compute_item_summary() {
 		const summary = {};
 
-		this.truck_data.trucks.forEach(truck => {
+		this.truck_data.trucks.filter(t => !this._closed_trucks.has(t.truck_number)).forEach(truck => {
 			truck.items.forEach(item => {
 				if (!summary[item.item_code]) {
 					summary[item.item_code] = {
@@ -471,7 +471,7 @@ class OrderFulfillmentManager {
 
 	_get_cv_trucks_and_stock() {
 		return {
-			trucks: this.customer_data.trucks || [],
+			trucks: (this.customer_data.trucks || []).filter(t => !this._closed_trucks.has(t.truck_number)),
 			stock:  this.customer_data.stock  || {},
 		};
 	}
@@ -702,7 +702,7 @@ ${truck_blocks}
 	// ── Customer View Tab ─────────────────────────────────────────────────────
 
 	_render_customers_tab() {
-		let trucks = this.customer_data.trucks || [];
+		let trucks = (this.customer_data.trucks || []).filter(t => !this._closed_trucks.has(t.truck_number));
 		const stock = this.customer_data.stock || {};
 
 		if (this.search_term) {
@@ -1157,26 +1157,18 @@ ${truck_blocks}
 
 		frappe.confirm(
 			__('Create a Material Request for {0} item(s) with shortages?', [shortage_items.length]),
-			() => {
-				frappe.call({
-					method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.create_requisition_from_shortage_items',
-					args: { shortage_items: JSON.stringify(shortage_items) },
-					freeze: true,
-					freeze_message: __('Creating Material Request…'),
-					callback: (r) => {
-						if (r.message) {
-							frappe.msgprint({
-								title: __('Requisition Created'),
-								message: __('Material Request {0} created', [
-									`<a href="/app/material-request/${r.message}" target="_blank">${r.message}</a>`
-								]),
-								indicator: 'green',
-							});
-							this._save_snapshot();
-						}
-					},
-				});
-			}
+			() => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.create_requisition_from_shortage_items',
+				args: { shortage_items: JSON.stringify(shortage_items) },
+				freeze: true,
+				freeze_message: __('Creating Material Request…'),
+				callback: (r) => {
+					if (r.message) {
+						this._save_snapshot();
+						frappe.set_route('Form', 'Material Request', r.message);
+					}
+				},
+			})
 		);
 	}
 
@@ -1191,15 +1183,7 @@ ${truck_blocks}
 				freeze: true,
 				freeze_message: __('Creating Material Request…'),
 				callback: (r) => {
-					if (r.message) {
-						frappe.msgprint({
-							title: __('Done'),
-							message: __('Material Request {0} created', [
-								`<a href="/app/material-request/${r.message}" target="_blank">${r.message}</a>`
-							]),
-							indicator: 'green',
-						});
-					}
+					if (r.message) frappe.set_route('Form', 'Material Request', r.message);
 				},
 				error: () => frappe.msgprint({ title: __('Error'), message: __('No shortages found'), indicator: 'red' }),
 			})
@@ -1278,13 +1262,7 @@ ${truck_blocks}
 				args: { shortage_items: JSON.stringify(shortage_items) },
 				freeze: true, freeze_message: __('Creating Material Request…'),
 				callback: (r) => {
-					if (r.message) {
-						frappe.msgprint({
-							title: __('Requisition Created'),
-							message: __('Material Request <a href="/app/material-request/{0}" target="_blank">{0}</a> created', [r.message]),
-							indicator: 'green',
-						});
-					}
+					if (r.message) frappe.set_route('Form', 'Material Request', r.message);
 				},
 			})
 		);
@@ -1318,12 +1296,8 @@ ${truck_blocks}
 				freeze: true, freeze_message: __('Creating Material Request…'),
 				callback: (r) => {
 					if (r.message) {
-						frappe.msgprint({
-							title: __('Requisition Created'),
-							message: __('Material Request <a href="/app/material-request/{0}" target="_blank">{0}</a> created', [r.message]),
-							indicator: 'green',
-						});
 						this._save_snapshot();
+						frappe.set_route('Form', 'Material Request', r.message);
 					}
 				},
 			})

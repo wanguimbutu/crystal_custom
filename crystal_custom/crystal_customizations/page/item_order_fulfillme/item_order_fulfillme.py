@@ -106,7 +106,6 @@ def get_truck_fulfillment_data():
         WHERE so.docstatus IN (0, 1)
           AND so.workflow_state IN %(wf)s
           AND so.status NOT IN ('Completed', 'Closed')
-          AND IFNULL(so.custom_truck_closed, 0) != 1
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number, so.name, soi.item_code
@@ -229,7 +228,6 @@ def get_truck_customer_data():
         WHERE so.docstatus IN (0, 1)
           AND so.workflow_state IN %(wf)s
           AND so.status NOT IN ('Completed', 'Closed')
-          AND IFNULL(so.custom_truck_closed, 0) != 1
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number, so.name, soi.item_code
