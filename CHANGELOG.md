@@ -1,3 +1,10 @@
+# [1.24.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.23.0...v1.24.0) (2026-06-18)
+
+
+### Features
+
+* pre-fulfilment toggle in Sales Order Manager page ([29538d3](https://github.com/wanguimbutu/crystal_custom/commit/29538d36b087cda4f84d036c7d1bf6009a2ab94c))
+
 # [1.23.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.22.0...v1.23.0) (2026-06-18)
 
 
