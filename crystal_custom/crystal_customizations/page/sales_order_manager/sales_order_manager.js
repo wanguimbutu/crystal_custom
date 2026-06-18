@@ -97,7 +97,7 @@ class SalesOrderManager {
 					'name', 'customer', 'customer_name', 'transaction_date',
 					'grand_total', 'custom_delivery_region', 'owner',
 					'workflow_state', 'custom_finance_rejection_note',
-					'custom_paint_notes',
+					'custom_paint_notes', 'custom_is_pre_fulfillment',
 				],
 				filters,
 				order_by: 'transaction_date desc',
@@ -197,6 +197,7 @@ class SalesOrderManager {
 						<th>Sales Person</th>
 						<th class="som-th-r">Amount</th>
 						<th>Status</th>
+						<th>Pre-Fulfilment</th>
 					</tr>
 				</thead>
 				<tbody>`;
@@ -206,9 +207,10 @@ class SalesOrderManager {
 			const has_paint   = !!o.custom_paint_notes;
 			const checked     = this.selected.has(o.name);
 			const expanded    = this.expanded.has(o.name);
+			const is_pf       = o.custom_is_pre_fulfillment == 1;
 
 			html += `
-				<tr class="som-row ${rejected ? 'som-row-rejected' : ''} ${checked ? 'som-row-selected' : ''}"
+				<tr class="som-row ${rejected ? 'som-row-rejected' : ''} ${checked ? 'som-row-selected' : ''}${is_pf ? ' som-row-pf' : ''}"
 				    data-order="${o.name}">
 					<td class="som-td-chk">
 						<input type="checkbox" class="som-chk" data-order="${o.name}"
@@ -240,6 +242,14 @@ class SalesOrderManager {
 							   <div class="som-rejection-preview">${frappe.utils.escape_html((o.custom_finance_rejection_note || '').slice(0, 80))}${(o.custom_finance_rejection_note || '').length > 80 ? '…' : ''}</div>`
 							: '<span class="som-badge som-badge-ready">Ready</span>'}
 					</td>
+					<td style="text-align:center;">
+						<button class="btn btn-xs som-pf-btn"
+						        data-order="${o.name}" data-pf="${is_pf ? 1 : 0}"
+						        title="${is_pf ? 'Pre-Fulfilment — click to remove' : 'Mark as Pre-Fulfilment'}"
+						        style="${is_pf ? 'background:#0d9488;color:#fff;border-color:#0d9488;' : 'background:#f1f5f9;color:#64748b;border-color:#cbd5e1;'}">
+							${is_pf ? '&#128205; On' : 'Off'}
+						</button>
+					</td>
 				</tr>`;
 
 			if (expanded) {
@@ -248,7 +258,7 @@ class SalesOrderManager {
 				const paint_notes     = o.custom_paint_notes || '';
 				html += `
 				<tr class="som-items-row" data-order="${o.name}">
-					<td colspan="9">
+					<td colspan="10">
 						<div class="som-items-wrap">
 							${rejection_note ? `
 							<div class="som-rejection-alert">
@@ -533,6 +543,38 @@ class SalesOrderManager {
 			const $wrap = $(`#som-items-${order_name}`);
 			if ($wrap.length) $wrap.html(self._render_items(order_name));
 		});
+
+		// Pre-Fulfilment toggle
+		this.$wrap.off('click.som-pf').on('click.som-pf', '.som-pf-btn', function () {
+			const $btn    = $(this);
+			const order   = $btn.data('order');
+			const cur_pf  = parseInt($btn.data('pf'), 10);
+			const new_val = cur_pf ? 0 : 1;
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_pre_fulfillment',
+				args: { order_name: order, value: new_val },
+				callback: () => {
+					const o = self.orders.find(x => x.name === order);
+					if (o) o.custom_is_pre_fulfillment = new_val;
+					$btn.data('pf', new_val);
+					if (new_val) {
+						$btn.css({ background: '#0d9488', color: '#fff', 'border-color': '#0d9488' })
+						    .attr('title', 'Pre-Fulfilment — click to remove')
+						    .html('&#128205; On');
+						$btn.closest('tr').addClass('som-row-pf');
+					} else {
+						$btn.css({ background: '#f1f5f9', color: '#64748b', 'border-color': '#cbd5e1' })
+						    .attr('title', 'Mark as Pre-Fulfilment')
+						    .html('Off');
+						$btn.closest('tr').removeClass('som-row-pf');
+					}
+					frappe.show_alert({
+						message: new_val ? __('Marked as Pre-Fulfilment') : __('Pre-Fulfilment removed'),
+						indicator: new_val ? 'green' : 'blue',
+					});
+				},
+			});
+		});
 	}
 
 	// ── Submit ────────────────────────────────────────────────────────────────
@@ -744,6 +786,8 @@ Add a note explaining what has changed — Finance will see this alongside the o
 		.som-row:hover td { background: #f8fafc; }
 		.som-row-selected td { background: #eff6ff !important; }
 		.som-row-rejected td { background: #fff5f5; border-left: 3px solid #ef4444 !important; }
+		.som-row-pf td { background: #f0fdfa !important; }
+		.som-row-pf:hover td { background: #ccfbf1 !important; }
 
 		.som-chk { width:16px; height:16px; accent-color:#3b82f6; cursor:pointer; }
 		.som-link { color:#3b82f6; font-weight:600; text-decoration:none; }
