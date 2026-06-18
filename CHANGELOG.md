@@ -1,3 +1,10 @@
+# [1.23.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.22.0...v1.23.0) (2026-06-18)
+
+
+### Features
+
+* custom_is_pre_fulfillment flag on Sales Order ([909fe73](https://github.com/wanguimbutu/crystal_custom/commit/909fe7375bc9f1975b95c09e98d010d110feec85))
+
 # [1.22.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.21.0...v1.22.0) (2026-06-18)
 
 
