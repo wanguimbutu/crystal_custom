@@ -152,6 +152,19 @@
   },
   {
     "doctype": "Custom Field",
+    "dt": "Sales Order",
+    "name": "Sales Order-custom_is_pre_fulfillment",
+    "fieldname": "custom_is_pre_fulfillment",
+    "label": "Pre-Fulfilment Order",
+    "fieldtype": "Check",
+    "insert_after": "custom_truck_closed",
+    "default": 0,
+    "description": "Tick to mark this order as pre-fulfilment (e.g. Nairobi). It will appear in Order Fulfilment before a truck is assigned.",
+    "allow_on_submit": 1,
+    "permlevel": 0
+  },
+  {
+    "doctype": "Custom Field",
     "dt": "Delivery Note",
     "name": "Delivery Note-custom_delivery_region",
     "fieldname": "custom_delivery_region",

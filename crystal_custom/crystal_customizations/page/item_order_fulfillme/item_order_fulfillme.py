@@ -285,16 +285,14 @@ def get_truck_customer_data():
 
 
 @frappe.whitelist()
-def get_region_fulfillment_data(regions_json):
+def get_region_fulfillment_data(regions_json=None):
     """
-    Return items for orders that have NO truck assigned yet, filtered by region.
-    Returns the same structure as get_truck_fulfillment_data so the frontend
-    can render them as virtual "pre-fulfillment" truck cards.
-    Each virtual truck_number = '📍 <REGION>'.
+    Return items for orders marked as Pre-Fulfilment (custom_is_pre_fulfillment=1)
+    that have no truck assigned yet. Grouped by delivery region as virtual truck cards.
+    The regions_json parameter is kept for backwards compatibility but is no longer
+    used — the custom_is_pre_fulfillment flag on the Sales Order is the source of truth.
     """
-    import json
-    regions = json.loads(regions_json) if isinstance(regions_json, str) else regions_json
-    if not regions:
+    if not frappe.db.has_column('Sales Order', 'custom_is_pre_fulfillment'):
         return {'trucks': [], 'stock': {}}
 
     ACTIVE_WORKFLOW = ('Pending Finance Approval',
@@ -323,10 +321,10 @@ def get_region_fulfillment_data(regions_json):
           AND so.workflow_state IN %(wf)s
           AND so.status NOT IN ('Completed', 'Closed')
           AND (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
-          AND so.custom_delivery_region IN %(regions)s
+          AND IFNULL(so.custom_is_pre_fulfillment, 0) = 1
         GROUP BY so.custom_delivery_region, so.name, soi.item_code
         ORDER BY so.custom_delivery_region, soi.item_code
-    """, {'wf': ACTIVE_WORKFLOW, 'regions': tuple(regions)}, as_dict=1)
+    """, {'wf': ACTIVE_WORKFLOW}, as_dict=1)
 
     if not rows:
         return {'trucks': [], 'stock': {}}

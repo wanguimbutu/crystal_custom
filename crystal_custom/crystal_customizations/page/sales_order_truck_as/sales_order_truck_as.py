@@ -6,6 +6,11 @@ def set_truck_number(order_name, truck_number):
     return True
 
 @frappe.whitelist()
+def set_pre_fulfillment(order_name, value=1):
+    frappe.db.set_value('Sales Order', order_name, 'custom_is_pre_fulfillment', int(value))
+    return True
+
+@frappe.whitelist()
 def set_truck_closed(order_name, value=1):
     frappe.db.set_value('Sales Order', order_name, 'custom_truck_closed', int(value))
     return True

@@ -166,7 +166,7 @@ class TruckAssignmentManager {
 			'name', 'customer', 'customer_name', 'transaction_date',
 			'grand_total', 'custom_delivery_region', 'owner', 'custom_truck_number',
 			'total_net_weight', 'custom_call_not_picked', 'custom_call_notes',
-			'workflow_state', 'docstatus',
+			'workflow_state', 'docstatus', 'custom_is_pre_fulfillment',
 		];
 
 		const base_filters = [
@@ -401,13 +401,14 @@ class TruckAssignmentManager {
 			<thead><tr>
 				<th width="3%"></th>
 				<th width="11%">Sales Order</th>
-				<th width="14%">Customer</th>
-				<th width="11%">Location</th>
-				<th width="8%">Region</th>
-				<th width="8%">Value</th>
+				<th width="12%">Customer</th>
+				<th width="9%">Location</th>
+				<th width="7%">Region</th>
+				<th width="7%">Value</th>
 				<th width="6%">Weight</th>
-				<th width="9%">Status</th>
-				<th width="13%">Assign Truck</th>
+				<th width="8%">Status</th>
+				<th width="12%">Assign Truck</th>
+				<th width="7%">Pre-Fulfilment</th>
 			</tr></thead>
 			<tbody>`;
 
@@ -417,7 +418,7 @@ class TruckAssignmentManager {
 			const grp_val = grp.reduce((s, o) => s + (o.grand_total || 0), 0);
 
 			html += `<tr class="ta-group-row">
-				<td colspan="9">
+				<td colspan="10">
 					<strong>${label}</strong>
 					<span class="ta-group-meta">${grp.length} order${grp.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${format_currency(grp_val)}</span>
 				</td>
@@ -426,8 +427,9 @@ class TruckAssignmentManager {
 			grp.forEach(o => {
 				const not_picked = o.custom_call_not_picked === 1;
 				const checked    = this.selected_orders.has(o.name);
+				const is_pf      = o.custom_is_pre_fulfillment == 1;
 				html += `
-				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${checked ? ' ta-row-selected' : ''}" data-order="${o.name}">
+				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
 					<td class="ta-td-chk">
 						<input type="checkbox" class="ta-order-chk" data-order="${o.name}" ${checked ? 'checked' : ''}>
 					</td>
@@ -451,6 +453,14 @@ class TruckAssignmentManager {
 							   placeholder="Truck number…"
 							   data-order="${o.name}"
 							   value="${frappe.utils.escape_html(o.custom_truck_number || '')}">
+					</td>
+					<td style="text-align:center;">
+						<button class="btn btn-xs ta-pf-btn"
+						        data-order="${o.name}" data-pf="${is_pf ? 1 : 0}"
+						        title="${is_pf ? 'Pre-Fulfilment — click to remove' : 'Mark as Pre-Fulfilment'}"
+						        style="${is_pf ? 'background:#0d9488;color:#fff;border-color:#0d9488;' : 'background:#f1f5f9;color:#64748b;border-color:#cbd5e1;'}">
+							${is_pf ? '&#128205; On' : 'Off'}
+						</button>
 					</td>
 				</tr>`;
 			});
@@ -751,6 +761,37 @@ class TruckAssignmentManager {
 
 		this.container.find('.btn-edit-closed-truck').off('click').on('click', function () {
 			self.edit_closed_truck(parseInt($(this).data('idx'), 10));
+		});
+
+		this.container.find('.ta-pf-btn').off('click').on('click', function () {
+			const $btn    = $(this);
+			const order   = $btn.data('order');
+			const cur_pf  = parseInt($btn.data('pf'), 10);
+			const new_val = cur_pf ? 0 : 1;
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_pre_fulfillment',
+				args: { order_name: order, value: new_val },
+				callback: () => {
+					const o = self.orders.find(x => x.name === order);
+					if (o) o.custom_is_pre_fulfillment = new_val;
+					$btn.data('pf', new_val);
+					if (new_val) {
+						$btn.css({ background: '#0d9488', color: '#fff', 'border-color': '#0d9488' })
+						    .attr('title', 'Pre-Fulfilment — click to remove')
+						    .html('&#128205; On');
+						$btn.closest('tr').addClass('ta-row-pf');
+					} else {
+						$btn.css({ background: '#f1f5f9', color: '#64748b', 'border-color': '#cbd5e1' })
+						    .attr('title', 'Mark as Pre-Fulfilment')
+						    .html('Off');
+						$btn.closest('tr').removeClass('ta-row-pf');
+					}
+					frappe.show_alert({
+						message: new_val ? __('Marked as Pre-Fulfilment') : __('Pre-Fulfilment removed'),
+						indicator: new_val ? 'green' : 'blue',
+					});
+				},
+			});
 		});
 	}
 
@@ -1338,6 +1379,8 @@ ${driver_cols}
 		.ta-row td { padding: 10px !important; vertical-align: middle !important; font-size: 13px; }
 		.ta-row:hover { background: #f8fafc !important; }
 		.ta-row-warn { border-left: 3px solid #f59e0b !important; }
+		.ta-row-pf td { background: #f0fdfa !important; }
+		.ta-row-pf:hover td { background: #ccfbf1 !important; }
 		.ta-amt { text-align: right; font-family: monospace; }
 		.ta-warn-badge {
 			display: inline-block;

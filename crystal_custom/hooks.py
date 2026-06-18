@@ -24,6 +24,7 @@ fixtures = [
                 "custom_truck_section",
                 "custom_truck_number",
                 "custom_truck_closed",
+                "custom_is_pre_fulfillment",
             ]],
         ],
     },

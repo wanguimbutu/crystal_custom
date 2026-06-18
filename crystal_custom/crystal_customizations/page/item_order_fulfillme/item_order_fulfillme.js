@@ -20,7 +20,7 @@ class OrderFulfillmentManager {
 		this.selected_trucks   = new Set();
 		this.truck_snapshot    = this._load_snapshot();
 		this._closed_trucks    = this._load_closed_trucks();
-		this._prefill_regions  = this._load_prefill_regions();
+		// _prefill_regions replaced by custom_is_pre_fulfillment flag on SO
 		this.setup_page();
 		this._load_allocations_then_data();
 	}
@@ -81,23 +81,6 @@ class OrderFulfillmentManager {
 			},
 		});
 
-		this.page.add_field({
-			label: 'Pre-Fulfilment Region', fieldtype: 'Link', fieldname: 'prefill_region',
-			options: 'Delivery Region',
-			placeholder: 'Add…',
-			change: () => {
-				const v = this.page.fields_dict.prefill_region.get_value();
-				if (!v) return;
-				this._prefill_regions.add(v);
-				setTimeout(() => this.page.fields_dict.prefill_region.set_value(''), 50);
-				this._save_prefill_regions();
-				this._render_prefill_pills();
-				this.load_data();
-			},
-		});
-		this._prefill_pills_wrap = $('<div class="region-pills-wrap"></div>').appendTo(this.page.page_form);
-		setTimeout(() => this._render_prefill_pills(), 100);
-
 		this.page.set_primary_action('Create Requisition', () => this.create_requisition(), 'octicon octicon-plus');
 		this.page.add_button('Auto Allocate', () => this.auto_allocate());
 		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
@@ -115,14 +98,11 @@ class OrderFulfillmentManager {
 
 		const prev_stock = this.truck_data ? { ...this.truck_data.stock } : {};
 
-		const region_promise = this._prefill_regions.size
-			? new Promise(resolve => frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_region_fulfillment_data',
-				args: { regions_json: JSON.stringify([...this._prefill_regions]) },
-				callback: r => resolve(r.message || { trucks: [], stock: {} }),
-				error: () => resolve({ trucks: [], stock: {} }),
-			}))
-			: Promise.resolve({ trucks: [], stock: {} });
+		const region_promise = new Promise(resolve => frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_region_fulfillment_data',
+			callback: r => resolve(r.message || { trucks: [], stock: {} }),
+			error: () => resolve({ trucks: [], stock: {} }),
+		}));
 
 		Promise.all([
 			new Promise(resolve => frappe.call({
@@ -1355,34 +1335,6 @@ ${truck_blocks}
 		localStorage.setItem('crystal_tf_closed_trucks', JSON.stringify([...this._closed_trucks]));
 	}
 
-	_load_prefill_regions() {
-		try { return new Set(JSON.parse(localStorage.getItem('crystal_tf_prefill_regions') || '[]')); }
-		catch(e) { return new Set(); }
-	}
-
-	_save_prefill_regions() {
-		localStorage.setItem('crystal_tf_prefill_regions', JSON.stringify([...this._prefill_regions]));
-	}
-
-	_render_prefill_pills() {
-		if (!this._prefill_pills_wrap) return;
-		if (!this._prefill_regions.size) { this._prefill_pills_wrap.empty(); return; }
-		const self = this;
-		const html = Array.from(this._prefill_regions).map(r =>
-			`<span class="rg-pill" style="background:#ccfbf1;color:#0f766e;border-color:#5eead4;">${frappe.utils.escape_html(r)}<span class="pf-rm" data-rg="${frappe.utils.escape_html(r)}">&times;</span></span>`
-		).join('');
-		this._prefill_pills_wrap.html(`<style>
-			.rg-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:12px;border:1px solid #6ee7b7;background:#d1fae5;color:#065f46;margin:2px 4px 2px 0;cursor:default;}
-			.pf-rm{cursor:pointer;font-size:14px;line-height:1;opacity:.6;}
-			.pf-rm:hover{opacity:1;}
-		</style>${html}`);
-		this._prefill_pills_wrap.find('.pf-rm').on('click', function () {
-			self._prefill_regions.delete($(this).data('rg'));
-			self._save_prefill_regions();
-			self._render_prefill_pills();
-			self.load_data();
-		});
-	}
 
 	_load_snapshot() {
 		try { return JSON.parse(localStorage.getItem('crystal_truck_snapshot') || 'null') || {}; }
