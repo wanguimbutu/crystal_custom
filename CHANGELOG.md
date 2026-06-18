@@ -1,3 +1,10 @@
+# [1.20.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.19.1...v1.20.0) (2026-06-18)
+
+
+### Features
+
+* MR opens for editing; truck close is independent; closed trucks hidden from all tabs ([939002c](https://github.com/wanguimbutu/crystal_custom/commit/939002cf16f1bcf815a0e2dcd78b9577a66f0612))
+
 ## [1.19.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.19.0...v1.19.1) (2026-06-18)
 
 
