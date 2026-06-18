@@ -19,6 +19,7 @@ class OrderFulfillmentManager {
 		this._alloc_save_timer = null;
 		this.selected_trucks   = new Set();
 		this.truck_snapshot    = this._load_snapshot();
+		this._closed_trucks    = this._load_closed_trucks();
 		this.setup_page();
 		this._load_allocations_then_data();
 	}
@@ -125,6 +126,12 @@ class OrderFulfillmentManager {
 					indicator: 'orange',
 				}, 6);
 			}
+			// Prune closed trucks that no longer exist in the data
+			const live_truck_nums = new Set(this.truck_data.trucks.map(t => t.truck_number));
+			[...this._closed_trucks].forEach(tn => {
+				if (!live_truck_nums.has(tn)) this._closed_trucks.delete(tn);
+			});
+			this._save_closed_trucks();
 			this.render();
 		});
 	}
@@ -220,15 +227,32 @@ class OrderFulfillmentManager {
 			return (a.truck_number || '').localeCompare(b.truck_number || '');
 		});
 
+		const open_trucks   = trucks.filter(t => !this._closed_trucks.has(t.truck_number));
+		const closed_trucks = trucks.filter(t =>  this._closed_trucks.has(t.truck_number));
+
 		const item_summary = this._compute_item_summary();
 		const total_items  = Object.keys(item_summary).length;
 		const items_ok     = Object.values(item_summary).filter(s => s.total_short <= 0).length;
 		const items_short  = total_items - items_ok;
 		const new_count    = this._count_new_orders();
 
+		const closed_section = closed_trucks.length ? `
+		<div class="tf-section" style="margin-top:24px;">
+			<div class="tf-section-header" style="background:#f1f5f9;color:#475569;cursor:pointer;" id="tf-closed-toggle">
+				&#10003; Completed Trucks (${closed_trucks.length})
+				<span class="tf-header-note" style="color:#94a3b8;">Click to expand — trucks you marked as done</span>
+				<span style="float:right;font-size:12px;" id="tf-closed-caret">&#9654;</span>
+			</div>
+			<div id="tf-closed-trucks-grid" style="display:none;">
+				<div class="tf-trucks-grid" style="margin-top:12px;">
+					${closed_trucks.map(t => this._render_truck_card(t, item_summary, true)).join('')}
+				</div>
+			</div>
+		</div>` : '';
+
 		return `
 		<div class="tf-kpi-row">
-			${this._kpi('Active Trucks', trucks.length, '#8b5cf6')}
+			${this._kpi('Active Trucks', open_trucks.length, '#8b5cf6')}
 			${this._kpi('Items Needed', total_items, '#667eea')}
 			${this._kpi('Fully Stocked', items_ok, '#10b981')}
 			${this._kpi('With Shortages', items_short, items_short > 0 ? '#ef4444' : '#9ca3af')}
@@ -243,13 +267,16 @@ class OrderFulfillmentManager {
 		</div>
 		<div class="tf-section">
 			<div class="tf-section-header">
-				Truck Allocations
+				Active Trucks (${open_trucks.length})
 				<span class="tf-header-note">Allocate stock to trucks using the inputs in each truck card</span>
 			</div>
 			<div class="tf-trucks-grid" id="tf-trucks-grid">
-				${trucks.map(t => this._render_truck_card(t, item_summary)).join('')}
+				${open_trucks.length
+					? open_trucks.map(t => this._render_truck_card(t, item_summary, false)).join('')
+					: '<div class="tf-empty" style="padding:20px;">All trucks marked as complete.</div>'}
 			</div>
-		</div>`;
+		</div>
+		${closed_section}`;
 	}
 
 	_compute_item_summary() {
@@ -326,7 +353,7 @@ class OrderFulfillmentManager {
 		return html;
 	}
 
-	_render_truck_card(truck, item_summary) {
+	_render_truck_card(truck, item_summary, is_closed = false) {
 		const tn  = truck.truck_number;
 		const sid = this._sid(tn);
 
@@ -390,8 +417,8 @@ class OrderFulfillmentManager {
 		const truck_new_count = (truck.orders || []).filter(o => this._is_order_new(tn, o.name)).length;
 
 		return `
-		<div class="tf-truck-card">
-			<div class="tf-truck-head">
+		<div class="tf-truck-card" style="${is_closed ? 'opacity:0.75;' : ''}">
+			<div class="tf-truck-head" style="${is_closed ? 'background:#334155;' : ''}">
 				<div style="display:flex;align-items:center;gap:8px;">
 					<input type="checkbox" class="tf-truck-chk"
 					       data-truck="${frappe.utils.escape_html(tn)}"
@@ -409,8 +436,12 @@ class OrderFulfillmentManager {
 				</div>
 				<div style="display:flex;align-items:center;gap:6px;">
 					<button class="btn btn-xs btn-default tf-truck-mr-btn" data-truck="${frappe.utils.escape_html(tn)}" title="Create MR for this truck's shortages">&#128203; MR</button>
-					<span class="tf-status-badge" id="tf-status-${sid}" style="background:${status_color}">
-						${status_label}
+					${is_closed
+						? `<button class="btn btn-xs tf-truck-reopen-btn" data-truck="${frappe.utils.escape_html(tn)}" style="background:#fef9c3;color:#854d0e;border-color:#fde68a;" title="Reopen this truck">&#8635; Reopen</button>`
+						: `<button class="btn btn-xs tf-truck-close-btn" data-truck="${frappe.utils.escape_html(tn)}" style="background:#dcfce7;color:#166534;border-color:#86efac;" title="Mark truck as complete">&#10003; Done</button>`
+					}
+					<span class="tf-status-badge" id="tf-status-${sid}" style="background:${is_closed ? '#94a3b8' : status_color}">
+						${is_closed ? 'Completed' : status_label}
 					</span>
 				</div>
 			</div>
@@ -958,6 +989,33 @@ ${truck_blocks}
 			self._attach_events();
 		});
 
+		// Close (mark done) / Reopen truck
+		this.container.off('click.tf-close').on('click.tf-close', '.tf-truck-close-btn', function () {
+			const tn = $(this).data('truck');
+			self._closed_trucks.add(tn);
+			self._save_closed_trucks();
+			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
+			self._attach_events();
+			frappe.show_alert({ message: __('Truck {0} marked as complete', [tn]), indicator: 'green' });
+		});
+		this.container.off('click.tf-reopen').on('click.tf-reopen', '.tf-truck-reopen-btn', function () {
+			const tn = $(this).data('truck');
+			self._closed_trucks.delete(tn);
+			self._save_closed_trucks();
+			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
+			self._attach_events();
+			frappe.show_alert({ message: __('Truck {0} reopened'), indicator: 'blue' });
+		});
+
+		// Closed trucks toggle
+		this.container.off('click.tf-ctog').on('click.tf-ctog', '#tf-closed-toggle', function () {
+			const $grid = self.container.find('#tf-closed-trucks-grid');
+			const $caret = self.container.find('#tf-closed-caret');
+			const open = $grid.is(':visible');
+			$grid.slideToggle(150);
+			$caret.html(open ? '&#9654;' : '&#9660;');
+		});
+
 		// Summary tab: create MR button
 		this.container.off('click.tf-mr').on('click.tf-mr', '.btn-create-mr-summary', () => {
 			this._create_mr_from_summary();
@@ -1149,6 +1207,15 @@ ${truck_blocks}
 	}
 
 	// ── Snapshot (new-order tracking via localStorage) ────────────────────────
+
+	_load_closed_trucks() {
+		try { return new Set(JSON.parse(localStorage.getItem('crystal_tf_closed_trucks') || '[]')); }
+		catch(e) { return new Set(); }
+	}
+
+	_save_closed_trucks() {
+		localStorage.setItem('crystal_tf_closed_trucks', JSON.stringify([...this._closed_trucks]));
+	}
 
 	_load_snapshot() {
 		try { return JSON.parse(localStorage.getItem('crystal_truck_snapshot') || 'null') || {}; }
