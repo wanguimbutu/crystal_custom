@@ -411,7 +411,7 @@ class DeliveryNoteManager {
             if (this.filters.customer && order.customer !== this.filters.customer) return false;
             if (this.filters.regions && this.filters.regions.length > 0 &&
                 !this.filters.regions.includes(order.custom_delivery_region)) return false;
-            if (this.filters.truck && order.custom_truck_number !== this.filters.truck) return false;
+            if (this.filters.truck && !(order.custom_truck_number || '').toLowerCase().includes(this.filters.truck.toLowerCase())) return false;
             return true;
         });
     }
@@ -912,7 +912,7 @@ class DeliveryNoteManager {
                         if (new_order_names.has(i.parent)) agg[i.item_code].is_new = true;
                     });
                     const items = Object.values(agg).sort((a, b) => a.item_code.localeCompare(b.item_code));
-                    this._print_loading_sheet_for_truck(truck_num, order_names, items, new_order_names);
+                    this._print_loading_sheet_for_truck(truck_num, order_names, items, new_order_names, orders_map);
                 } else {
                     this._print_packing_list_for_truck(truck_num, order_names, raw_items, orders_map, new_order_names);
                 }
@@ -922,7 +922,7 @@ class DeliveryNoteManager {
         });
     }
 
-    _print_loading_sheet_for_truck(truck_num, order_names, items) {
+    _print_loading_sheet_for_truck(truck_num, order_names, items, new_order_names = new Set(), orders_map = {}) {
         const today      = frappe.datetime.str_to_user(frappe.datetime.get_today());
         const meta       = this.truck_meta[truck_num] || {};
         const total_qty    = items.reduce((s, i) => s + i.qty, 0);
@@ -979,6 +979,34 @@ ${has_new ? `<div style="margin-bottom:10px;padding:6px 10px;background:#f0fdf4;
     <td>${total_weight > 0 ? total_weight.toFixed(2) : '—'}</td><td></td>
   </tr></tfoot>
 </table>
+${(() => {
+    const custs = order_names
+        .slice().sort((a, b) => ((orders_map[a] || {}).customer_name || '').localeCompare((orders_map[b] || {}).customer_name || ''))
+        .map((n, idx) => {
+            const o = orders_map[n] || {};
+            const is_new = new_order_names.has(n);
+            return `<tr>
+                <td>${idx + 1}</td>
+                <td><strong>${frappe.utils.escape_html(o.customer_name || n)}${is_new ? ' (NEW)' : ''}</strong></td>
+                <td>${frappe.utils.escape_html(n)}</td>
+                <td>${frappe.utils.escape_html(o.custom_delivery_region || '—')}</td>
+            </tr>`;
+        }).join('');
+    return `<div style="margin-top:28px;">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;border-bottom:2px solid #000;padding-bottom:4px;">
+            Customers on this Truck (${order_names.length})
+        </div>
+        <table>
+            <thead><tr>
+                <th width="4%">#</th>
+                <th width="40%">Customer Name</th>
+                <th width="28%">Sales Order</th>
+                <th width="28%">Region</th>
+            </tr></thead>
+            <tbody>${custs}</tbody>
+        </table>
+    </div>`;
+})()}
 <p style="margin-top:24px;font-size:11px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
 </body></html>`);
         w.document.close();
@@ -1221,6 +1249,35 @@ ${customer_blocks}
     <td>${total_weight > 0 ? total_weight.toFixed(2) : '—'}</td><td></td>
   </tr></tfoot>
 </table>
+${(() => {
+    const custs = order_names
+        .slice().sort((a, b) => ((orders_map[a] || {}).customer_name || '').localeCompare((orders_map[b] || {}).customer_name || ''))
+        .map((n, idx) => {
+            const o = orders_map[n] || {};
+            return `<tr>
+                <td>${idx + 1}</td>
+                <td><strong>${frappe.utils.escape_html(o.customer_name || n)}</strong></td>
+                <td>${frappe.utils.escape_html(n)}</td>
+                <td>${frappe.utils.escape_html(o.custom_truck_number || '—')}</td>
+                <td>${frappe.utils.escape_html(o.custom_delivery_region || '—')}</td>
+            </tr>`;
+        }).join('');
+    return `<div style="margin-top:28px;">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;border-bottom:2px solid #000;padding-bottom:4px;">
+            Customers on this Loading Sheet (${order_names.length})
+        </div>
+        <table>
+            <thead><tr>
+                <th width="4%">#</th>
+                <th width="34%">Customer Name</th>
+                <th width="24%">Sales Order</th>
+                <th width="18%">Truck</th>
+                <th width="20%">Region</th>
+            </tr></thead>
+            <tbody>${custs}</tbody>
+        </table>
+    </div>`;
+})()}
 <p style="margin-top:24px;font-size:11px;color:#888;">Generated: ${today} &nbsp;·&nbsp; Crystal Customs</p>
 </body></html>`;
 
