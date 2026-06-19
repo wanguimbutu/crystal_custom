@@ -1,3 +1,10 @@
+## [1.25.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.0...v1.25.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* sales person filter and text search across all pages ([b20899b](https://github.com/wanguimbutu/crystal_custom/commit/b20899b62ee7ccfdc287a2f290d4cf9d957534ea))
+
 # [1.25.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.24.2...v1.25.0) (2026-06-19)
 
 
