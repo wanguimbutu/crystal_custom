@@ -139,8 +139,8 @@ class OrderFulfillmentManager {
 					indicator: 'orange',
 				}, 6);
 			}
-			// Prune closed trucks that no longer exist in the data (exclude virtual region buckets)
-			const live_truck_nums = new Set(this.truck_data.trucks.filter(t => !t.is_region_bucket).map(t => t.truck_number));
+			// Prune closed trucks (and closed region buckets) that no longer have live data
+			const live_truck_nums = new Set(this.truck_data.trucks.map(t => t.truck_number));
 			[...this._closed_trucks].forEach(tn => {
 				if (!live_truck_nums.has(tn)) this._closed_trucks.delete(tn);
 			});
@@ -266,15 +266,34 @@ class OrderFulfillmentManager {
 			</div>
 		</div>` : '';
 
-		const region_section = region_buckets.length ? `
+		const open_regions   = region_buckets.filter(t => !this._closed_trucks.has(t.truck_number));
+		const closed_regions = region_buckets.filter(t =>  this._closed_trucks.has(t.truck_number));
+
+		const closed_regions_section = closed_regions.length ? `
+		<div style="margin-top:16px;">
+			<div class="tf-section-header" style="background:#134e4a;color:#a7f3d0;cursor:pointer;" id="tf-closed-regions-toggle">
+				&#10003; Completed Pre-Fulfilment (${closed_regions.length})
+				<span style="float:right;font-size:12px;" id="tf-closed-regions-caret">&#9654;</span>
+			</div>
+			<div id="tf-closed-regions-grid" style="display:none;">
+				<div class="tf-trucks-grid" style="margin-top:12px;">
+					${closed_regions.map(t => this._render_region_bucket_card(t, item_summary, true)).join('')}
+				</div>
+			</div>
+		</div>` : '';
+
+		const region_section = (open_regions.length || closed_regions.length) ? `
 		<div class="tf-section" style="margin-bottom:24px;">
 			<div class="tf-section-header" style="background:#0f766e;">
-				&#128205; Pre-Fulfillment Regions (${region_buckets.length})
+				&#128205; Pre-Fulfilment Regions (${open_regions.length})
 				<span class="tf-header-note" style="color:#99f6e4;">Orders without a truck assignment yet — prepare stock for these regions</span>
 			</div>
 			<div class="tf-trucks-grid">
-				${region_buckets.map(t => this._render_truck_card(t, item_summary, false)).join('')}
+				${open_regions.length
+					? open_regions.map(t => this._render_region_bucket_card(t, item_summary, false)).join('')
+					: '<div class="tf-empty" style="padding:20px;">All pre-fulfilment regions marked as complete.</div>'}
 			</div>
+			${closed_regions_section}
 		</div>` : '';
 
 		return `
@@ -498,7 +517,7 @@ class OrderFulfillmentManager {
 		</div>`;
 	}
 
-	_render_region_bucket_card(truck, item_summary) {
+	_render_region_bucket_card(truck, item_summary, is_closed = false) {
 		const tn  = truck.truck_number;
 		const sid = this._sid(tn);
 		const region = truck.region_label || tn;
@@ -536,21 +555,25 @@ class OrderFulfillmentManager {
 		const status_color = fully_stocked ? '#10b981' : '#ef4444';
 
 		return `
-		<div class="tf-truck-card" style="border-color:#0d9488;">
-			<div class="tf-truck-head" style="background:#0f766e;">
+		<div class="tf-truck-card" style="border-color:#0d9488;${is_closed ? 'opacity:0.75;' : ''}">
+			<div class="tf-truck-head" style="background:${is_closed ? '#134e4a' : '#0f766e'};">
 				<div style="display:flex;align-items:center;gap:8px;">
 					<span style="font-size:18px;">&#128205;</span>
 					<div>
 						<span class="tf-truck-num">${frappe.utils.escape_html(region)}</span>
 						<span class="tf-truck-meta">
 							${truck.order_count} order${truck.order_count !== 1 ? 's' : ''} &nbsp;·&nbsp;
-							<em>Pre-fulfillment — no truck assigned yet</em>
+							<em>Pre-fulfilment — no truck assigned yet</em>
 						</span>
 					</div>
 				</div>
 				<div style="display:flex;align-items:center;gap:6px;">
 					<button class="btn btn-xs btn-default tf-truck-mr-btn" data-truck="${frappe.utils.escape_html(tn)}" title="Create MR for this region's shortages">&#128203; MR</button>
-					<span class="tf-status-badge" style="background:${status_color}">${status_label}</span>
+					${is_closed
+						? `<button class="btn btn-xs tf-region-reopen-btn" data-truck="${frappe.utils.escape_html(tn)}" style="background:#fef9c3;color:#854d0e;border-color:#fde68a;">&#8635; Reopen</button>`
+						: `<button class="btn btn-xs tf-region-close-btn" data-truck="${frappe.utils.escape_html(tn)}" style="background:#ccfbf1;color:#134e4a;border-color:#5eead4;">&#10003; Done</button>`
+					}
+					<span class="tf-status-badge" style="background:${is_closed ? '#94a3b8' : status_color}">${is_closed ? 'Completed' : status_label}</span>
 				</div>
 			</div>
 
@@ -1150,6 +1173,32 @@ ${truck_blocks}
 			$caret.html(open ? '&#9654;' : '&#9660;');
 		});
 
+		// Pre-fulfilment region Done / Reopen
+		this.container.off('click.tf-rclose').on('click.tf-rclose', '.tf-region-close-btn', function () {
+			const tn = $(this).data('truck');
+			self._closed_trucks.add(tn);
+			self._save_closed_trucks();
+			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
+			self._attach_events();
+			frappe.show_alert({ message: __('Pre-fulfilment region marked as complete'), indicator: 'green' });
+		});
+		this.container.off('click.tf-rreopen').on('click.tf-rreopen', '.tf-region-reopen-btn', function () {
+			const tn = $(this).data('truck');
+			self._closed_trucks.delete(tn);
+			self._save_closed_trucks();
+			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
+			self._attach_events();
+			frappe.show_alert({ message: __('Pre-fulfilment region reopened'), indicator: 'blue' });
+		});
+		// Closed pre-fulfilment regions toggle
+		this.container.off('click.tf-rtog').on('click.tf-rtog', '#tf-closed-regions-toggle', function () {
+			const $grid  = self.container.find('#tf-closed-regions-grid');
+			const $caret = self.container.find('#tf-closed-regions-caret');
+			const open = $grid.is(':visible');
+			$grid.slideToggle(150);
+			$caret.html(open ? '&#9654;' : '&#9660;');
+		});
+
 		// Summary tab: create MR button
 		this.container.off('click.tf-mr').on('click.tf-mr', '.btn-create-mr-summary', () => {
 			this._create_mr_from_summary();
@@ -1376,8 +1425,13 @@ ${truck_blocks}
 		const item_totals = {};
 		this.truck_data.trucks.filter(t => set.has(t.truck_number)).forEach(truck => {
 			truck.items.forEach(item => {
-				const alloc = (this.allocations[item.item_code] || {})[truck.truck_number] || 0;
-				const short = Math.max(0, item.required_qty - alloc);
+				// Use stock available to this truck (total stock minus what others are allocated).
+				// If nothing is allocated to anyone, this equals total stock — giving a true
+				// shortage based on what's actually needed vs what's in the warehouse.
+				const avail = truck.is_region_bucket
+					? (this.truck_data.stock[item.item_code] || {}).available_qty || 0
+					: this._get_available_for_truck(item.item_code, truck.truck_number);
+				const short = Math.max(0, item.required_qty - avail);
 				if (short <= 0) return;
 				if (!item_totals[item.item_code]) {
 					item_totals[item.item_code] = { item_code: item.item_code, item_name: item.item_name, shortage_qty: 0, uom: item.uom };
