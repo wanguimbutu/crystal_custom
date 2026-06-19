@@ -107,9 +107,11 @@ class SalesOrderManager {
 			if (region && o.custom_delivery_region !== region)     return false;
 			if (this.search_term) {
 				const q = this.search_term.toLowerCase();
-				const match = (o.name          || '').toLowerCase().includes(q) ||
-				              (o.customer_name  || '').toLowerCase().includes(q) ||
-				              (o.customer       || '').toLowerCase().includes(q);
+				const match =
+					(o.name          || '').toLowerCase().includes(q) ||
+					(o.customer_name || '').toLowerCase().includes(q) ||
+					(o.customer      || '').toLowerCase().includes(q) ||
+					(o.sales_persons || '').toLowerCase().includes(q);
 				if (!match) return false;
 			}
 			return true;

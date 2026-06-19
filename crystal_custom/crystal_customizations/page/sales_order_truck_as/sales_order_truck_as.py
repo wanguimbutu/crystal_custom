@@ -1,5 +1,91 @@
 import frappe
 
+
+@frappe.whitelist()
+def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json=None):
+    """
+    Return truck-assigned and unassigned orders for the Truck Assignment page.
+    SP filtering is done via SQL JOIN so it always works correctly.
+    Returns sales_persons per order so the search box can filter by SP name.
+    """
+    import json
+    sps = json.loads(sales_persons_json) if sales_persons_json else []
+
+    has_pf = frappe.db.has_column('Sales Order', 'custom_is_pre_fulfillment')
+    pf_expr = (
+        'IFNULL(so.custom_is_pre_fulfillment, 0) AS custom_is_pre_fulfillment'
+        if has_pf else '0 AS custom_is_pre_fulfillment'
+    )
+
+    WF = ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')
+
+    # Build optional SP join / where clause
+    sp_join  = ''
+    sp_where = ''
+    params   = {'wf': WF}
+    if sps:
+        sp_join  = 'INNER JOIN `tabSales Team` st ON st.parent = so.name AND st.parenttype = "Sales Order"'
+        sp_ph    = ', '.join([f'%(sp{i})s' for i in range(len(sps))])
+        sp_where = f'AND st.sales_person IN ({sp_ph})'
+        for i, sp in enumerate(sps):
+            params[f'sp{i}'] = sp
+
+    select_cols = f"""
+        so.name, so.customer, so.customer_name, so.transaction_date,
+        so.grand_total, so.custom_delivery_region, so.owner,
+        so.custom_truck_number, so.total_net_weight,
+        IFNULL(so.custom_call_not_picked, 0) AS custom_call_not_picked,
+        so.custom_call_notes,
+        so.workflow_state, so.docstatus,
+        {pf_expr},
+        (SELECT GROUP_CONCAT(DISTINCT st2.sales_person
+                             ORDER BY st2.sales_person SEPARATOR ', ')
+         FROM `tabSales Team` st2
+         WHERE st2.parent = so.name) AS sales_persons
+    """
+
+    base_where = f"""
+        WHERE so.docstatus IN (0, 1)
+          AND so.workflow_state IN %(wf)s
+          AND so.status NOT IN ('Completed', 'Closed')
+          AND IFNULL(so.custom_truck_closed, 0) != 1
+          {sp_where}
+    """
+
+    # Truck-assigned orders: no date filter — always visible once on a truck
+    assigned = frappe.db.sql(f"""
+        SELECT DISTINCT {select_cols}
+        FROM `tabSales Order` so {sp_join}
+        {base_where}
+          AND so.custom_truck_number IS NOT NULL
+          AND so.custom_truck_number != ''
+        ORDER BY so.transaction_date DESC
+        LIMIT 500
+    """, params, as_dict=1)
+
+    # Unassigned orders: apply date filter
+    up = dict(params)
+    date_where = ''
+    if from_date:
+        up['from_date'] = from_date
+        date_where += ' AND so.transaction_date >= %(from_date)s'
+    if to_date:
+        up['to_date'] = to_date
+        date_where += ' AND so.transaction_date <= %(to_date)s'
+
+    unassigned = frappe.db.sql(f"""
+        SELECT DISTINCT {select_cols}
+        FROM `tabSales Order` so {sp_join}
+        {base_where}
+          AND (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
+          {date_where}
+        ORDER BY so.transaction_date DESC
+        LIMIT 500
+    """, up, as_dict=1)
+
+    return {'assigned': [dict(r) for r in assigned], 'unassigned': [dict(r) for r in unassigned]}
+
+
 @frappe.whitelist()
 def set_truck_number(order_name, truck_number):
     frappe.db.set_value('Sales Order', order_name, 'custom_truck_number', truck_number or '')

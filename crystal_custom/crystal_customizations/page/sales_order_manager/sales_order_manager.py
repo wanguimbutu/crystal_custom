@@ -36,7 +36,11 @@ def get_orders(sales_persons_json=None):
             so.workflow_state,
             so.custom_finance_rejection_note,
             so.custom_paint_notes,
-            {pf_expr}
+            {pf_expr},
+            (SELECT GROUP_CONCAT(DISTINCT st2.sales_person
+                                 ORDER BY st2.sales_person SEPARATOR ', ')
+             FROM `tabSales Team` st2
+             WHERE st2.parent = so.name) AS sales_persons
         FROM `tabSales Order` so
         {sp_join}
         WHERE so.docstatus = 0
