@@ -20,6 +20,7 @@ class OrderFulfillmentManager {
 		this.selected_trucks   = new Set();
 		this.truck_snapshot    = this._load_snapshot();
 		this._closed_trucks    = this._load_closed_trucks();
+		this.trucks_subtab     = 'active';
 		// _prefill_regions replaced by custom_is_pre_fulfillment flag on SO
 		this.setup_page();
 		this._load_allocations_then_data();
@@ -205,37 +206,81 @@ class OrderFulfillmentManager {
 	}
 
 	_render_trucks_tab() {
-		let all_trucks = this.truck_data.trucks;
+		const all_trucks = this.truck_data.trucks;
 
+		// Search mode: flat results table showing which truck each order is on
 		if (this.search_term) {
-			const q = this.search_term.toLowerCase();
-			all_trucks = all_trucks.filter(t =>
-				(t.truck_number     || '').toLowerCase().includes(q) ||
-				(t.delivery_regions || '').toLowerCase().includes(q) ||
-				(t.orders || []).some(o =>
+			return this._render_truck_search_results(all_trucks);
+		}
+
+		return this._render_trucks_subtabs(all_trucks);
+	}
+
+	_render_truck_search_results(all_trucks) {
+		const q       = this.search_term.toLowerCase();
+		const matches = [];
+
+		all_trucks.forEach(truck => {
+			const tn        = truck.truck_number;
+			const is_closed = this._closed_trucks.has(tn);
+			const is_region = !!truck.is_region_bucket;
+			const status    = is_region ? 'Pre-Fulfilment' : (is_closed ? 'Dispatched' : 'Active');
+			const status_color = is_region ? '#0d9488' : (is_closed ? '#64748b' : '#8b5cf6');
+
+			(truck.orders || []).forEach(o => {
+				const hit =
+					(tn                || '').toLowerCase().includes(q) ||
 					(o.name            || '').toLowerCase().includes(q) ||
 					(o.customer_name   || '').toLowerCase().includes(q) ||
 					(o.delivery_region || '').toLowerCase().includes(q) ||
-					(o.sales_persons   || '').toLowerCase().includes(q)
-				) ||
-				(t.items || []).some(i =>
-					(i.item_code || '').toLowerCase().includes(q) ||
-					(i.item_name || '').toLowerCase().includes(q)
-				)
-			);
-		}
+					(o.sales_persons   || '').toLowerCase().includes(q);
+				if (hit) matches.push({ o, tn, is_region, status, status_color });
+			});
+		});
 
-		const region_buckets = all_trucks.filter(t => t.is_region_bucket);
-		let trucks = all_trucks.filter(t => !t.is_region_bucket);
-
-		if (!trucks.length && !region_buckets.length) {
+		if (!matches.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>${this.search_term ? 'No trucks match your search.' : 'No active trucks with assigned orders'}</strong>
-				${!this.search_term ? ' — assign orders to trucks in the Truck Assignment page first.' : ''}
+				<strong>No results for "${frappe.utils.escape_html(this.search_term)}"</strong>
+				— try an order number, customer name, or truck number.
 			</div>`;
 		}
 
-		// Shortages first, then alpha
+		const rows = matches.map(({ o, tn, is_region, status, status_color }) => `
+		<tr>
+			<td><a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${frappe.utils.escape_html(o.name)}</a></td>
+			<td>${frappe.utils.escape_html(o.customer_name || '')}</td>
+			<td><strong style="color:${is_region ? '#0d9488' : '#667eea'};">${frappe.utils.escape_html(tn)}</strong></td>
+			<td>${frappe.utils.escape_html(o.delivery_region || '')}</td>
+			<td><span class="tf-status-badge" style="background:${status_color};">${status}</span></td>
+		</tr>`).join('');
+
+		return `
+		<div style="margin-bottom:12px;color:#64748b;font-size:13px;">
+			${matches.length} result${matches.length !== 1 ? 's' : ''} for
+			<strong>"${frappe.utils.escape_html(this.search_term)}"</strong>
+		</div>
+		<table class="table table-bordered tf-table">
+			<thead><tr>
+				<th>Sales Order</th>
+				<th>Customer</th>
+				<th>Truck / Region</th>
+				<th>Delivery Region</th>
+				<th>Status</th>
+			</tr></thead>
+			<tbody>${rows}</tbody>
+		</table>`;
+	}
+
+	_render_trucks_subtabs(all_trucks) {
+		if (!all_trucks.length) {
+			return `<div class="alert alert-info" style="margin-top:20px;">
+				<strong>No active trucks with assigned orders</strong> — assign orders to trucks in the Truck Assignment page first.
+			</div>`;
+		}
+
+		const region_buckets = all_trucks.filter(t =>  t.is_region_bucket);
+		let   trucks         = all_trucks.filter(t => !t.is_region_bucket);
+
 		trucks = [...trucks].sort((a, b) => {
 			const a_short = a.items.length > 0 && this._truck_has_shortage(a);
 			const b_short = b.items.length > 0 && this._truck_has_shortage(b);
@@ -243,8 +288,10 @@ class OrderFulfillmentManager {
 			return (a.truck_number || '').localeCompare(b.truck_number || '');
 		});
 
-		const open_trucks   = trucks.filter(t => !this._closed_trucks.has(t.truck_number));
-		const closed_trucks = trucks.filter(t =>  this._closed_trucks.has(t.truck_number));
+		const open_trucks    = trucks.filter(t => !this._closed_trucks.has(t.truck_number));
+		const closed_trucks  = trucks.filter(t =>  this._closed_trucks.has(t.truck_number));
+		const open_regions   = region_buckets.filter(t => !this._closed_trucks.has(t.truck_number));
+		const closed_regions = region_buckets.filter(t =>  this._closed_trucks.has(t.truck_number));
 
 		const item_summary = this._compute_item_summary();
 		const total_items  = Object.keys(item_summary).length;
@@ -252,51 +299,11 @@ class OrderFulfillmentManager {
 		const items_short  = total_items - items_ok;
 		const new_count    = this._count_new_orders();
 
-		const closed_section = closed_trucks.length ? `
-		<div class="tf-section" style="margin-top:24px;">
-			<div class="tf-section-header" style="background:#f1f5f9;color:#475569;cursor:pointer;" id="tf-closed-toggle">
-				&#10003; Completed Trucks (${closed_trucks.length})
-				<span class="tf-header-note" style="color:#94a3b8;">Click to expand — trucks you marked as done</span>
-				<span style="float:right;font-size:12px;" id="tf-closed-caret">&#9654;</span>
-			</div>
-			<div id="tf-closed-trucks-grid" style="display:none;">
-				<div class="tf-trucks-grid" style="margin-top:12px;">
-					${closed_trucks.map(t => this._render_truck_card(t, item_summary, true)).join('')}
-				</div>
-			</div>
-		</div>` : '';
+		const active_count     = open_trucks.length + open_regions.length;
+		const dispatched_count = closed_trucks.length + closed_regions.length;
+		const is_active        = (this.trucks_subtab !== 'dispatched');
 
-		const open_regions   = region_buckets.filter(t => !this._closed_trucks.has(t.truck_number));
-		const closed_regions = region_buckets.filter(t =>  this._closed_trucks.has(t.truck_number));
-
-		const closed_regions_section = closed_regions.length ? `
-		<div style="margin-top:16px;">
-			<div class="tf-section-header" style="background:#134e4a;color:#a7f3d0;cursor:pointer;" id="tf-closed-regions-toggle">
-				&#10003; Completed Pre-Fulfilment (${closed_regions.length})
-				<span style="float:right;font-size:12px;" id="tf-closed-regions-caret">&#9654;</span>
-			</div>
-			<div id="tf-closed-regions-grid" style="display:none;">
-				<div class="tf-trucks-grid" style="margin-top:12px;">
-					${closed_regions.map(t => this._render_region_bucket_card(t, item_summary, true)).join('')}
-				</div>
-			</div>
-		</div>` : '';
-
-		const region_section = (open_regions.length || closed_regions.length) ? `
-		<div class="tf-section" style="margin-bottom:24px;">
-			<div class="tf-section-header" style="background:#0f766e;">
-				&#128205; Pre-Fulfilment Regions (${open_regions.length})
-				<span class="tf-header-note" style="color:#99f6e4;">Orders without a truck assignment yet — prepare stock for these regions</span>
-			</div>
-			<div class="tf-trucks-grid">
-				${open_regions.length
-					? open_regions.map(t => this._render_region_bucket_card(t, item_summary, false)).join('')
-					: '<div class="tf-empty" style="padding:20px;">All pre-fulfilment regions marked as complete.</div>'}
-			</div>
-			${closed_regions_section}
-		</div>` : '';
-
-		return `
+		const active_html = `
 		<div class="tf-kpi-row">
 			${this._kpi('Active Trucks', open_trucks.length, '#8b5cf6')}
 			${this._kpi('Items Needed', total_items, '#667eea')}
@@ -311,7 +318,16 @@ class OrderFulfillmentManager {
 			<button class="btn btn-sm btn-default tf-mark-reviewed-btn">&#10003; Mark All as Reviewed</button>
 			${new_count > 0 ? `<span class="tf-new-notice">${new_count} newly added order${new_count !== 1 ? 's' : ''} highlighted in green</span>` : ''}
 		</div>
-		${region_section}
+		${open_regions.length ? `
+		<div class="tf-section" style="margin-bottom:24px;">
+			<div class="tf-section-header" style="background:#0f766e;">
+				&#128205; Pre-Fulfilment Regions (${open_regions.length})
+				<span class="tf-header-note" style="color:#99f6e4;">Orders without a truck assignment yet — prepare stock for these regions</span>
+			</div>
+			<div class="tf-trucks-grid">
+				${open_regions.map(t => this._render_region_bucket_card(t, item_summary, false)).join('')}
+			</div>
+		</div>` : ''}
 		<div class="tf-section">
 			<div class="tf-section-header">
 				Active Trucks (${open_trucks.length})
@@ -320,10 +336,44 @@ class OrderFulfillmentManager {
 			<div class="tf-trucks-grid" id="tf-trucks-grid">
 				${open_trucks.length
 					? open_trucks.map(t => this._render_truck_card(t, item_summary, false)).join('')
-					: '<div class="tf-empty" style="padding:20px;">All trucks marked as complete.</div>'}
+					: '<div class="tf-empty" style="padding:20px;">All trucks marked as complete — check the Dispatched tab.</div>'}
 			</div>
+		</div>`;
+
+		const dispatched_html = `
+		${closed_regions.length ? `
+		<div class="tf-section" style="margin-bottom:24px;">
+			<div class="tf-section-header" style="background:#134e4a;color:#a7f3d0;border-bottom:none;">
+				&#128205; Completed Pre-Fulfilment Regions (${closed_regions.length})
+			</div>
+			<div class="tf-trucks-grid" style="margin-top:12px;">
+				${closed_regions.map(t => this._render_region_bucket_card(t, item_summary, true)).join('')}
+			</div>
+		</div>` : ''}
+		<div class="tf-section">
+			<div class="tf-section-header" style="background:#334155;color:#f1f5f9;border-bottom:none;">
+				&#128666; Dispatched Trucks (${closed_trucks.length})
+				<span class="tf-header-note" style="color:#94a3b8;">Trucks marked as done — reopen to move back to Active</span>
+			</div>
+			<div class="tf-trucks-grid" style="margin-top:12px;">
+				${closed_trucks.length
+					? closed_trucks.map(t => this._render_truck_card(t, item_summary, true)).join('')
+					: '<div class="tf-empty" style="padding:20px;">No dispatched trucks yet.</div>'}
+			</div>
+		</div>`;
+
+		return `
+		<div class="tf-subtabs">
+			<button class="tf-subtab-btn ${is_active ? 'active' : ''}" data-subtab="active">
+				Active
+				${active_count ? `<span class="tf-subtab-badge">${active_count}</span>` : ''}
+			</button>
+			<button class="tf-subtab-btn ${!is_active ? 'active' : ''}" data-subtab="dispatched">
+				Dispatched
+				${dispatched_count ? `<span class="tf-subtab-badge" style="background:#64748b;">${dispatched_count}</span>` : ''}
+			</button>
 		</div>
-		${closed_section}`;
+		${is_active ? active_html : dispatched_html}`;
 	}
 
 	_compute_item_summary() {
@@ -1057,6 +1107,13 @@ ${truck_blocks}
 			self.container.find(`#tf-${tab}-pane`).addClass('active');
 		});
 
+		// Trucks sub-tab switching (Active / Dispatched)
+		this.container.off('click.tf-stab').on('click.tf-stab', '.tf-subtab-btn', function () {
+			self.trucks_subtab = $(this).data('subtab');
+			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
+			self._attach_events();
+		});
+
 		// Allocation input
 		this.container.off('input.tf-alloc').on('input.tf-alloc', '.tf-alloc-input', function () {
 			const tn    = $(this).data('truck');
@@ -1164,14 +1221,6 @@ ${truck_blocks}
 			frappe.show_alert({ message: __('Truck {0} reopened'), indicator: 'blue' });
 		});
 
-		// Closed trucks toggle
-		this.container.off('click.tf-ctog').on('click.tf-ctog', '#tf-closed-toggle', function () {
-			const $grid = self.container.find('#tf-closed-trucks-grid');
-			const $caret = self.container.find('#tf-closed-caret');
-			const open = $grid.is(':visible');
-			$grid.slideToggle(150);
-			$caret.html(open ? '&#9654;' : '&#9660;');
-		});
 
 		// Pre-fulfilment region Done / Reopen
 		this.container.off('click.tf-rclose').on('click.tf-rclose', '.tf-region-close-btn', function () {
@@ -1189,14 +1238,6 @@ ${truck_blocks}
 			self.container.find('#tf-trucks-pane').html(self._render_trucks_tab());
 			self._attach_events();
 			frappe.show_alert({ message: __('Pre-fulfilment region reopened'), indicator: 'blue' });
-		});
-		// Closed pre-fulfilment regions toggle
-		this.container.off('click.tf-rtog').on('click.tf-rtog', '#tf-closed-regions-toggle', function () {
-			const $grid  = self.container.find('#tf-closed-regions-grid');
-			const $caret = self.container.find('#tf-closed-regions-caret');
-			const open = $grid.is(':visible');
-			$grid.slideToggle(150);
-			$caret.html(open ? '&#9654;' : '&#9660;');
 		});
 
 		// Summary tab: create MR button
@@ -1740,6 +1781,40 @@ ${truck_blocks}
 			background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
 		}
 		.tf-new-notice { font-size: 12px; color: #10b981; font-weight: 600; margin-left: 6px; }
+
+		/* Active / Dispatched sub-tabs */
+		.tf-subtabs {
+			display: flex;
+			gap: 4px;
+			border-bottom: 2px solid #e2e8f0;
+			margin-bottom: 20px;
+		}
+		.tf-subtab-btn {
+			background: none;
+			border: none;
+			border-bottom: 3px solid transparent;
+			margin-bottom: -2px;
+			padding: 8px 18px;
+			font-weight: 600;
+			font-size: 13px;
+			color: #6b7280;
+			cursor: pointer;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			outline: none;
+			transition: color .2s;
+		}
+		.tf-subtab-btn:hover { color: #8b5cf6; }
+		.tf-subtab-btn.active { color: #8b5cf6; border-bottom-color: #8b5cf6; }
+		.tf-subtab-badge {
+			background: #8b5cf6;
+			color: #fff;
+			border-radius: 10px;
+			padding: 1px 7px;
+			font-size: 11px;
+			font-weight: 700;
+		}
 		</style>`;
 	}
 }
