@@ -1,3 +1,10 @@
+## [1.24.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.24.1...v1.24.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* correct MR shortage calc + pre-fulfilment region Done/Reopen ([1ff7ccf](https://github.com/wanguimbutu/crystal_custom/commit/1ff7ccf5263b92e04b71893dbaa6bf5e369def7b))
+
 ## [1.24.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.24.0...v1.24.1) (2026-06-18)
 
 
