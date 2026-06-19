@@ -1,3 +1,10 @@
+## [1.25.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.2...v1.25.3) (2026-06-19)
+
+
+### Bug Fixes
+
+* MR for new orders skips items already covered by pending MRs ([9ad8f7a](https://github.com/wanguimbutu/crystal_custom/commit/9ad8f7a064a1f764298dd26c7dead7a26f24f9e8))
+
 ## [1.25.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.1...v1.25.2) (2026-06-19)
 
 
