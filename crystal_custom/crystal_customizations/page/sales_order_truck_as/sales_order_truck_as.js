@@ -31,7 +31,7 @@ class TruckAssignmentManager {
 
 		this.page.add_field({
 			label: 'From Date', fieldtype: 'Date', fieldname: 'from_date',
-			default: frappe.datetime.add_days(today, -2),
+			default: frappe.datetime.add_days(today, -30),
 			change: () => this.load_data(),
 		});
 		this.page.add_field({

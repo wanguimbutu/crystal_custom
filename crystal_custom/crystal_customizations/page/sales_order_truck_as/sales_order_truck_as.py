@@ -63,15 +63,17 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: apply date filter
+    # Unassigned orders: apply date filter only when no SP filter is active.
+    # When searching for a specific SP's orders, show all of them regardless of age.
     up = dict(params)
     date_where = ''
-    if from_date:
-        up['from_date'] = from_date
-        date_where += ' AND so.transaction_date >= %(from_date)s'
-    if to_date:
-        up['to_date'] = to_date
-        date_where += ' AND so.transaction_date <= %(to_date)s'
+    if not sps:
+        if from_date:
+            up['from_date'] = from_date
+            date_where += ' AND so.transaction_date >= %(from_date)s'
+        if to_date:
+            up['to_date'] = to_date
+            date_where += ' AND so.transaction_date <= %(to_date)s'
 
     unassigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
