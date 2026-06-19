@@ -2,12 +2,11 @@ import frappe
 
 
 @frappe.whitelist()
-def get_orders(sales_persons_json=None):
+def get_orders(sales_persons_json=None, from_date=None, to_date=None):
     """
-    Return draft Sales Orders at Proceed To Order / blank workflow state,
-    including custom_is_pre_fulfillment if the column exists.
-    Uses server-side frappe.db to avoid the field-permission check that
-    frappe.client.get_list applies to custom fields not yet in the meta cache.
+    Return draft Sales Orders at Proceed To Order / blank workflow state.
+    Date filtering is done server-side so the full result set is correct
+    regardless of how many total orders exist.
     """
     import json
     sps = json.loads(sales_persons_json) if sales_persons_json else []
@@ -19,10 +18,18 @@ def get_orders(sales_persons_json=None):
     sp_where = ''
     params   = {}
     if sps:
-        sp_join  = 'INNER JOIN `tabSales Team` st ON st.parent = so.name'
+        sp_join  = 'INNER JOIN `tabSales Team` st ON st.parent = so.name AND st.parenttype = "Sales Order"'
         sp_ph    = ', '.join([f'%(sp{i})s' for i in range(len(sps))])
         sp_where = f'AND st.sales_person IN ({sp_ph})'
         params   = {f'sp{i}': sp for i, sp in enumerate(sps)}
+
+    date_where = ''
+    if from_date:
+        params['from_date'] = from_date
+        date_where += ' AND so.transaction_date >= %(from_date)s'
+    if to_date:
+        params['to_date'] = to_date
+        date_where += ' AND so.transaction_date <= %(to_date)s'
 
     rows = frappe.db.sql(f"""
         SELECT DISTINCT
@@ -46,6 +53,7 @@ def get_orders(sales_persons_json=None):
         WHERE so.docstatus = 0
           AND (so.workflow_state IS NULL OR so.workflow_state = '' OR so.workflow_state = 'Proceed To Order')
           {sp_where}
+          {date_where}
         ORDER BY so.transaction_date DESC
         LIMIT 500
     """, params, as_dict=1)

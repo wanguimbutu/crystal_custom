@@ -30,13 +30,13 @@ class SalesOrderManager {
 
 		this.page.add_field({
 			label: 'From Date', fieldtype: 'Date', fieldname: 'from_date',
-			default: frappe.datetime.add_days(today, -7),
-			change: () => { this.current_page = 1; this.render(); },
+			default: frappe.datetime.add_days(today, -30),
+			change: () => { this.current_page = 1; this.load_data(); },
 		});
 		this.page.add_field({
 			label: 'To Date', fieldtype: 'Date', fieldname: 'to_date',
 			default: today,
-			change: () => { this.current_page = 1; this.render(); },
+			change: () => { this.current_page = 1; this.load_data(); },
 		});
 		this.page.add_field({
 			label: 'Region', fieldtype: 'Link', fieldname: 'delivery_region',
@@ -88,6 +88,8 @@ class SalesOrderManager {
 			method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.get_orders',
 			args: {
 				sales_persons_json: this._sps.size ? JSON.stringify([...this._sps]) : null,
+				from_date: this.page.fields_dict.from_date.get_value() || null,
+				to_date:   this.page.fields_dict.to_date.get_value()   || null,
 			},
 			callback: (r) => {
 				this.orders = r.message || [];
@@ -98,12 +100,8 @@ class SalesOrderManager {
 	}
 
 	filtered_orders() {
-		const from   = this.page.fields_dict.from_date.get_value();
-		const to     = this.page.fields_dict.to_date.get_value();
 		const region = this.page.fields_dict.delivery_region.get_value();
 		return this.orders.filter(o => {
-			if (from   && o.transaction_date < from)               return false;
-			if (to     && o.transaction_date > to)                 return false;
 			if (region && o.custom_delivery_region !== region)     return false;
 			if (this.search_term) {
 				const q = this.search_term.toLowerCase();
