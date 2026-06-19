@@ -1,3 +1,10 @@
+## [1.25.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.1...v1.25.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* server-side date filtering in Sales Order Manager ([2012c3d](https://github.com/wanguimbutu/crystal_custom/commit/2012c3dd4a1e96768003e13223d1c35368c10a83))
+
 ## [1.25.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.0...v1.25.1) (2026-06-19)
 
 
