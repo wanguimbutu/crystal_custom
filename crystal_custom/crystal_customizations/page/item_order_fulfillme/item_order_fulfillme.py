@@ -476,6 +476,34 @@ def get_allocations():
 
 
 @frappe.whitelist()
+def get_pending_mr_quantities(item_codes_json):
+    """
+    Return still-pending quantities per item across all active submitted MRs.
+    pending = qty - ordered_qty for each MR line that hasn't been fully fulfilled.
+    Used to avoid re-requesting items that are already in a pending MR.
+    """
+    import json
+    item_codes = json.loads(item_codes_json) if isinstance(item_codes_json, str) else item_codes_json
+    if not item_codes:
+        return {}
+
+    item_ph = ', '.join(['%s'] * len(item_codes))
+    rows = frappe.db.sql(f"""
+        SELECT
+            mri.item_code,
+            SUM(GREATEST(0, mri.qty - IFNULL(mri.ordered_qty, 0))) AS pending_qty
+        FROM `tabMaterial Request Item` mri
+        INNER JOIN `tabMaterial Request` mr ON mr.name = mri.parent
+        WHERE mr.docstatus = 1
+          AND mr.status NOT IN ('Stopped', 'Cancelled')
+          AND mri.item_code IN ({item_ph})
+        GROUP BY mri.item_code
+    """, item_codes, as_dict=1)
+
+    return {r.item_code: float(r.pending_qty) for r in rows}
+
+
+@frappe.whitelist()
 def create_requisition_from_shortage_items(shortage_items):
     """
     Create a draft Manufacture Material Request from a list of shortage items.

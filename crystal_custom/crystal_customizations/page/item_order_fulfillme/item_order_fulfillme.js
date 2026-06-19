@@ -1507,31 +1507,69 @@ ${truck_blocks}
 				(order.items || []).forEach(item => {
 					if (item.required_qty <= 0) return;
 					if (!item_totals[item.item_code]) {
-						item_totals[item.item_code] = { item_code: item.item_code, item_name: item.item_name, shortage_qty: 0, uom: item.uom };
+						item_totals[item.item_code] = {
+							item_code:   item.item_code,
+							item_name:   item.item_name,
+							shortage_qty: 0,
+							uom:         item.uom,
+						};
 					}
 					item_totals[item.item_code].shortage_qty += item.required_qty;
 				});
 			});
 		});
-		const shortage_items = Object.values(item_totals);
-		if (!shortage_items.length) {
+
+		if (!Object.keys(item_totals).length) {
 			frappe.msgprint(__('No items found in new orders — click "Mark All as Reviewed" first if this is unexpected.'));
 			return;
 		}
-		frappe.confirm(
-			__('Create Material Request for {0} item(s) from newly added orders?', [shortage_items.length]),
-			() => frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.create_requisition_from_shortage_items',
-				args: { shortage_items: JSON.stringify(shortage_items) },
-				freeze: true, freeze_message: __('Creating Material Request…'),
-				callback: (r) => {
-					if (r.message) {
-						this._save_snapshot();
-						frappe.set_route('Form', 'Material Request', r.message);
-					}
-				},
-			})
-		);
+
+		// Check existing pending MRs so we don't re-request what's already covered
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_pending_mr_quantities',
+			args: { item_codes_json: JSON.stringify(Object.keys(item_totals)) },
+			callback: (r) => {
+				const pending = r.message || {};
+
+				// Net qty = new-order requirement minus what's already pending in open MRs
+				Object.values(item_totals).forEach(item => {
+					const in_mr = pending[item.item_code] || 0;
+					item.already_in_mr = in_mr;
+					item.shortage_qty  = Math.max(0, item.shortage_qty - in_mr);
+				});
+
+				const shortage_items = Object.values(item_totals).filter(i => i.shortage_qty > 0);
+				const skipped_count  = Object.values(item_totals).filter(i => i.shortage_qty <= 0 && i.already_in_mr > 0).length;
+
+				if (!shortage_items.length) {
+					frappe.msgprint({
+						title:   __('Already Covered'),
+						message: __('All items from the new orders are already covered by existing pending Material Requests.'),
+						indicator: 'green',
+					});
+					return;
+				}
+
+				const skip_note = skipped_count
+					? `\n(${skipped_count} item${skipped_count !== 1 ? 's' : ''} skipped — already in a pending MR)`
+					: '';
+
+				frappe.confirm(
+					__('Create Material Request for {0} item(s) from newly added orders?', [shortage_items.length]) + skip_note,
+					() => frappe.call({
+						method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.create_requisition_from_shortage_items',
+						args: { shortage_items: JSON.stringify(shortage_items) },
+						freeze: true, freeze_message: __('Creating Material Request…'),
+						callback: (r) => {
+							if (r.message) {
+								this._save_snapshot();
+								frappe.set_route('Form', 'Material Request', r.message);
+							}
+						},
+					})
+				);
+			},
+		});
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
