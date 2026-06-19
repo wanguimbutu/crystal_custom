@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.24.2...v1.25.0) (2026-06-19)
+
+
+### Features
+
+* Active/Dispatched sub-tabs + search shows truck assignment in Order Fulfillment ([8763f3e](https://github.com/wanguimbutu/crystal_custom/commit/8763f3e433ea9e2b44839d904b4efd360368e0e1))
+
 ## [1.24.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.24.1...v1.24.2) (2026-06-19)
 
 
