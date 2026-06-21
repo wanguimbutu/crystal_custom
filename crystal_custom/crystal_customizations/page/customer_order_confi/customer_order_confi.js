@@ -1093,7 +1093,15 @@ class OrderConfirmationManager {
             method: 'crystal_custom.crystal_customizations.page.customer_order_confi.customer_order_confi.save_order_changes',
             args: { order_name, items_json: JSON.stringify(payload) },
             callback: r => {
-                if (!r.message || r.message.status !== 'ok') return;
+                if (!r.message || r.message.status !== 'ok') {
+                    $container.find('.oc-save-status').text('');
+                    frappe.msgprint({
+                        title: __('Save failed'),
+                        message: __('Could not save {0}. Please reload and try again.', [order_name]),
+                        indicator: 'red',
+                    });
+                    return;
+                }
                 const msg = r.message;
 
                 // Update local items list with server-assigned names for new rows
@@ -1116,7 +1124,22 @@ class OrderConfirmationManager {
                 setTimeout(() => $container.find('.oc-save-status').text(''), 3000);
                 frappe.show_alert({ message: __('Order {0} updated', [order_name]), indicator: 'green' });
             },
-            error: () => { $container.find('.oc-save-status').text('Save failed'); },
+            error: (err) => {
+                $container.find('.oc-save-status').text('');
+                // Extract the most useful error text from Frappe's error response
+                let detail = '';
+                try {
+                    const msgs = JSON.parse(err._server_messages || '[]');
+                    detail = msgs.map(m => {
+                        try { return JSON.parse(m).message; } catch(e) { return m; }
+                    }).join('\n');
+                } catch(e) { /* ignore */ }
+                frappe.msgprint({
+                    title: __('Save failed — {0}', [order_name]),
+                    message: detail || err.exc || __('An error occurred. Check browser console for details.'),
+                    indicator: 'red',
+                });
+            },
         });
     }
 

@@ -72,16 +72,20 @@ def save_order_changes(order_name, items_json):
                 or frappe.db.get_value('Warehouse', {'is_group': 0, 'disabled': 0}, 'name')
                 or ''
             )
+            uom = d.get('uom') or item.sales_uom or item.stock_uom or 'Nos'
             so.append('items', {
-                'item_code':       ic,
-                'item_name':       item.item_name,
-                'qty':             flt(d.get('qty', 1)),
-                'rate':            flt(d.get('rate', 0)),
-                'amount':          flt(d.get('qty', 1)) * flt(d.get('rate', 0)),
-                'uom':             d.get('uom') or item.sales_uom or item.stock_uom or 'Nos',
-                'weight_per_unit': flt(item.weight_per_unit),
-                'delivery_date':   so.delivery_date,
-                'warehouse':       wh,
+                'item_code':         ic,
+                'item_name':         item.item_name,
+                'description':       item.description or item.item_name,
+                'qty':               flt(d.get('qty', 1)),
+                'rate':              flt(d.get('rate', 0)),
+                'amount':            flt(d.get('qty', 1)) * flt(d.get('rate', 0)),
+                'uom':               uom,
+                'stock_uom':         item.stock_uom or uom,
+                'conversion_factor': 1.0,
+                'weight_per_unit':   flt(item.weight_per_unit),
+                'delivery_date':     so.delivery_date,
+                'warehouse':         wh,
             })
 
     so.save(ignore_permissions=True)
