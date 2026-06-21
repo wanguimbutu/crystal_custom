@@ -23,16 +23,13 @@ def get_orders(sales_persons_json=None, from_date=None, to_date=None):
         sp_where = f'AND st.sales_person IN ({sp_ph})'
         params   = {f'sp{i}': sp for i, sp in enumerate(sps)}
 
-    # Apply date filter only when no SP filter is active.
-    # When searching for a specific SP's orders, show all of them regardless of age.
     date_where = ''
-    if not sps:
-        if from_date:
-            params['from_date'] = from_date
-            date_where += ' AND so.transaction_date >= %(from_date)s'
-        if to_date:
-            params['to_date'] = to_date
-            date_where += ' AND so.transaction_date <= %(to_date)s'
+    if from_date:
+        params['from_date'] = from_date
+        date_where += ' AND so.transaction_date >= %(from_date)s'
+    if to_date:
+        params['to_date'] = to_date
+        date_where += ' AND so.transaction_date <= %(to_date)s'
 
     rows = frappe.db.sql(f"""
         SELECT DISTINCT
