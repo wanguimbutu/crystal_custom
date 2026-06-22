@@ -18,6 +18,7 @@ class TruckAssignmentManager {
 		this.selected_orders = new Set();
 		this.saved_meta = {};
 		this.closed_trucks = [];
+		this.trucks_tab = 'active';
 		this._sps = new Set();
 		this._regions = new Set();
 		this.setup_page();
@@ -264,7 +265,17 @@ class TruckAssignmentManager {
 				Trucks
 				<span class="ta-count-badge">${trucks_used} active${this.closed_trucks.length ? ` &nbsp;·&nbsp; ${this.closed_trucks.length} dispatched` : ''}</span>
 			</div>
-			${this._render_trucks(this.orders)}
+			<div class="ta-subtabs">
+				<button class="ta-subtab-btn ${this.trucks_tab === 'active' ? 'active' : ''}" data-tab="active">
+					Active
+					<span class="ta-subtab-badge">${trucks_used}</span>
+				</button>
+				<button class="ta-subtab-btn ${this.trucks_tab === 'dispatched' ? 'active' : ''}" data-tab="dispatched">
+					Dispatched
+					${this.closed_trucks.length ? `<span class="ta-subtab-badge" style="background:#64748b;">${this.closed_trucks.length}</span>` : ''}
+				</button>
+			</div>
+			${this.trucks_tab === 'active' ? this._render_trucks(this.orders) : this._render_dispatched_trucks()}
 		</div>` : ''}
 
 		<div class="ta-section">
@@ -522,20 +533,15 @@ class TruckAssignmentManager {
 		});
 
 		html += '</div>';
+		return html;
+	}
 
-		if (!this.closed_trucks.length) return html;
+	_render_dispatched_trucks() {
+		if (!this.closed_trucks.length) {
+			return `<div style="padding:24px;text-align:center;color:#94a3b8;">No dispatched trucks yet.</div>`;
+		}
 
-		// ── Dispatched trucks in a separate section below the active grid ────────
-		html += `<div style="margin-top:28px;">
-			<div style="font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.6px;
-			            margin-bottom:12px;padding:6px 12px;background:#f1f5f9;border-radius:6px;
-			            border-left:4px solid #64748b;">
-				&#128666; Dispatched Trucks (${this.closed_trucks.length})
-				<span style="font-size:11px;font-weight:400;color:#94a3b8;margin-left:8px;">
-					Closed &mdash; click Reopen to move orders back to active
-				</span>
-			</div>
-			<div class="ta-trucks-grid">`;
+		let html = '<div class="ta-trucks-grid">';
 
 		this.closed_trucks.forEach((ct, idx) => {
 			const closed_label = ct.closed_at
@@ -584,7 +590,7 @@ class TruckAssignmentManager {
 			</div>`;
 		});
 
-		html += '</div></div>'; // close ta-trucks-grid + dispatched section wrapper
+		html += '</div>';
 		return html;
 	}
 
@@ -600,6 +606,12 @@ class TruckAssignmentManager {
 			const checked    = $(this).is(':checked');
 			const unassigned = self.get_filtered_orders().filter(o => !o.custom_truck_number);
 			unassigned.forEach(o => checked ? self.selected_orders.add(o.name) : self.selected_orders.delete(o.name));
+			self.render_view();
+		});
+
+		// Trucks sub-tab switching (Active / Dispatched)
+		this.container.off('click.ta-stab').on('click.ta-stab', '.ta-subtab-btn', function () {
+			self.trucks_tab = $(this).data('tab');
 			self.render_view();
 		});
 
@@ -1290,6 +1302,40 @@ ${driver_cols}
 			padding: 1px 9px;
 			font-size: 12px;
 			font-weight: 600;
+		}
+
+		/* Active / Dispatched sub-tabs */
+		.ta-subtabs {
+			display: flex;
+			gap: 4px;
+			border-bottom: 2px solid #e2e8f0;
+			margin-bottom: 20px;
+		}
+		.ta-subtab-btn {
+			background: none;
+			border: none;
+			border-bottom: 3px solid transparent;
+			margin-bottom: -2px;
+			padding: 8px 18px;
+			font-weight: 600;
+			font-size: 13px;
+			color: #6b7280;
+			cursor: pointer;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			outline: none;
+			transition: color .2s;
+		}
+		.ta-subtab-btn:hover { color: #667eea; }
+		.ta-subtab-btn.active { color: #667eea; border-bottom-color: #667eea; }
+		.ta-subtab-badge {
+			background: #667eea;
+			color: #fff;
+			border-radius: 10px;
+			padding: 1px 7px;
+			font-size: 11px;
+			font-weight: 700;
 		}
 
 		/* Bulk assignment bar */

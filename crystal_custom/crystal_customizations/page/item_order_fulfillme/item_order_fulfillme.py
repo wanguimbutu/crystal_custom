@@ -78,8 +78,6 @@ def get_truck_fulfillment_data():
     matches truck assignment. Includes closed trucks (is_closed=True).
     Stock is always current (from tabBin at call time).
     """
-    # Mirror exactly the filters truck assignment uses for its active truck grid.
-    # Orders with custom_truck_closed=1 are dispatched and excluded here too.
     ACTIVE_WORKFLOW = ('Pending Finance Approval',
                        'Pending Customer Order Reconfirmation',
                        'Order Confirmed')
@@ -155,7 +153,6 @@ def get_truck_fulfillment_data():
         WHERE so.docstatus IN (0, 1)
           AND so.workflow_state IN %(wf)s
           AND so.status NOT IN ('Completed', 'Closed')
-          AND IFNULL(so.custom_truck_closed, 0) != 1
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
         GROUP BY so.custom_truck_number
