@@ -1082,11 +1082,11 @@ ${(() => {
   h2{margin:0 0 4px;}
   .meta{color:#000;margin-bottom:20px;font-size:11px;}
   table{border-collapse:collapse;width:100%;margin-bottom:4px;}
-  th,td{border:1px solid #000;padding:6px 9px;}
-  th{background:#fff;color:#000;text-align:left;font-size:11px;font-weight:bold;}
-  tfoot td{font-weight:700;border-top:2px solid #000;}
-  .customer-block{margin-bottom:28px;page-break-inside:avoid;}
-  .cust-header{border:1px solid #000;border-bottom:2px solid #000;padding:7px 10px;display:flex;justify-content:space-between;align-items:center;}
+  th,td{border:none;padding:3px 9px;}
+  th{background:#fff;color:#000;text-align:left;font-size:11px;font-weight:bold;border-bottom:1px solid #000;}
+  tfoot td{font-weight:700;border-top:1px solid #000;}
+  .customer-block{margin-bottom:24px;page-break-inside:avoid;}
+  .cust-header{border-bottom:1px solid #000;padding:7px 4px;display:flex;justify-content:space-between;align-items:center;}
   .cust-name{font-size:15px;font-weight:800;color:#000;}
   .cust-meta{font-size:11px;color:#000;}
   .sig-line{margin-top:6px;padding:8px 4px;font-size:11px;color:#000;border-top:1px dashed #000;}

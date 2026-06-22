@@ -21,7 +21,8 @@ class OrderFulfillmentManager {
 		this.truck_snapshot    = this._load_snapshot();
 		this._closed_trucks    = this._load_closed_trucks();
 		this.trucks_subtab     = 'active';
-		// _prefill_regions replaced by custom_is_pre_fulfillment flag on SO
+		this._stock_updated_at    = null;
+		this._stock_refresh_timer = null;
 		this.setup_page();
 		this._load_allocations_then_data();
 	}
@@ -91,7 +92,36 @@ class OrderFulfillmentManager {
 
 	// ── Data loading ──────────────────────────────────────────────────────────
 
+	_fmt_updated_at() {
+		if (!this._stock_updated_at) return '';
+		return 'Stock as of ' + this._stock_updated_at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	_silent_refresh_stock() {
+		if (!this.container.closest('body').length) {
+			clearInterval(this._stock_refresh_timer);
+			return;
+		}
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_truck_fulfillment_data',
+			callback: r => {
+				if (!r.message) return;
+				this.truck_data.stock = r.message.stock || {};
+				this._stock_updated_at = new Date();
+				this.container.find('.tf-stock-ts').text(this._fmt_updated_at());
+				if (this.active_tab === 'stock') {
+					this.container.find('#tf-stock-pane').html(this._render_stock_tab());
+					this._attach_events();
+				}
+			},
+		});
+	}
+
 	load_data() {
+		if (this._stock_refresh_timer) {
+			clearInterval(this._stock_refresh_timer);
+			this._stock_refresh_timer = null;
+		}
 		this.container.html(this._loading_html());
 
 		const from_date = this.page.fields_dict.from_date.get_value();
@@ -146,6 +176,8 @@ class OrderFulfillmentManager {
 				if (!live_truck_nums.has(tn)) this._closed_trucks.delete(tn);
 			});
 			this._save_closed_trucks();
+			this._stock_updated_at = new Date();
+			this._stock_refresh_timer = setInterval(() => this._silent_refresh_stock(), 90000);
 			this.render();
 		});
 	}
@@ -455,6 +487,18 @@ class OrderFulfillmentManager {
 		const tn  = truck.truck_number;
 		const sid = this._sid(tn);
 
+		// Build item → [customer names] map for this truck from customer_data
+		const cv_truck = (this.customer_data.trucks || []).find(t => t.truck_number === tn) || { orders: [] };
+		const item_customers = {};
+		cv_truck.orders.forEach(order => {
+			(order.items || []).forEach(item => {
+				if (item.required_qty > 0) {
+					if (!item_customers[item.item_code]) item_customers[item.item_code] = [];
+					item_customers[item.item_code].push(order.customer_name);
+				}
+			});
+		});
+
 		let fully_allocated = true;
 		let any_items = truck.items.length > 0;
 
@@ -469,6 +513,7 @@ class OrderFulfillmentManager {
 			if (short > 0) fully_allocated = false;
 
 			const isic = this._sid(ic);
+			const affected = short > 0 ? (item_customers[ic] || []) : [];
 
 			rows += `<tr>
 				<td><strong>${frappe.utils.escape_html(ic)}</strong></td>
@@ -483,7 +528,8 @@ class OrderFulfillmentManager {
 				</td>
 				<td class="tf-r tf-short-cell ${short > 0 ? 'tf-short' : 'tf-ok'}"
 				    id="tf-short-${sid}-${isic}">
-					${short > 0 ? `<strong>${short.toFixed(2)}</strong>` : '—'}
+					${short > 0 ? `<strong>${short.toFixed(2)}</strong>
+						${affected.length ? `<div class="tf-affected-custs">${affected.map(c => frappe.utils.escape_html(c)).join(', ')}</div>` : ''}` : '—'}
 				</td>
 			</tr>`;
 		});
@@ -864,19 +910,13 @@ ${truck_blocks}
 		}
 
 		return `
-		<div class="tf-kpi-row">
-			${this._kpi('Items', total_items, '#667eea')}
-			${this._kpi('Fully Stocked', items_ok, '#10b981')}
-			${this._kpi('With Shortages', items_short, items_short > 0 ? '#ef4444' : '#9ca3af')}
+		<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;font-size:12px;color:#6b7280;">
+			<span>${total_items} items &nbsp;·&nbsp; <strong style="color:#10b981;">${items_ok} stocked</strong>${items_short ? ` &nbsp;·&nbsp; <strong style="color:#ef4444;">${items_short} short</strong>` : ''}</span>
+			<span class="tf-stock-ts" style="margin-left:auto;">${this._fmt_updated_at()}</span>
+			<button class="btn btn-xs btn-default tf-refresh-stock-btn">&#8635; Refresh Stock</button>
 		</div>
-		<div class="tf-section">
-			<div class="tf-section-header">
-				Item Stock Overview
-				<span class="tf-header-note">Stock vs requirements across all active trucks</span>
-			</div>
-			<div id="tf-item-overview">
-				${this._render_item_overview(item_summary)}
-			</div>
+		<div id="tf-item-overview">
+			${this._render_item_overview(item_summary)}
 		</div>`;
 	}
 
@@ -910,114 +950,51 @@ ${truck_blocks}
 
 		const total_orders = trucks.reduce((s, t) => s + t.orders.length, 0);
 		let html = `
-		<div class="tf-kpi-row">
-			${this._kpi('Trucks', trucks.length, '#8b5cf6')}
-			${this._kpi('Customers', total_orders, '#667eea')}
-		</div>
-		<div style="display:flex;gap:8px;margin-bottom:14px;">
-			<button class="btn btn-sm btn-default tf-cv-print-btn">&#128438; Print Customer View</button>
-			<button class="btn btn-sm btn-default tf-cv-dl-btn">&#8659; Download Excel</button>
+		<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;font-size:12px;color:#6b7280;">
+			<span>${trucks.length} truck${trucks.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${total_orders} customer${total_orders !== 1 ? 's' : ''}</span>
+			<div style="margin-left:auto;display:flex;gap:8px;">
+				<button class="btn btn-xs btn-default tf-cv-print-btn">&#128438; Print</button>
+				<button class="btn btn-xs btn-default tf-cv-dl-btn">&#8659; Excel</button>
+			</div>
 		</div>`;
 
 		trucks.forEach(truck => {
 			const tn = truck.truck_number;
 
-			html += `
-			<div class="tf-section tf-cv-truck-section">
-				<div class="tf-section-header tf-cv-truck-header">
-					<span>&#128666; ${frappe.utils.escape_html(tn)}</span>
-					<span class="tf-cv-truck-sub">${truck.orders.length} customer${truck.orders.length !== 1 ? 's' : ''}</span>
-				</div>
-				<div class="tf-cv-customers">`;
-
-			truck.orders.forEach(order => {
-				const sid = this._sid(order.name);
-
-				const item_rows = order.items.map(item => {
-					const ic           = item.item_code;
-					const truck_alloc  = (this.allocations[ic] || {})[tn] || 0;
-					const in_stock     = stock[ic] || 0;
-					const covered      = Math.min(item.required_qty, truck_alloc);
-					const short        = Math.max(0, item.required_qty - truck_alloc);
-					const stock_short  = Math.max(0, item.required_qty - in_stock);
-					const pct_covered  = truck_alloc > 0
-						? Math.min(100, Math.round((covered / item.required_qty) * 100))
-						: 0;
-
-					return `<tr>
-						<td><strong>${frappe.utils.escape_html(ic)}</strong></td>
-						<td class="tf-item-name">${frappe.utils.escape_html(item.item_name)}</td>
-						<td class="tf-r">${item.required_qty.toFixed(2)} ${item.uom}</td>
-						<td class="tf-r ${stock_short > 0 ? 'tf-warn' : 'tf-ok'}">${in_stock.toFixed(2)}</td>
-						<td class="tf-r">${truck_alloc.toFixed(2)}</td>
-						<td class="tf-r ${short > 0 ? 'tf-short' : 'tf-ok'}">
-							${short > 0 ? `<strong>${short.toFixed(2)}</strong>` : '—'}
-						</td>
-						<td class="tf-r">
-							<div class="tf-cv-bar-wrap">
-								<div class="tf-cv-bar-fill" style="width:${pct_covered}%;background:${short > 0 ? '#f59e0b' : '#10b981'}"></div>
-							</div>
-							<span style="font-size:10px;color:#6b7280;">${pct_covered}%</span>
-						</td>
-					</tr>`;
-				}).join('');
-
+			const order_rows = truck.orders.map(order => {
 				const all_covered = order.items.every(i => {
 					const alloc = (this.allocations[i.item_code] || {})[tn] || 0;
 					return alloc >= i.required_qty;
 				});
+				const region = order.delivery_region || '';
+				return `<tr>
+					<td><a href="/app/sales-order/${order.name}" target="_blank" style="color:#667eea;font-weight:600;">${frappe.utils.escape_html(order.name)}</a></td>
+					<td>${frappe.utils.escape_html(order.customer_name)}</td>
+					<td>${region ? frappe.utils.escape_html(region) : '<span style="color:#cbd5e1;">—</span>'}</td>
+					<td style="text-align:right;">${format_currency(order.grand_total, null, 0)}</td>
+					<td style="text-align:center;">
+						<span class="tf-status-badge" style="background:${all_covered ? '#10b981' : '#f59e0b'};font-size:10px;">
+							${all_covered ? 'Covered' : 'Short'}
+						</span>
+					</td>
+				</tr>`;
+			}).join('');
 
-				html += `
-				<div class="tf-cv-customer-card">
-					<div class="tf-cv-cust-head">
-						<div>
-							<a href="/app/sales-order/${order.name}" target="_blank" class="tf-cv-order-link">
-								${frappe.utils.escape_html(order.name)}
-							</a>
-							<span class="tf-cv-cust-name">${frappe.utils.escape_html(order.customer_name)}</span>
-						</div>
-						<div style="display:flex;align-items:center;gap:10px;">
-							<span class="tf-cv-total">${format_currency(order.grand_total, null, 0)}</span>
-							<span class="tf-status-badge" style="background:${all_covered ? '#10b981' : '#f59e0b'};font-size:10px;">
-								${all_covered ? 'Covered' : 'Partial / Short'}
-							</span>
-						</div>
-					</div>
-					<table class="tf-card-table tf-cv-table">
-						<thead><tr>
-							<th>Item</th><th>Description</th>
-							<th class="tf-r">Required</th>
-							<th class="tf-r">In Stock</th>
-							<th class="tf-r">Truck Alloc.</th>
-							<th class="tf-r">Short</th>
-							<th class="tf-r">Coverage</th>
-						</tr></thead>
-						<tbody>${item_rows}</tbody>
-					</table>
-				</div>`;
-			});
-
-			html += `</div></div>`;
+			html += `
+			<div style="margin-bottom:20px;">
+				<div style="font-size:12px;font-weight:700;color:#475569;padding:5px 0 6px;border-bottom:2px solid #e2e8f0;margin-bottom:8px;display:flex;gap:8px;align-items:center;">
+					&#128666; ${frappe.utils.escape_html(tn)}
+					<span style="font-weight:400;color:#94a3b8;">${truck.orders.length} customer${truck.orders.length !== 1 ? 's' : ''}</span>
+				</div>
+				<table class="table tf-table" style="margin:0;">
+					<thead><tr>
+						<th>Order</th><th>Customer</th><th>Region</th>
+						<th style="text-align:right;">Value</th><th style="text-align:center;">Status</th>
+					</tr></thead>
+					<tbody>${order_rows}</tbody>
+				</table>
+			</div>`;
 		});
-
-		html += `<style>
-			.tf-cv-truck-section { margin-bottom: 24px; }
-			.tf-cv-truck-header { justify-content: space-between; }
-			.tf-cv-truck-sub { font-size: 12px; font-weight: 400; color: #6b7280; }
-			.tf-cv-customers { display: flex; flex-direction: column; gap: 14px; }
-			.tf-cv-customer-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
-			.tf-cv-cust-head {
-				display: flex; justify-content: space-between; align-items: center;
-				padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0;
-			}
-			.tf-cv-order-link { font-weight: 700; color: #667eea; text-decoration: none; font-size: 13px; }
-			.tf-cv-order-link:hover { color: #764ba2; text-decoration: underline; }
-			.tf-cv-cust-name { display: block; font-size: 12px; color: #6b7280; margin-top: 2px; }
-			.tf-cv-total { font-weight: 600; color: #374151; font-size: 13px; }
-			.tf-cv-table { margin: 0 !important; }
-			.tf-cv-bar-wrap { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; min-width: 60px; margin-bottom: 2px; }
-			.tf-cv-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
-		</style>`;
 
 		return html;
 	}
@@ -1025,65 +1002,58 @@ ${truck_blocks}
 	// ── Item Summary Tab ──────────────────────────────────────────────────────
 
 	_render_summary_tab() {
-		let data = this.summary_data;
+		const item_summary = this._compute_item_summary();
+		let items = Object.values(item_summary).sort((a, b) => b.total_short - a.total_short);
 
 		if (this.search_term) {
 			const q = this.search_term.toLowerCase();
-			data = data.filter(d =>
-				(d.item_code || '').toLowerCase().includes(q) ||
-				(d.item_name || '').toLowerCase().includes(q)
+			items = items.filter(s =>
+				(s.item_code || '').toLowerCase().includes(q) ||
+				(s.item_name || '').toLowerCase().includes(q)
 			);
 		}
 
-		if (!data.length) {
+		const short_items = items.filter(s => s.total_short > 0);
+
+		if (!items.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>${this.search_term ? 'No items match your search.' : 'No items found — no finance-approved orders in this date range.'}</strong>
+				<strong>${this.search_term ? 'No items match your search.' : 'No items — assign orders to active trucks first.'}</strong>
 			</div>`;
 		}
 
-		const total_items = data.length;
-		const short_items = data.filter(d => d.shortage > 0).length;
+		const display = short_items.length ? short_items : items;
+		const showing_all = !short_items.length;
 
 		let html = `
-		<div class="tf-kpi-row">
-			${this._kpi('Items',         total_items, '#667eea')}
-			${this._kpi('With Shortages', short_items, short_items > 0 ? '#ef4444' : '#9ca3af')}
+		<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;font-size:12px;color:#6b7280;">
+			<span>${items.length} item${items.length !== 1 ? 's' : ''} across active trucks${short_items.length ? ` &nbsp;·&nbsp; <strong style="color:#ef4444;">${short_items.length} short</strong>` : ' &nbsp;·&nbsp; <strong style="color:#10b981;">all stocked</strong>'}</span>
+			${short_items.length ? `<button class="btn btn-primary btn-xs btn-create-mr-summary" style="margin-left:auto;">Create MR for Shortages</button>` : ''}
 		</div>
-		<div class="tf-section">
-			<table class="table table-bordered tf-table">
-				<thead><tr>
-					<th>Item Code</th><th>Item Name</th>
-					<th class="tf-r">Required</th>
-					<th class="tf-r">Available</th>
-					<th class="tf-r">Shortage</th>
-					<th>Status</th>
-				</tr></thead><tbody>`;
+		<table class="table table-bordered tf-table">
+			<thead><tr>
+				<th>Item Code</th><th>Item Name</th>
+				<th class="tf-r">Needed</th>
+				<th class="tf-r">In Stock</th>
+				<th class="tf-r">Short</th>
+			</tr></thead><tbody>`;
 
-		data.forEach(row => {
-			const has_short = row.shortage > 0;
+		display.forEach(s => {
+			const has_short = s.total_short > 0;
 			html += `<tr>
-				<td><strong>${frappe.utils.escape_html(row.item_code)}</strong></td>
-				<td>${frappe.utils.escape_html(row.item_name)}</td>
-				<td class="tf-r">${row.required_qty.toFixed(2)}</td>
-				<td class="tf-r ${has_short ? 'tf-warn' : 'tf-ok'}">${row.available_qty.toFixed(2)}</td>
+				<td><strong>${frappe.utils.escape_html(s.item_code)}</strong></td>
+				<td>${frappe.utils.escape_html(s.item_name)}</td>
+				<td class="tf-r">${s.total_required.toFixed(2)} ${s.uom}</td>
+				<td class="tf-r ${has_short ? 'tf-warn' : 'tf-ok'}">${s.in_stock.toFixed(2)}</td>
 				<td class="tf-r ${has_short ? 'tf-short' : 'tf-ok'}">
-					${has_short ? `<strong>${row.shortage.toFixed(2)}</strong>` : '—'}
-				</td>
-				<td>
-					<span class="tf-status-badge" style="background:${has_short ? '#ef4444' : '#10b981'}">
-						${has_short ? 'Insufficient' : 'Adequate'}
-					</span>
+					${has_short ? `<strong>${s.total_short.toFixed(2)}</strong>` : '—'}
 				</td>
 			</tr>`;
 		});
 
-		html += `</tbody></table>
-		<div style="margin-top:12px;">
-			<button class="btn btn-primary btn-sm btn-create-mr-summary">
-				Create Material Request for All Shortages
-			</button>
-		</div>
-		</div>`;
+		html += `</tbody></table>`;
+		if (!showing_all && items.length > short_items.length) {
+			html += `<p style="font-size:11px;color:#94a3b8;margin-top:6px;">Showing ${short_items.length} short item${short_items.length !== 1 ? 's' : ''}. ${items.length - short_items.length} item${items.length - short_items.length !== 1 ? 's' : ''} fully stocked.</p>`;
+		}
 
 		return html;
 	}
@@ -1150,6 +1120,11 @@ ${truck_blocks}
 		this.container.off('change.tf-chk').on('change.tf-chk', '.tf-truck-chk', function () {
 			const tn = $(this).data('truck');
 			$(this).is(':checked') ? self.selected_trucks.add(tn) : self.selected_trucks.delete(tn);
+		});
+
+		// Refresh stock button (Stock Overview tab)
+		this.container.off('click.tf-rsb').on('click.tf-rsb', '.tf-refresh-stock-btn', function () {
+			self._silent_refresh_stock();
 		});
 
 		// Per-truck MR button
@@ -1768,6 +1743,7 @@ ${truck_blocks}
 		.tf-card-table tr:hover td { background: #f8fafc; }
 		.tf-item-name { color: #64748b; max-width: 160px; }
 		.tf-short-cell { font-family: monospace; }
+		.tf-affected-custs { font-family: sans-serif; font-size: 10px; font-weight: 400; color: #dc2626; opacity: 0.85; margin-top: 2px; white-space: normal; line-height: 1.3; }
 
 		/* Orders in truck */
 		.tf-orders-section { border-top: 1px solid #f1f5f9; }
