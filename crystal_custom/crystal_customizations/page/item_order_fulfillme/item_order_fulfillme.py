@@ -340,29 +340,44 @@ def get_region_fulfillment_data(regions_json=None):
     item_uoms  = {r.item_code: r.uom       for r in rows}
 
     from collections import defaultdict
-    buckets = defaultdict(lambda: {'orders': {}, 'items': defaultdict(float)})
+    buckets = defaultdict(lambda: {
+        'orders': {}, 'items': defaultdict(float),
+        'order_items': defaultdict(lambda: defaultdict(float)),
+    })
     for r in rows:
         region = r.delivery_region or 'Unknown'
-        buckets[region]['orders'][r.sales_order] = {
-            'name':            r.sales_order,
-            'customer_name':   r.customer_name or r.sales_order,
-            'paint_notes':     r.custom_paint_notes or '',
-            'delivery_region': r.custom_delivery_region or '',
-            'sales_persons':   r.sales_persons or '',
-        }
+        if r.sales_order not in buckets[region]['orders']:
+            buckets[region]['orders'][r.sales_order] = {
+                'name':            r.sales_order,
+                'customer_name':   r.customer_name or r.sales_order,
+                'paint_notes':     r.custom_paint_notes or '',
+                'delivery_region': r.custom_delivery_region or '',
+                'sales_persons':   r.sales_persons or '',
+            }
         if float(r.required_qty) > 0:
             buckets[region]['items'][r.item_code] += float(r.required_qty)
+            buckets[region]['order_items'][r.sales_order][r.item_code] = float(r.required_qty)
 
     trucks = []
     for region in sorted(buckets.keys()):
         data = buckets[region]
         virtual_truck_number = f'\U0001f4cd {region}'
+        orders_with_items = [
+            {
+                **order_data,
+                'items': [
+                    {'item_code': ic, 'required_qty': qty}
+                    for ic, qty in data['order_items'].get(on, {}).items()
+                ],
+            }
+            for on, order_data in data['orders'].items()
+        ]
         trucks.append({
             'truck_number':     virtual_truck_number,
             'is_region_bucket': True,
             'region_label':     region,
             'order_count':      len(data['orders']),
-            'orders':           list(data['orders'].values()),
+            'orders':           orders_with_items,
             'total_weight':     0,
             'total_value':      0,
             'delivery_regions': region,

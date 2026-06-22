@@ -618,13 +618,25 @@ class OrderFulfillmentManager {
 		const sid = this._sid(tn);
 		const region = truck.region_label || tn;
 
+		// Build item → [customer names] map from per-order item data
+		const item_customers = {};
+		(truck.orders || []).forEach(order => {
+			(order.items || []).forEach(item => {
+				if (item.required_qty > 0) {
+					if (!item_customers[item.item_code]) item_customers[item.item_code] = [];
+					item_customers[item.item_code].push(order.customer_name);
+				}
+			});
+		});
+
 		let fully_stocked = true;
 		let rows = '';
 		truck.items.forEach(item => {
-			const ic    = item.item_code;
-			const stock = (this.truck_data.stock[item.item_code] || {}).available_qty || 0;
-			const short = Math.max(0, item.required_qty - stock);
+			const ic       = item.item_code;
+			const stock    = (this.truck_data.stock[item.item_code] || {}).available_qty || 0;
+			const short    = Math.max(0, item.required_qty - stock);
 			if (short > 0) fully_stocked = false;
+			const affected = short > 0 ? (item_customers[ic] || []) : [];
 			const isic = this._sid(ic);
 			rows += `<tr>
 				<td><strong>${frappe.utils.escape_html(ic)}</strong></td>
@@ -632,7 +644,8 @@ class OrderFulfillmentManager {
 				<td class="tf-r">${item.required_qty.toFixed(2)} ${item.uom}</td>
 				<td class="tf-r">${stock.toFixed(2)}</td>
 				<td class="tf-r tf-short-cell ${short > 0 ? 'tf-short' : 'tf-ok'}">
-					${short > 0 ? `<strong>${short.toFixed(2)}</strong>` : '—'}
+					${short > 0 ? `<strong>${short.toFixed(2)}</strong>
+						${affected.length ? `<div class="tf-affected-custs">${affected.map(c => frappe.utils.escape_html(c)).join(', ')}</div>` : ''}` : '—'}
 				</td>
 			</tr>`;
 		});
