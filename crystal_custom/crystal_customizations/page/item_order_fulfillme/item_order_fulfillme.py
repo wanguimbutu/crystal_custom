@@ -463,8 +463,18 @@ def reopen_truck(truck_number):
 
 @frappe.whitelist()
 def save_allocations(allocations_json):
-    """Persist truck-item allocation map across page loads."""
-    frappe.db.set_default('crystal_fulfillment_alloc', allocations_json)
+    """Persist truck-item allocation map across page loads.
+    Strips zero-value entries before saving to avoid exceeding the defvalue column limit.
+    """
+    import json as _json2
+    allocs = _json2.loads(allocations_json) if isinstance(allocations_json, str) else allocations_json
+    # Keep only non-zero truck quantities, and only items that have at least one non-zero
+    compact = {
+        item: {truck: qty for truck, qty in trucks.items() if qty}
+        for item, trucks in allocs.items()
+    }
+    compact = {item: trucks for item, trucks in compact.items() if trucks}
+    frappe.db.set_default('crystal_fulfillment_alloc', _json2.dumps(compact, separators=(',', ':')))
     frappe.db.commit()
     return True
 
