@@ -48,22 +48,22 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         WHERE so.docstatus IN (0, 1)
           AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
           AND so.status NOT IN ('Completed', 'Closed')
-          AND IFNULL(so.custom_truck_closed, 0) != 1
           {sp_where}
     """
 
-    # Truck-assigned orders: no date filter — always visible once on a truck
+    # Truck-assigned orders: hide dispatched (custom_truck_closed=1) — those go to Dispatched tab
     assigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}
         {base_where}
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
+          AND IFNULL(so.custom_truck_closed, 0) != 1
         ORDER BY so.transaction_date DESC
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: no date filter — all pending orders must be visible for assignment
+    # Unassigned orders: never filter by custom_truck_closed — flag is irrelevant without a truck
     unassigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}
@@ -78,7 +78,10 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
 
 @frappe.whitelist()
 def set_truck_number(order_name, truck_number):
-    frappe.db.set_value('Sales Order', order_name, 'custom_truck_number', truck_number or '')
+    frappe.db.set_value('Sales Order', order_name, {
+        'custom_truck_number': truck_number or '',
+        'custom_truck_closed': 0,
+    })
     return True
 
 @frappe.whitelist()
