@@ -17,7 +17,7 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         if has_pf else '0 AS custom_is_pre_fulfillment'
     )
 
-    WF = ('Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')
+    WF = ('Proceed To Order', 'Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')
 
     # Build optional SP join / where clause
     sp_join  = ''
@@ -63,25 +63,15 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: apply date filter from the UI fields.
-    up = dict(params)
-    date_where = ''
-    if from_date:
-        up['from_date'] = from_date
-        date_where += ' AND so.transaction_date >= %(from_date)s'
-    if to_date:
-        up['to_date'] = to_date
-        date_where += ' AND so.transaction_date <= %(to_date)s'
-
+    # Unassigned orders: no date filter — all pending orders must be visible for assignment
     unassigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}
         {base_where}
           AND (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
-          {date_where}
         ORDER BY so.transaction_date DESC
-        LIMIT 500
-    """, up, as_dict=1)
+        LIMIT 1000
+    """, params, as_dict=1)
 
     return {'assigned': [dict(r) for r in assigned], 'unassigned': [dict(r) for r in unassigned]}
 

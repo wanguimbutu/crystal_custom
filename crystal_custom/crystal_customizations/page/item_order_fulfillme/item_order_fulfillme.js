@@ -27,16 +27,30 @@ class OrderFulfillmentManager {
 		this._load_allocations_then_data();
 	}
 
-	// Load persisted allocations from server first, then fetch order/stock data
+	// Load persisted allocations + closed trucks from server, then fetch order/stock data
 	_load_allocations_then_data() {
-		frappe.call({
-			method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_allocations',
-			callback: (r) => {
-				try { this.allocations = JSON.parse(r.message || '{}') || {}; } catch(e) {}
-				this.load_data();
-			},
-			error: () => this.load_data(),
-		});
+		Promise.all([
+			new Promise(resolve => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_allocations',
+				callback: r => {
+					try { this.allocations = JSON.parse(r.message || '{}') || {}; } catch(e) {}
+					resolve();
+				},
+				error: () => resolve(),
+			})),
+			new Promise(resolve => frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.get_ofm_closed_trucks',
+				callback: r => {
+					try {
+						const saved = JSON.parse(r.message || '[]');
+						this._closed_trucks = new Set(saved);
+						localStorage.setItem('crystal_tf_closed_trucks', r.message || '[]');
+					} catch(e) {}
+					resolve();
+				},
+				error: () => resolve(),
+			})),
+		]).then(() => this.load_data());
 	}
 
 	_save_allocations() {
@@ -1410,7 +1424,12 @@ ${truck_blocks}
 	}
 
 	_save_closed_trucks() {
-		localStorage.setItem('crystal_tf_closed_trucks', JSON.stringify([...this._closed_trucks]));
+		const json = JSON.stringify([...this._closed_trucks]);
+		localStorage.setItem('crystal_tf_closed_trucks', json);
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.item_order_fulfillme.item_order_fulfillme.save_ofm_closed_trucks',
+			args: { trucks_json: json },
+		});
 	}
 
 

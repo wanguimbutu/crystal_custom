@@ -473,28 +473,70 @@ def reopen_truck(truck_number):
     return 'ok'
 
 
+def _alloc_file_path():
+    import os as _os
+    path = frappe.get_site_path('private', 'files', 'crystal_fulfillment_alloc.json')
+    _os.makedirs(_os.path.dirname(path), exist_ok=True)
+    return path
+
+def _ofm_closed_file_path():
+    import os as _os
+    path = frappe.get_site_path('private', 'files', 'crystal_ofm_closed_trucks.json')
+    _os.makedirs(_os.path.dirname(path), exist_ok=True)
+    return path
+
+
 @frappe.whitelist()
 def save_allocations(allocations_json):
-    """Persist truck-item allocation map across page loads.
-    Strips zero-value entries before saving to avoid exceeding the defvalue column limit.
-    """
+    """Persist truck-item allocation map to a private site file (no size limit)."""
     import json as _json2
     allocs = _json2.loads(allocations_json) if isinstance(allocations_json, str) else allocations_json
-    # Keep only non-zero truck quantities, and only items that have at least one non-zero
     compact = {
         item: {truck: qty for truck, qty in trucks.items() if qty}
         for item, trucks in allocs.items()
     }
     compact = {item: trucks for item, trucks in compact.items() if trucks}
-    frappe.db.set_default('crystal_fulfillment_alloc', _json2.dumps(compact, separators=(',', ':')))
-    frappe.db.commit()
+    with open(_alloc_file_path(), 'w', encoding='utf-8') as fh:
+        _json2.dump(compact, fh, separators=(',', ':'), ensure_ascii=False)
     return True
 
 
 @frappe.whitelist()
 def get_allocations():
     """Return previously saved allocation map."""
-    return frappe.db.get_default('crystal_fulfillment_alloc') or '{}'
+    import json as _json2, os as _os
+    path = _alloc_file_path()
+    if _os.path.exists(path):
+        with open(path, encoding='utf-8') as fh:
+            return fh.read()
+    # Fallback: migrate old defvalue store if present
+    old = frappe.db.get_default('crystal_fulfillment_alloc')
+    if old:
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(old)
+        frappe.db.set_default('crystal_fulfillment_alloc', '')
+        frappe.db.commit()
+        return old
+    return '{}'
+
+
+@frappe.whitelist()
+def save_ofm_closed_trucks(trucks_json):
+    """Persist OFM closed (Done) truck numbers server-side."""
+    with open(_ofm_closed_file_path(), 'w', encoding='utf-8') as fh:
+        fh.write(trucks_json)
+    return True
+
+
+@frappe.whitelist()
+def get_ofm_closed_trucks():
+    """Return previously saved OFM closed truck numbers."""
+    import os as _os
+    path = _ofm_closed_file_path()
+    if _os.path.exists(path):
+        with open(path, encoding='utf-8') as fh:
+            return fh.read()
+    return '[]'
 
 
 @frappe.whitelist()

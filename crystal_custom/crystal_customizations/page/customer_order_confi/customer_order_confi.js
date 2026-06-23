@@ -96,66 +96,37 @@ class OrderConfirmationManager {
     load_data() {
         const from_date = this.page.fields_dict.from_date.get_value();
         const to_date = this.page.fields_dict.to_date.get_value();
-        const filters = [
-            ['Sales Order', 'docstatus', '=', 0],
-            ['Sales Order', 'workflow_state', '=', 'Pending Customer Order Reconfirmation'],
-        ];
-        if (this._sps.size) filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
-        if (from_date) filters.push(['Sales Order', 'transaction_date', '>=', from_date]);
-        if (to_date) filters.push(['Sales Order', 'transaction_date', '<=', to_date]);
+        const sps = [...this._sps];
 
         frappe.call({
-            method: 'frappe.client.get_list',
+            method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_assignment_orders',
             args: {
-                doctype: 'Sales Order',
-                fields: ['name', 'customer', 'customer_name', 'transaction_date', 'grand_total',
-                         'custom_delivery_region', 'custom_phone_number', 'owner', 'workflow_state',
-                         'custom_call_not_picked', 'custom_call_notes', 'custom_truck_number'],
-                filters,
-                limit_page_length: 500
+                from_date: from_date || null,
+                to_date: to_date || null,
+                sales_persons_json: sps.length ? JSON.stringify(sps) : null,
             },
             callback: (r) => {
-                if (r.message) {
-                    this.orders = r.message;
-                    this.orders.forEach(order => {
-                        if (order.custom_call_not_picked === 1) {
-                            this.not_picked_orders.add(order.name);
-                        }
-                    });
-                    this.load_submitted_orders();
-                }
+                if (!r.message) return;
+                const all = [...(r.message.assigned || []), ...(r.message.unassigned || [])];
+                const seen = new Set();
+                const orders = all.filter(o => { if (seen.has(o.name)) return false; seen.add(o.name); return true; });
+
+                this.orders = orders.filter(o => parseInt(o.docstatus) === 0);
+                this.submitted_orders = orders.filter(o => parseInt(o.docstatus) === 1);
+
+                this.orders.forEach(order => {
+                    if (order.custom_call_not_picked === 1) {
+                        this.not_picked_orders.add(order.name);
+                    }
+                });
+                this._attach_customer_phones();
             }
         });
     }
 
     load_submitted_orders() {
-        const filters = [
-            ['Sales Order', 'docstatus', '=', 1],
-            ['Sales Order', 'workflow_state', '=', 'Order Confirmed'],
-            ['Sales Order', 'transaction_date', '>=', frappe.datetime.add_days(frappe.datetime.get_today(), -14)],
-        ];
-        if (this._sps.size) filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
-
-        frappe.call({
-            method: 'frappe.client.get_list',
-            args: {
-                doctype: 'Sales Order',
-                fields: ['name', 'customer', 'customer_name', 'transaction_date',
-                         'grand_total', 'custom_phone_number', 'custom_call_notes',
-                         'custom_call_not_picked', 'custom_truck_number'],
-                filters,
-                order_by: 'transaction_date desc',
-                limit_page_length: 200,
-            },
-            callback: (r) => {
-                this.submitted_orders = r.message || [];
-                this._attach_customer_phones();
-            },
-            error: () => {
-                this.submitted_orders = [];
-                this.render_orders();
-            },
-        });
+        // Loading is now handled inside load_data(); this stub kept for any direct callers.
+        this._attach_customer_phones();
     }
 
     _attach_customer_phones() {
