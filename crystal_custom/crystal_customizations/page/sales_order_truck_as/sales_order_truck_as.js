@@ -265,6 +265,7 @@ class TruckAssignmentManager {
 				Trucks
 				<span class="ta-count-badge">${trucks_used} active${this.closed_trucks.length ? ` &nbsp;·&nbsp; ${this.closed_trucks.length} dispatched` : ''}</span>
 			</div>
+			${this.search_term ? this._render_search_truck_results(orders) : `
 			<div class="ta-subtabs">
 				<button class="ta-subtab-btn ${this.trucks_tab === 'active' ? 'active' : ''}" data-tab="active">
 					Active
@@ -275,7 +276,7 @@ class TruckAssignmentManager {
 					${this.closed_trucks.length ? `<span class="ta-subtab-badge" style="background:#64748b;">${this.closed_trucks.length}</span>` : ''}
 				</button>
 			</div>
-			${this.trucks_tab === 'active' ? this._render_trucks(this.orders) : this._render_dispatched_trucks()}
+			${this.trucks_tab === 'active' ? this._render_trucks(this.orders) : this._render_dispatched_trucks()}`}
 		</div>` : ''}
 
 		<div class="ta-section">
@@ -471,6 +472,53 @@ class TruckAssignmentManager {
 		};
 		const [color, label] = map[state] || ['#9ca3af', state || '—'];
 		return `<span class="ta-state-badge" style="background:${color}">${label}</span>`;
+	}
+
+	_render_search_truck_results(matched_orders) {
+		const assigned_matches = matched_orders.filter(o => o.custom_truck_number);
+		if (!assigned_matches.length) return '<div class="ta-empty">No assigned orders match this search.</div>';
+
+		// Build a map of truck_number → truck meta (active + dispatched)
+		const all_truck_meta = {};
+		this.available_trucks.forEach(t => { all_truck_meta[t.truck_number] = t; });
+		this.closed_trucks.forEach(t => { all_truck_meta[t.truck_number] = t; });
+		const closed_set = new Set(this.closed_trucks.map(t => t.truck_number));
+
+		const truck_numbers = [...new Set(assigned_matches.map(o => o.custom_truck_number))];
+		let html = '<div class="ta-trucks-grid">';
+		truck_numbers.forEach(tn => {
+			const truck = all_truck_meta[tn] || { truck_number: tn };
+			const is_dispatched = closed_set.has(tn);
+			const truck_orders = assigned_matches.filter(o => o.custom_truck_number === tn);
+			const total_weight = truck_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+			const total_value  = truck_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+			html += `
+			<div class="ta-truck-card" style="${is_dispatched ? 'opacity:0.75;border-top:4px solid #64748b;' : ''}">
+				<div class="ta-truck-head">
+					<div class="ta-truck-num">${frappe.utils.escape_html(tn)}
+						${is_dispatched ? '<span style="font-size:10px;font-weight:400;color:#64748b;margin-left:6px;">Dispatched</span>' : ''}
+					</div>
+				</div>
+				${truck.driver_name ? `<div class="ta-truck-driver">${frappe.utils.escape_html(truck.driver_name)}</div>` : ''}
+				<div class="ta-truck-stats">
+					<div class="ta-truck-stat"><span>${truck_orders.length}</span>Matched Orders</div>
+					<div class="ta-truck-stat"><span>${total_weight.toFixed(0)} kg</span>Weight</div>
+					<div class="ta-truck-stat"><span>${format_currency(total_value, null, 0)}</span>Value</div>
+				</div>
+				<div class="ta-truck-orders">
+					${truck_orders.map(o => `
+					<div class="ta-truck-order" style="background:#fef9c3;">
+						<div>
+							<a href="/app/sales-order/${o.name}" target="_blank" class="ta-order-link">${o.name}</a>
+							<span class="ta-order-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
+						</div>
+						<div style="font-size:11px;color:#64748b;">${frappe.utils.escape_html(o.custom_delivery_region || '')}</div>
+					</div>`).join('')}
+				</div>
+			</div>`;
+		});
+		html += '</div>';
+		return html;
 	}
 
 	_render_trucks(all_orders) {

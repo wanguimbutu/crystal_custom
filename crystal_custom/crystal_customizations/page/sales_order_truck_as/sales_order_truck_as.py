@@ -51,19 +51,19 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
           {sp_where}
     """
 
-    # Truck-assigned orders: hide dispatched (custom_truck_closed=1) — those go to Dispatched tab
+    # Truck-assigned orders: Active/Dispatched split is managed in the UI via _closed_trucks;
+    # do NOT filter by custom_truck_closed here — the DB flag is unreliable after reopens/moves.
     assigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}
         {base_where}
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
-          AND IFNULL(so.custom_truck_closed, 0) != 1
         ORDER BY so.transaction_date DESC
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: never filter by custom_truck_closed — flag is irrelevant without a truck
+    # Unassigned orders: no date filter, no truck-closed filter
     unassigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}
