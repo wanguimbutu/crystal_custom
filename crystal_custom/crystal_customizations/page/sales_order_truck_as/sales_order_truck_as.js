@@ -90,15 +90,11 @@ class TruckAssignmentManager {
 			{ label: 'Driver Name', fieldname: 'driver_name', fieldtype: 'Data' },
 			{ label: 'Capacity (kg)', fieldname: 'capacity_kg', fieldtype: 'Float', default: 5000 },
 		], (vals) => {
-			if (this.available_trucks.find(t => t.truck_number === vals.truck_number)) {
-				frappe.msgprint(__('Truck {0} already exists', [vals.truck_number]));
-				return;
-			}
 			this.available_trucks.push(vals);
 			this._save_truck_meta();
 			frappe.show_alert({ message: __('Truck {0} added', [vals.truck_number]), indicator: 'green' });
 			this.render_view();
-		}, __('Add New Truck'), __('Add'));
+		}, __('Add Truck'), __('Add'));
 	}
 
 	// ── Data loading ──────────────────────────────────────────────────────────
@@ -144,9 +140,9 @@ class TruckAssignmentManager {
 							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
 							callback: (cr) => {
 								try { this.closed_trucks = JSON.parse(cr.message || '[]') || []; } catch(e) {}
-								// Remove trucks from active grid if they're already in closed_trucks
-								const closed_tns = new Set(this.closed_trucks.map(ct => ct.truck_number));
-								this.available_trucks = this.available_trucks.filter(t => !closed_tns.has(t.truck_number));
+								// saved_meta (available_trucks) is authoritative for active trucks;
+								// closed_trucks is display-only history — do not filter active list by it,
+								// since trucks in rotation will appear in history AND be re-added as active.
 								this.load_data();
 							},
 							error: () => this.load_data(),
@@ -263,7 +259,7 @@ class TruckAssignmentManager {
 		<div class="ta-section">
 			<div class="ta-section-header">
 				Trucks
-				<span class="ta-count-badge">${trucks_used} active${this.closed_trucks.length ? ` &nbsp;·&nbsp; ${this.closed_trucks.length} dispatched` : ''}</span>
+				<span class="ta-count-badge">${trucks_used} loaded${this.closed_trucks.length ? ` &nbsp;·&nbsp; ${this.closed_trucks.length} trips today` : ''}</span>
 			</div>
 			${this.search_term ? this._render_search_truck_results(orders) : `
 			<div class="ta-subtabs">
@@ -272,7 +268,7 @@ class TruckAssignmentManager {
 					<span class="ta-subtab-badge">${trucks_used}</span>
 				</button>
 				<button class="ta-subtab-btn ${this.trucks_tab === 'dispatched' ? 'active' : ''}" data-tab="dispatched">
-					Dispatched
+					Trip History
 					${this.closed_trucks.length ? `<span class="ta-subtab-badge" style="background:#64748b;">${this.closed_trucks.length}</span>` : ''}
 				</button>
 			</div>
@@ -545,7 +541,7 @@ class TruckAssignmentManager {
 						<button class="btn btn-xs btn-default btn-edit-truck"    data-truck="${truck.truck_number}" title="Edit">&#9998;</button>
 						${!is_empty ? `<button class="btn btn-xs btn-default btn-reassign-truck" data-truck="${truck.truck_number}" title="Move all orders to another truck">&#8644;</button>` : ''}
 						<button class="btn btn-xs btn-danger  btn-delete-truck"  data-truck="${truck.truck_number}" title="${is_empty ? 'Remove truck' : 'Unassign all orders'}">&#215;</button>
-						${!is_empty ? `<button class="btn btn-xs btn-primary btn-close-truck" data-truck="${truck.truck_number}">Close</button>` : ''}
+						${!is_empty ? `<button class="btn btn-xs btn-primary btn-close-truck" data-truck="${truck.truck_number}">Dispatch</button>` : ''}
 					</div>
 				</div>
 
@@ -586,7 +582,7 @@ class TruckAssignmentManager {
 
 	_render_dispatched_trucks() {
 		if (!this.closed_trucks.length) {
-			return `<div style="padding:24px;text-align:center;color:#94a3b8;">No dispatched trucks yet.</div>`;
+			return `<div style="padding:24px;text-align:center;color:#94a3b8;">No trips recorded yet.</div>`;
 		}
 
 		let html = '<div class="ta-trucks-grid">';
@@ -613,11 +609,7 @@ class TruckAssignmentManager {
 						${ct.driver_name ? `<div class="ta-truck-driver" style="color:#cbd5e1;">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
 					</div>
 					<div style="text-align:right;">
-						<div style="font-size:11px;color:#94a3b8;">Dispatched ${frappe.utils.escape_html(closed_label)}</div>
-						<div style="margin-top:6px;display:flex;gap:4px;justify-content:flex-end;">
-							<button class="btn btn-xs btn-default btn-edit-closed-truck" data-idx="${idx}" title="Edit driver / capacity">&#9998;</button>
-							<button class="btn btn-xs btn-primary btn-reopen-truck" data-idx="${idx}">Reopen</button>
-						</div>
+						<div style="font-size:11px;color:#94a3b8;">${frappe.utils.escape_html(closed_label)}</div>
 					</div>
 				</div>
 
@@ -781,14 +773,6 @@ class TruckAssignmentManager {
 			const ct = self.closed_trucks[idx] || {};
 			const n  = (ct.orders || []).length;
 			$(this).html(`${open ? '&#9658;' : '&#9660;'} View ${n} order${n !== 1 ? 's' : ''}`);
-		});
-
-		this.container.find('.btn-reopen-truck').off('click').on('click', function () {
-			self.reopen_truck(parseInt($(this).data('idx'), 10));
-		});
-
-		this.container.find('.btn-edit-closed-truck').off('click').on('click', function () {
-			self.edit_closed_truck(parseInt($(this).data('idx'), 10));
 		});
 
 		this.container.find('.ta-pf-btn').off('click').on('click', function () {
@@ -1022,10 +1006,10 @@ class TruckAssignmentManager {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
 		if (!truck_orders.length) { frappe.msgprint(__('Cannot close an empty truck')); return; }
 
-		const unsubmitted = truck_orders.filter(o => o.docstatus === 0);
+		const unsubmitted = truck_orders.filter(o => parseInt(o.docstatus) === 0);
 		const msg = unsubmitted.length
-			? __('Truck {0} has {1} unsubmitted order(s). Close anyway? Orders will be archived.', [truck_number, unsubmitted.length])
-			: __('Close truck {0} with {1} orders? They will be archived and removed from this view.', [truck_number, truck_orders.length]);
+			? __('Truck {0} has {1} unsubmitted order(s). Dispatch anyway? Trip will be recorded and truck cleared for the next load.', [truck_number, unsubmitted.length])
+			: __('Dispatch truck {0} with {1} orders? Trip will be recorded and truck cleared for the next load.', [truck_number, truck_orders.length]);
 
 		frappe.confirm(msg, () => {
 			this.download_manifest(truck_number);
@@ -1054,7 +1038,7 @@ class TruckAssignmentManager {
 					})),
 				};
 
-				// Prepend to history (most recent first) and persist
+				// Prepend to trip history (most recent first) and persist
 				this.closed_trucks = [closure, ...this.closed_trucks];
 				frappe.call({
 					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
@@ -1079,11 +1063,11 @@ class TruckAssignmentManager {
 					},
 				});
 
-				// Remove from active list and persist truck meta
+				// Remove from active list and persist — logistics decides when to reload this truck
 				this.available_trucks = this.available_trucks.filter(t => t.truck_number !== truck_number);
 				this._save_truck_meta();
 
-				frappe.show_alert({ message: __('Truck {0} closed and recorded', [truck_number]), indicator: 'green' });
+				frappe.show_alert({ message: __('Trip recorded for {0}', [truck_number]), indicator: 'green' });
 				this.load_data();
 				return;
 			}

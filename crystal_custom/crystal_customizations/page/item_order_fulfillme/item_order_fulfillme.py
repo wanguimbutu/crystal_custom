@@ -106,6 +106,7 @@ def get_truck_fulfillment_data():
           AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
+          AND IFNULL(so.custom_truck_closed, 0) != 1
         GROUP BY so.custom_truck_number, so.name, soi.item_code
         ORDER BY so.custom_truck_number, soi.item_code
     """, {'wf': ACTIVE_WORKFLOW}, as_dict=1)
@@ -155,6 +156,7 @@ def get_truck_fulfillment_data():
           AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
+          AND IFNULL(so.custom_truck_closed, 0) != 1
         GROUP BY so.custom_truck_number
     """, {'wf': ACTIVE_WORKFLOW}, as_dict=1)
     meta_map = {r.truck_number: r for r in meta_rows}
@@ -227,6 +229,7 @@ def get_truck_customer_data():
           AND so.status NOT IN ('Completed', 'Closed')
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
+          AND IFNULL(so.custom_truck_closed, 0) != 1
         GROUP BY so.custom_truck_number, so.name, soi.item_code
         ORDER BY so.custom_truck_number, so.customer_name, so.name, soi.item_code
     """, {'wf': ACTIVE_WORKFLOW}, as_dict=1)
