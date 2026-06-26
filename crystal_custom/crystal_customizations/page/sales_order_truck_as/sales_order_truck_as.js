@@ -119,6 +119,7 @@ class TruckAssignmentManager {
 							['Sales Order', 'docstatus', 'in', [0, 1]],
 							['Sales Order', 'custom_truck_number', '!=', ''],
 							['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
+							['Sales Order', 'custom_truck_closed', '!=', 1],
 						],
 						limit_page_length: 500,
 					},
