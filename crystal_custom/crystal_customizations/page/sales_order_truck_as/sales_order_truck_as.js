@@ -1019,34 +1019,35 @@ class TruckAssignmentManager {
 	}
 
 	_close_truck_batch(truck_number, truck_orders) {
-		let done = 0;
-		const next = () => {
-			if (done >= truck_orders.length) {
-				// Build a closure record before removing the truck
-				const truck_info = this.available_trucks.find(t => t.truck_number === truck_number) || {};
-				const closure = {
-					truck_number,
-					driver_name:  truck_info.driver_name || '',
-					capacity_kg:  truck_info.capacity_kg || 0,
-					closed_at:    frappe.datetime.now_datetime(),
-					order_count:  truck_orders.length,
-					total_weight: truck_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0),
-					total_value:  truck_orders.reduce((s, o) => s + (o.grand_total || 0), 0),
-					orders: truck_orders.map(o => ({
-						name:            o.name,
-						customer_name:   o.customer_name || o.customer,
-						delivery_region: o.custom_delivery_region || '',
-					})),
-				};
+		const truck_info = this.available_trucks.find(t => t.truck_number === truck_number) || {};
+		const closure = {
+			truck_number,
+			driver_name:  truck_info.driver_name || '',
+			capacity_kg:  truck_info.capacity_kg || 0,
+			closed_at:    frappe.datetime.now_datetime(),
+			order_count:  truck_orders.length,
+			total_weight: truck_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0),
+			total_value:  truck_orders.reduce((s, o) => s + (o.grand_total || 0), 0),
+			orders: truck_orders.map(o => ({
+				name:            o.name,
+				customer_name:   o.customer_name || o.customer,
+				delivery_region: o.custom_delivery_region || '',
+			})),
+		};
 
-				// Prepend to trip history (most recent first) and persist
+		// Single batch call — marks all orders closed atomically in one SQL UPDATE
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.close_truck_orders',
+			args: { order_names_json: JSON.stringify(truck_orders.map(o => o.name)) },
+			callback: () => {
+				// Prepend to trip history and persist
 				this.closed_trucks = [closure, ...this.closed_trucks];
 				frappe.call({
 					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
 					args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
 				});
 
-				// Persist as a submitted Crystal Truck Plan doctype for permanent record
+				// Persist as a submitted Crystal Truck Plan for permanent record
 				frappe.call({
 					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.create_truck_plan',
 					args: {
@@ -1054,32 +1055,27 @@ class TruckAssignmentManager {
 						driver_name:  truck_info.driver_name || '',
 						capacity_kg:  truck_info.capacity_kg || 0,
 						orders_json:  JSON.stringify(truck_orders.map(o => ({
-							name:            o.name,
-							customer_name:   o.customer_name || o.customer || '',
-							delivery_region: o.custom_delivery_region || '',
-							grand_total:     o.grand_total || 0,
+							name:             o.name,
+							customer_name:    o.customer_name || o.customer || '',
+							delivery_region:  o.custom_delivery_region || '',
+							grand_total:      o.grand_total || 0,
 							total_net_weight: o.total_net_weight || 0,
 						}))),
 						closed_from: 'Truck Assignment',
 					},
 				});
 
-				// Remove from active list and persist — logistics decides when to reload this truck
+				// Remove from active list and persist
 				this.available_trucks = this.available_trucks.filter(t => t.truck_number !== truck_number);
 				this._save_truck_meta();
 
 				frappe.show_alert({ message: __('Trip recorded for {0}', [truck_number]), indicator: 'green' });
 				this.load_data();
-				return;
-			}
-			frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_closed',
-				args: { order_name: truck_orders[done].name, value: 1 },
-				callback: () => { done++; next(); },
-				error:    () => { done++; next(); },
-			});
-		};
-		next();
+			},
+			error: () => {
+				frappe.msgprint(__('Failed to dispatch truck {0}. Please try again.', [truck_number]));
+			},
+		});
 	}
 
 

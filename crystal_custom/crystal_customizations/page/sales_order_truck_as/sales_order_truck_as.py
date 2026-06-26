@@ -96,6 +96,21 @@ def set_truck_closed(order_name, value=1):
     return True
 
 @frappe.whitelist()
+def close_truck_orders(order_names_json):
+    """Batch-set custom_truck_closed=1 for all orders in a single DB call."""
+    import json
+    names = json.loads(order_names_json) if isinstance(order_names_json, str) else order_names_json
+    if not names:
+        return True
+    ph = ', '.join(['%s'] * len(names))
+    frappe.db.sql(
+        f"UPDATE `tabSales Order` SET custom_truck_closed = 1 WHERE name IN ({ph})",
+        names
+    )
+    frappe.db.commit()
+    return True
+
+@frappe.whitelist()
 def save_truck_meta(trucks_json):
     """Persist truck metadata (driver name, capacity) so it survives page reloads."""
     frappe.db.set_default('crystal_truck_meta', trucks_json)
