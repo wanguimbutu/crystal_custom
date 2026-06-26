@@ -1,3 +1,10 @@
+## [1.25.5](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.4...v1.25.5) (2026-06-26)
+
+
+### Bug Fixes
+
+* batch dispatch truck orders in single SQL call ([41f2140](https://github.com/wanguimbutu/crystal_custom/commit/41f2140a22f5de61cc65d01f21676c14b55b269d))
+
 ## [1.25.4](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.3...v1.25.4) (2026-06-26)
 
 
