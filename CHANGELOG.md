@@ -1,3 +1,11 @@
+## [1.25.4](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.3...v1.25.4) (2026-06-26)
+
+
+### Bug Fixes
+
+* exclude dispatched trucks from assign-to-truck selection ([3094ec0](https://github.com/wanguimbutu/crystal_custom/commit/3094ec04338f29d4bf083b7e616adc0e202c1552))
+* truck rotation — dispatched trips no longer block re-use ([01430b3](https://github.com/wanguimbutu/crystal_custom/commit/01430b3cf9d9b4ca109a5607100bd3100cfd992d))
+
 ## [1.25.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.2...v1.25.3) (2026-06-19)
 
 
