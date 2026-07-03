@@ -985,6 +985,50 @@ ${truck_blocks}
 			</div>
 		</div>`;
 
+		// ── APS summary section ──────────────────────────────────────────────
+		const aps_entries = [];
+		trucks.forEach(truck => {
+			truck.orders.forEach(order => {
+				(order.items || []).forEach(i => {
+					if ((i.item_name || i.item_code || '').toUpperCase().includes('APS')) {
+						aps_entries.push({
+							truck: truck.truck_number,
+							order: order.name,
+							customer: order.customer_name,
+							item_code: i.item_code,
+							item_name: i.item_name || i.item_code,
+							qty: i.required_qty,
+							uom: i.uom || '',
+						});
+					}
+				});
+			});
+		});
+
+		if (aps_entries.length) {
+			html += `
+			<div style="margin-bottom:20px;border:2px solid #f59e0b;border-radius:8px;overflow:hidden;">
+				<div style="background:#fef3c7;padding:8px 14px;font-size:12px;font-weight:700;color:#92400e;display:flex;align-items:center;gap:8px;">
+					&#9888; APS Items &nbsp;·&nbsp; ${aps_entries.length} line${aps_entries.length !== 1 ? 's' : ''} across ${new Set(aps_entries.map(e => e.order)).size} order${new Set(aps_entries.map(e => e.order)).size !== 1 ? 's' : ''}
+				</div>
+				<table class="table tf-table" style="margin:0;font-size:11px;">
+					<thead><tr>
+						<th>Item</th><th>Qty</th><th>Order</th><th>Customer</th><th>Truck</th>
+					</tr></thead>
+					<tbody>
+						${aps_entries.map(e => `<tr style="background:#fffbeb;">
+							<td><strong>${frappe.utils.escape_html(e.item_name)}</strong></td>
+							<td>${e.qty} ${frappe.utils.escape_html(e.uom)}</td>
+							<td><a href="/app/sales-order/${e.order}" target="_blank" style="color:#667eea;">${frappe.utils.escape_html(e.order)}</a></td>
+							<td>${frappe.utils.escape_html(e.customer)}</td>
+							<td>${frappe.utils.escape_html(e.truck)}</td>
+						</tr>`).join('')}
+					</tbody>
+				</table>
+			</div>`;
+		}
+
+		// ── Per-truck order tables ────────────────────────────────────────────
 		trucks.forEach(truck => {
 			const tn = truck.truck_number;
 
@@ -993,9 +1037,28 @@ ${truck_blocks}
 					const alloc = (this.allocations[i.item_code] || {})[tn] || 0;
 					return alloc >= i.required_qty;
 				});
+				const has_aps = (order.items || []).some(i =>
+					(i.item_name || i.item_code || '').toUpperCase().includes('APS')
+				);
 				const region = order.delivery_region || '';
-				return `<tr>
-					<td><a href="/app/sales-order/${order.name}" target="_blank" style="color:#667eea;font-weight:600;">${frappe.utils.escape_html(order.name)}</a></td>
+
+				const item_rows = (order.items || []).map(i => {
+					const alloc = (this.allocations[i.item_code] || {})[tn] || 0;
+					const short = Math.max(0, i.required_qty - alloc);
+					const is_aps = (i.item_name || i.item_code || '').toUpperCase().includes('APS');
+					return `<tr style="background:${is_aps ? '#fffbeb' : '#f8fafc'};">
+						<td style="padding:3px 10px;font-size:11px;${is_aps ? 'font-weight:600;color:#92400e;' : 'color:#475569;'}">${frappe.utils.escape_html(i.item_name || i.item_code)}</td>
+						<td style="padding:3px 10px;font-size:11px;text-align:right;">${i.required_qty} ${frappe.utils.escape_html(i.uom || '')}</td>
+						<td style="padding:3px 10px;font-size:11px;text-align:right;color:${short > 0 ? '#ef4444' : '#10b981'};">${short > 0 ? '-' + short.toFixed(2) : '✓'}</td>
+					</tr>`;
+				}).join('');
+
+				const row_id = `tf-cv-items-${order.name.replace(/[^a-z0-9]/gi, '_')}`;
+				return `<tr class="tf-cv-order-row${has_aps ? ' tf-cv-aps-row' : ''}" style="${has_aps ? 'background:#fffbeb;' : ''}">
+					<td style="width:28px;cursor:pointer;" class="tf-cv-toggle" data-target="${row_id}">
+						<span class="tf-cv-arrow" style="display:inline-block;transition:transform .15s;">&#9658;</span>
+					</td>
+					<td><a href="/app/sales-order/${order.name}" target="_blank" style="color:#667eea;font-weight:600;">${frappe.utils.escape_html(order.name)}</a>${has_aps ? ' <span style="font-size:9px;background:#f59e0b;color:#fff;padding:1px 4px;border-radius:3px;vertical-align:middle;">APS</span>' : ''}</td>
 					<td>${frappe.utils.escape_html(order.customer_name)}</td>
 					<td>${region ? frappe.utils.escape_html(region) : '<span style="color:#cbd5e1;">—</span>'}</td>
 					<td style="text-align:right;">${format_currency(order.grand_total, null, 0)}</td>
@@ -1003,6 +1066,18 @@ ${truck_blocks}
 						<span class="tf-status-badge" style="background:${all_covered ? '#10b981' : '#f59e0b'};font-size:10px;">
 							${all_covered ? 'Covered' : 'Short'}
 						</span>
+					</td>
+				</tr>
+				<tr id="${row_id}" class="tf-cv-items-row" style="display:none;">
+					<td colspan="6" style="padding:0 0 0 28px;background:#f8fafc;">
+						<table style="width:100%;border-collapse:collapse;">
+							<thead><tr>
+								<th style="padding:3px 10px;font-size:10px;color:#94a3b8;font-weight:600;text-align:left;">Item</th>
+								<th style="padding:3px 10px;font-size:10px;color:#94a3b8;font-weight:600;text-align:right;">Qty</th>
+								<th style="padding:3px 10px;font-size:10px;color:#94a3b8;font-weight:600;text-align:right;">Short</th>
+							</tr></thead>
+							<tbody>${item_rows}</tbody>
+						</table>
 					</td>
 				</tr>`;
 			}).join('');
@@ -1015,6 +1090,7 @@ ${truck_blocks}
 				</div>
 				<table class="table tf-table" style="margin:0;">
 					<thead><tr>
+						<th style="width:28px;"></th>
 						<th>Order</th><th>Customer</th><th>Region</th>
 						<th style="text-align:right;">Value</th><th style="text-align:center;">Status</th>
 					</tr></thead>
@@ -1125,6 +1201,16 @@ ${truck_blocks}
 
 			self._update_allocations_in_place(ic, tn);
 			self._save_allocations();
+		});
+
+		// Customer view expandable order rows
+		this.container.off('click.tf-cv-expand').on('click.tf-cv-expand', '.tf-cv-toggle', function () {
+			const target_id = $(this).data('target');
+			const $items_row = $(`#${target_id}`);
+			const $arrow = $(this).find('.tf-cv-arrow');
+			const is_open = $items_row.is(':visible');
+			$items_row.slideToggle(150);
+			$arrow.css('transform', is_open ? 'rotate(0deg)' : 'rotate(90deg)');
 		});
 
 		// Orders list toggle
