@@ -274,31 +274,43 @@ class OrderFulfillmentManager {
 			const status_color = is_region ? '#0d9488' : (is_closed ? '#64748b' : '#8b5cf6');
 
 			(truck.orders || []).forEach(o => {
+				const matched_items = (o.items || []).filter(i =>
+					(i.item_code || '').toLowerCase().includes(q) ||
+					(i.item_name || '').toLowerCase().includes(q)
+				);
 				const hit =
 					(tn                || '').toLowerCase().includes(q) ||
 					(o.name            || '').toLowerCase().includes(q) ||
 					(o.customer_name   || '').toLowerCase().includes(q) ||
 					(o.delivery_region || '').toLowerCase().includes(q) ||
-					(o.sales_persons   || '').toLowerCase().includes(q);
-				if (hit) matches.push({ o, tn, is_region, status, status_color });
+					(o.sales_persons   || '').toLowerCase().includes(q) ||
+					matched_items.length > 0;
+				if (hit) matches.push({ o, tn, is_region, status, status_color, matched_items });
 			});
 		});
 
 		if (!matches.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
 				<strong>No results for "${frappe.utils.escape_html(this.search_term)}"</strong>
-				— try an order number, customer name, or truck number.
+				— try an order number, customer name, truck number, item code, or item name.
 			</div>`;
 		}
 
-		const rows = matches.map(({ o, tn, is_region, status, status_color }) => `
-		<tr>
-			<td><a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${frappe.utils.escape_html(o.name)}</a></td>
-			<td>${frappe.utils.escape_html(o.customer_name || '')}</td>
-			<td><strong style="color:${is_region ? '#0d9488' : '#667eea'};">${frappe.utils.escape_html(tn)}</strong></td>
-			<td>${frappe.utils.escape_html(o.delivery_region || '')}</td>
-			<td><span class="tf-status-badge" style="background:${status_color};">${status}</span></td>
-		</tr>`).join('');
+		const rows = matches.map(({ o, tn, is_region, status, status_color, matched_items }) => {
+			const item_badges = matched_items.map(i =>
+				`<span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;margin-right:3px;">${frappe.utils.escape_html(i.item_name || i.item_code)}</span>`
+			).join('');
+			return `<tr>
+				<td>
+					<a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${frappe.utils.escape_html(o.name)}</a>
+					${item_badges ? `<div style="margin-top:3px;">${item_badges}</div>` : ''}
+				</td>
+				<td>${frappe.utils.escape_html(o.customer_name || '')}</td>
+				<td><strong style="color:${is_region ? '#0d9488' : '#667eea'};">${frappe.utils.escape_html(tn)}</strong></td>
+				<td>${frappe.utils.escape_html(o.delivery_region || '')}</td>
+				<td><span class="tf-status-badge" style="background:${status_color};">${status}</span></td>
+			</tr>`;
+		}).join('');
 
 		return `
 		<div style="margin-bottom:12px;color:#64748b;font-size:13px;">
