@@ -84,15 +84,20 @@ class TruckAssignmentManager {
 		this.container = $('<div class="ta-container"></div>').appendTo(this.page.main);
 	}
 
+	_gen_trip_id() {
+		return 'TRP-' + Date.now().toString(36).slice(-4).toUpperCase() + Math.random().toString(36).substr(2, 2).toUpperCase();
+	}
+
 	add_new_truck() {
 		frappe.prompt([
 			{ label: 'Truck Number', fieldname: 'truck_number', fieldtype: 'Data', reqd: 1 },
 			{ label: 'Driver Name', fieldname: 'driver_name', fieldtype: 'Data' },
 			{ label: 'Capacity (kg)', fieldname: 'capacity_kg', fieldtype: 'Float', default: 5000 },
 		], (vals) => {
+			vals.trip_id = this._gen_trip_id();
 			this.available_trucks.push(vals);
 			this._save_truck_meta();
-			frappe.show_alert({ message: __('Truck {0} added', [vals.truck_number]), indicator: 'green' });
+			frappe.show_alert({ message: __('Truck {0} added ({1})', [vals.truck_number, vals.trip_id]), indicator: 'green' });
 			this.render_view();
 		}, __('Add Truck'), __('Add'));
 	}
@@ -132,6 +137,7 @@ class TruckAssignmentManager {
 										truck_number: t,
 										driver_name:  m.driver_name  || '',
 										capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
+										trip_id:      m.trip_id      || this._gen_trip_id(),
 									});
 								}
 							});
@@ -190,6 +196,7 @@ class TruckAssignmentManager {
 							truck_number: o.custom_truck_number,
 							driver_name:  m.driver_name  || '',
 							capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
+							trip_id:      m.trip_id      || this._gen_trip_id(),
 						});
 					}
 				});
@@ -296,6 +303,7 @@ class TruckAssignmentManager {
 			truck_number: t.truck_number,
 			driver_name:  t.driver_name  || '',
 			capacity_kg:  t.capacity_kg  != null ? t.capacity_kg : 5000,
+			trip_id:      t.trip_id      || '',
 		}));
 		// Update in-memory saved_meta so subsequent seeds in load_data() use fresh values
 		this.saved_meta = {};
@@ -537,7 +545,10 @@ class TruckAssignmentManager {
 			html += `
 			<div class="ta-truck-card${is_empty ? ' ta-truck-empty' : ''}">
 				<div class="ta-truck-head">
-					<div class="ta-truck-num">${frappe.utils.escape_html(truck.truck_number)}</div>
+					<div>
+						<div class="ta-truck-num">${frappe.utils.escape_html(truck.truck_number)}</div>
+						${truck.trip_id ? `<div style="font-size:10px;color:#94a3b8;letter-spacing:.5px;">${frappe.utils.escape_html(truck.trip_id)}</div>` : ''}
+					</div>
 					<div class="ta-truck-btns">
 						<button class="btn btn-xs btn-default btn-dl-manifest"   data-truck="${truck.truck_number}" title="Download manifest">&#8659;</button>
 						<button class="btn btn-xs btn-default btn-edit-truck"    data-truck="${truck.truck_number}" title="Edit">&#9998;</button>
@@ -609,6 +620,7 @@ class TruckAssignmentManager {
 					<div>
 						<div class="ta-truck-num">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</div>
 						${ct.driver_name ? `<div class="ta-truck-driver" style="color:#cbd5e1;">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
+						${ct.trip_id ? `<div style="font-size:10px;color:#94a3b8;letter-spacing:.5px;">${frappe.utils.escape_html(ct.trip_id)}</div>` : ''}
 					</div>
 					<div style="text-align:right;">
 						<div style="font-size:11px;color:#94a3b8;">${frappe.utils.escape_html(closed_label)}</div>
@@ -722,6 +734,7 @@ class TruckAssignmentManager {
 					truck_number,
 					driver_name: m.driver_name || '',
 					capacity_kg: m.capacity_kg != null ? m.capacity_kg : 5000,
+					trip_id:     m.trip_id     || self._gen_trip_id(),
 				});
 			}
 			self._set_truck(order_name, truck_number);
@@ -826,6 +839,7 @@ class TruckAssignmentManager {
 				truck_number,
 				driver_name: m.driver_name || '',
 				capacity_kg: m.capacity_kg != null ? m.capacity_kg : 5000,
+				trip_id:     m.trip_id     || this._gen_trip_id(),
 			});
 		}
 
@@ -1022,6 +1036,7 @@ class TruckAssignmentManager {
 	_close_truck_batch(truck_number, truck_orders) {
 		const truck_info = this.available_trucks.find(t => t.truck_number === truck_number) || {};
 		const closure = {
+			trip_id:      truck_info.trip_id || '',
 			truck_number,
 			driver_name:  truck_info.driver_name || '',
 			capacity_kg:  truck_info.capacity_kg || 0,
@@ -1117,6 +1132,7 @@ class TruckAssignmentManager {
 									truck_number: ct.truck_number,
 									driver_name:  ct.driver_name  || '',
 									capacity_kg:  ct.capacity_kg  || 5000,
+									trip_id:      this._gen_trip_id(),
 								});
 								this._save_truck_meta();
 							}
