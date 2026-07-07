@@ -2,26 +2,25 @@ import frappe
 
 
 @frappe.whitelist()
-def get_daily_orders(from_date, to_date, sales_persons=None, delivery_region=None):
+def get_daily_orders(from_date, to_date, sales_persons_json=None, delivery_region=None):
+    import json
     conditions = [
         "so.docstatus != 2",
         "DATE(so.transaction_date) BETWEEN %(from_date)s AND %(to_date)s",
     ]
     params = {'from_date': from_date, 'to_date': to_date}
 
-    # Back-compat: accept single string or list
-    if isinstance(sales_persons, str):
-        sales_persons = [sales_persons] if sales_persons else None
+    sps = json.loads(sales_persons_json) if sales_persons_json else []
 
     sp_join = ""
-    if sales_persons:
-        placeholders = ', '.join(f'%(sp{i})s' for i in range(len(sales_persons)))
+    if sps:
+        placeholders = ', '.join(f'%(sp{i})s' for i in range(len(sps)))
         sp_join = (
             f"INNER JOIN `tabSales Team` sp_f "
             f"ON sp_f.parent = so.name AND sp_f.parenttype = 'Sales Order' "
             f"AND sp_f.sales_person IN ({placeholders})"
         )
-        for i, sp in enumerate(sales_persons):
+        for i, sp in enumerate(sps):
             params[f'sp{i}'] = sp
 
     if delivery_region:

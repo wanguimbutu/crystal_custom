@@ -95,7 +95,7 @@ class SalesOrderStatusPage {
 			args: {
 				from_date,
 				to_date,
-				sales_persons:   this._sps.size ? [...this._sps] : null,
+				sales_persons_json: this._sps.size ? JSON.stringify([...this._sps]) : null,
 				delivery_region: this.page.fields_dict.delivery_region.get_value() || null,
 			},
 			callback: (r) => {
