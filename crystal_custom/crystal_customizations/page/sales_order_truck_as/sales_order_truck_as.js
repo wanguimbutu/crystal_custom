@@ -141,6 +141,10 @@ class TruckAssignmentManager {
 									});
 								}
 							});
+							// Persist any newly-generated trip IDs so they survive page reloads
+							if (this.available_trucks.some(t => !(this.saved_meta[t.truck_number] || {}).trip_id)) {
+								this._save_truck_meta();
+							}
 						}
 						// Fetch closed-truck history before first render
 						frappe.call({
@@ -189,17 +193,21 @@ class TruckAssignmentManager {
 				);
 
 				// Seed any newly-seen truck numbers, restoring saved metadata
+				let seeded_new_trip_id = false;
 				this.orders.forEach(o => {
 					if (o.custom_truck_number && !this.available_trucks.find(t => t.truck_number === o.custom_truck_number)) {
 						const m = this.saved_meta[o.custom_truck_number] || {};
+						const trip_id = m.trip_id || this._gen_trip_id();
+						if (!m.trip_id) seeded_new_trip_id = true;
 						this.available_trucks.push({
 							truck_number: o.custom_truck_number,
 							driver_name:  m.driver_name  || '',
 							capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
-							trip_id:      m.trip_id      || this._gen_trip_id(),
+							trip_id,
 						});
 					}
 				});
+				if (seeded_new_trip_id) this._save_truck_meta();
 
 				// Fetch customer locations then render
 				const customers = [...new Set(this.orders.map(o => o.customer).filter(Boolean))];
