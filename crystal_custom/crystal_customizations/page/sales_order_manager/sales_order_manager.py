@@ -26,10 +26,10 @@ def get_orders(sales_persons_json=None, from_date=None, to_date=None):
     date_where = ''
     if from_date:
         params['from_date'] = from_date
-        date_where += ' AND so.transaction_date >= %(from_date)s'
+        date_where += ' AND DATE(so.transaction_date) >= %(from_date)s'
     if to_date:
         params['to_date'] = to_date
-        date_where += ' AND so.transaction_date <= %(to_date)s'
+        date_where += ' AND DATE(so.transaction_date) <= %(to_date)s'
 
     rows = frappe.db.sql(f"""
         SELECT DISTINCT

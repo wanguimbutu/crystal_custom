@@ -44,11 +44,20 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
          WHERE st2.parent = so.name) AS sales_persons
     """
 
+    date_where = ''
+    if from_date:
+        params['from_date'] = from_date
+        date_where += ' AND DATE(so.transaction_date) >= %(from_date)s'
+    if to_date:
+        params['to_date'] = to_date
+        date_where += ' AND DATE(so.transaction_date) <= %(to_date)s'
+
     base_where = f"""
         WHERE so.docstatus IN (0, 1)
           AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
           AND so.status NOT IN ('Completed', 'Closed')
           {sp_where}
+          {date_where}
     """
 
     # Truck-assigned, current trip only: custom_truck_closed=1 marks orders from a past dispatched
@@ -64,7 +73,7 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: no date filter, no truck-closed filter
+    # Unassigned orders: respect date filter, no truck-closed filter
     unassigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}

@@ -5,7 +5,7 @@ import frappe
 def get_daily_orders(from_date, to_date, sales_persons=None, delivery_region=None):
     conditions = [
         "so.docstatus != 2",
-        "so.transaction_date BETWEEN %(from_date)s AND %(to_date)s",
+        "DATE(so.transaction_date) BETWEEN %(from_date)s AND %(to_date)s",
     ]
     params = {'from_date': from_date, 'to_date': to_date}
 

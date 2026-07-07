@@ -37,7 +37,7 @@ class TruckAssignmentManager {
 		});
 		this.page.add_field({
 			label: 'To Date', fieldtype: 'Date', fieldname: 'to_date',
-			default: frappe.datetime.add_days(today, 1),
+			default: today,
 			change: () => this.load_data(),
 		});
 		this.page.add_field({
