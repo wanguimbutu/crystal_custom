@@ -41,7 +41,7 @@ class SalesOrderManager {
 		this.page.add_field({
 			label: 'Region', fieldtype: 'Link', fieldname: 'delivery_region',
 			options: 'Delivery Region',
-			change: () => { this.current_page = 1; this.render(); },
+			change: () => { this.current_page = 1; this.load_data(); },
 		});
 		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
@@ -88,8 +88,9 @@ class SalesOrderManager {
 			method: 'crystal_custom.crystal_customizations.page.sales_order_manager.sales_order_manager.get_orders',
 			args: {
 				sales_persons_json: this._sps.size ? JSON.stringify([...this._sps]) : null,
-				from_date: this.page.fields_dict.from_date.get_value() || null,
-				to_date:   this.page.fields_dict.to_date.get_value()   || null,
+				from_date:          this.page.fields_dict.from_date.get_value()        || null,
+				to_date:            this.page.fields_dict.to_date.get_value()           || null,
+				delivery_region:    this.page.fields_dict.delivery_region.get_value()   || null,
 			},
 			callback: (r) => {
 				this.orders = r.message || [];
@@ -100,9 +101,7 @@ class SalesOrderManager {
 	}
 
 	filtered_orders() {
-		const region = this.page.fields_dict.delivery_region.get_value();
 		return this.orders.filter(o => {
-			if (region && o.custom_delivery_region !== region)     return false;
 			if (this.search_term) {
 				const q = this.search_term.toLowerCase();
 				const match =

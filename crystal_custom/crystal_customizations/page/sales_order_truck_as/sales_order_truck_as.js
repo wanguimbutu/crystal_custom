@@ -50,7 +50,7 @@ class TruckAssignmentManager {
 				this._regions.add(v);
 				setTimeout(() => this.page.fields_dict.delivery_region.set_value(''), 50);
 				this._render_region_pills();
-				this.current_page = 1; this.render_view();
+				this.current_page = 1; this.load_data();
 			},
 		});
 		this._region_pills_wrap = $('<div class="region-pills-wrap"></div>').appendTo(this.page.page_form);
@@ -166,6 +166,7 @@ class TruckAssignmentManager {
 				from_date:           from || null,
 				to_date:             to   || null,
 				sales_persons_json:  this._sps.size ? JSON.stringify([...this._sps]) : null,
+				regions_json:        this._regions.size ? JSON.stringify([...this._regions]) : null,
 			},
 			callback: (r) => {
 				const result = r.message || { assigned: [], unassigned: [] };

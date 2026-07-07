@@ -2,14 +2,15 @@ import frappe
 
 
 @frappe.whitelist()
-def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json=None):
+def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json=None, regions_json=None):
     """
     Return truck-assigned and unassigned orders for the Truck Assignment page.
     SP filtering is done via SQL JOIN so it always works correctly.
     Returns sales_persons per order so the search box can filter by SP name.
     """
     import json
-    sps = json.loads(sales_persons_json) if sales_persons_json else []
+    sps     = json.loads(sales_persons_json) if sales_persons_json else []
+    regions = json.loads(regions_json)        if regions_json        else []
 
     has_pf = frappe.db.has_column('Sales Order', 'custom_is_pre_fulfillment')
     pf_expr = (
@@ -51,6 +52,11 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
     if to_date:
         params['to_date'] = to_date
         date_where += ' AND DATE(so.transaction_date) <= %(to_date)s'
+    if regions:
+        rph = ', '.join([f'%(rgn{i})s' for i in range(len(regions))])
+        date_where += f' AND so.custom_delivery_region IN ({rph})'
+        for i, r in enumerate(regions):
+            params[f'rgn{i}'] = r
 
     base_where = f"""
         WHERE so.docstatus IN (0, 1)

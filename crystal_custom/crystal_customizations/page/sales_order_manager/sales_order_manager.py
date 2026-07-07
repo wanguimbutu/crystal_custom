@@ -2,7 +2,7 @@ import frappe
 
 
 @frappe.whitelist()
-def get_orders(sales_persons_json=None, from_date=None, to_date=None):
+def get_orders(sales_persons_json=None, from_date=None, to_date=None, delivery_region=None):
     """
     Return draft Sales Orders at Proceed To Order / blank workflow state.
     Date filtering is done server-side so the full result set is correct
@@ -30,6 +30,9 @@ def get_orders(sales_persons_json=None, from_date=None, to_date=None):
     if to_date:
         params['to_date'] = to_date
         date_where += ' AND DATE(so.transaction_date) <= %(to_date)s'
+    if delivery_region:
+        params['delivery_region'] = delivery_region
+        date_where += ' AND so.custom_delivery_region = %(delivery_region)s'
 
     rows = frappe.db.sql(f"""
         SELECT DISTINCT
