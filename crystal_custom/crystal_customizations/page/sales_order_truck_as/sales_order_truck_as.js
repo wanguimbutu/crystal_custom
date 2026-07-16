@@ -123,7 +123,6 @@ class TruckAssignmentManager {
 						filters: [
 							['Sales Order', 'docstatus', 'in', [0, 1]],
 							['Sales Order', 'custom_truck_number', '!=', ''],
-							['Sales Order', 'status', 'not in', ['Completed', 'Closed']],
 							['Sales Order', 'custom_truck_closed', '!=', 1],
 						],
 						limit_page_length: 500,
@@ -979,12 +978,26 @@ class TruckAssignmentManager {
 			truck.capacity_kg  = vals.capacity_kg;
 			this._save_truck_meta();
 			if (old_num !== vals.truck_number) {
-				const to_update = this.orders.filter(o => o.custom_truck_number === old_num);
-				if (to_update.length) {
-					this._set_truck_batch(to_update, vals.truck_number);
-				} else {
-					this.render_view();
-				}
+				// Fetch ALL orders with the old truck number directly from DB — do not rely on
+				// this.orders which may be incomplete due to active SP/region/date filters.
+				frappe.call({
+					method: 'frappe.client.get_list',
+					args: {
+						doctype: 'Sales Order',
+						fields: ['name'],
+						filters: [['Sales Order', 'custom_truck_number', '=', old_num]],
+						limit_page_length: 0,
+					},
+					callback: (r) => {
+						const all_orders = r.message || [];
+						if (all_orders.length) {
+							this._set_truck_batch(all_orders, vals.truck_number);
+						} else {
+							this.load_data();
+						}
+					},
+					error: () => this.load_data(),
+				});
 			} else {
 				this.render_view();
 			}

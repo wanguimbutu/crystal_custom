@@ -45,6 +45,13 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
          WHERE st2.parent = so.name) AS sales_persons
     """
 
+    region_where = ''
+    if regions:
+        rph = ', '.join([f'%(rgn{i})s' for i in range(len(regions))])
+        region_where = f' AND so.custom_delivery_region IN ({rph})'
+        for i, r in enumerate(regions):
+            params[f'rgn{i}'] = r
+
     date_where = ''
     if from_date:
         params['from_date'] = from_date
@@ -52,26 +59,18 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
     if to_date:
         params['to_date'] = to_date
         date_where += ' AND DATE(so.transaction_date) <= %(to_date)s'
-    if regions:
-        rph = ', '.join([f'%(rgn{i})s' for i in range(len(regions))])
-        date_where += f' AND so.custom_delivery_region IN ({rph})'
-        for i, r in enumerate(regions):
-            params[f'rgn{i}'] = r
 
-    base_where = f"""
-        WHERE so.docstatus IN (0, 1)
-          AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
-          AND so.status NOT IN ('Completed', 'Closed')
-          {sp_where}
-          {date_where}
-    """
+    sp_region = f"{sp_where} {region_where}"
 
-    # Truck-assigned, current trip only: custom_truck_closed=1 marks orders from a past dispatched
-    # trip on the same truck — exclude them so rotating trucks don't bleed old orders into new trips.
+    # Truck-assigned: no date filter, no status filter — custom_truck_closed=1 is the sole signal
+    # that an order's trip is over. Orders must remain visible while the truck is active even after
+    # delivery notes and invoices are created (which would otherwise flip status to 'Completed').
     assigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}
-        {base_where}
+        WHERE so.docstatus IN (0, 1)
+          AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
+          {sp_region}
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
           AND IFNULL(so.custom_truck_closed, 0) != 1
@@ -79,11 +78,15 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: respect date filter, no truck-closed filter
+    # Unassigned orders: apply status + date filter so only open, actionable work appears
     unassigned = frappe.db.sql(f"""
         SELECT DISTINCT {select_cols}
         FROM `tabSales Order` so {sp_join}
-        {base_where}
+        WHERE so.docstatus IN (0, 1)
+          AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
+          AND so.status NOT IN ('Completed', 'Closed')
+          {sp_region}
+          {date_where}
           AND (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
         ORDER BY so.transaction_date DESC
         LIMIT 1000
