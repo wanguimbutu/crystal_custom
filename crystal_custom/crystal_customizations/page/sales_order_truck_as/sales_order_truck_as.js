@@ -561,7 +561,7 @@ class TruckAssignmentManager {
 						<button class="btn btn-xs btn-default btn-edit-truck"    data-truck="${truck.truck_number}" title="Edit">&#9998;</button>
 						${!is_empty ? `<button class="btn btn-xs btn-default btn-reassign-truck" data-truck="${truck.truck_number}" title="Move all orders to another truck">&#8644;</button>` : ''}
 						<button class="btn btn-xs btn-danger  btn-delete-truck"  data-truck="${truck.truck_number}" title="${is_empty ? 'Remove truck' : 'Unassign all orders'}">&#215;</button>
-						${!is_empty ? `<button class="btn btn-xs btn-primary btn-close-truck" data-truck="${truck.truck_number}">Dispatch</button>` : ''}
+						${!is_empty ? `<button class="btn btn-xs btn-primary btn-close-truck" data-truck="${truck.truck_number}" title="Archive current orders and start a new trip">New Trip</button>` : ''}
 					</div>
 				</div>
 
@@ -1053,12 +1053,12 @@ class TruckAssignmentManager {
 
 	close_truck(truck_number) {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
-		if (!truck_orders.length) { frappe.msgprint(__('Cannot close an empty truck')); return; }
+		if (!truck_orders.length) { frappe.msgprint(__('Cannot start a new trip on an empty truck')); return; }
 
 		const unsubmitted = truck_orders.filter(o => parseInt(o.docstatus) === 0);
 		const msg = unsubmitted.length
-			? __('Truck {0} has {1} unsubmitted order(s). Dispatch anyway? Trip will be recorded and truck cleared for the next load.', [truck_number, unsubmitted.length])
-			: __('Dispatch truck {0} with {1} orders? Trip will be recorded and truck cleared for the next load.', [truck_number, truck_orders.length]);
+			? __('Truck {0} has {1} unsubmitted order(s). Start new trip anyway? Current orders will be archived and the truck stays active for the next load.', [truck_number, unsubmitted.length])
+			: __('Start new trip for truck {0}? {1} current orders will be archived and the truck stays active for the next load.', [truck_number, truck_orders.length]);
 
 		frappe.confirm(msg, () => {
 			this.download_manifest(truck_number);
@@ -1114,11 +1114,14 @@ class TruckAssignmentManager {
 					},
 				});
 
-				// Remove from active list and persist
-				this.available_trucks = this.available_trucks.filter(t => t.truck_number !== truck_number);
+				// Keep truck active but give it a fresh trip ID for the next load
+				const truck_idx = this.available_trucks.findIndex(t => t.truck_number === truck_number);
+				if (truck_idx >= 0) {
+					this.available_trucks[truck_idx].trip_id = this._gen_trip_id();
+				}
 				this._save_truck_meta();
 
-				frappe.show_alert({ message: __('Trip recorded for {0}', [truck_number]), indicator: 'green' });
+				frappe.show_alert({ message: __('Trip archived for {0} — truck ready for next load', [truck_number]), indicator: 'green' });
 				this.load_data();
 			},
 			error: () => {
