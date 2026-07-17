@@ -63,10 +63,11 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
     sp_region = f"{sp_where} {region_where}"
 
     # Truck-assigned: no date filter, no status filter — custom_truck_closed=1 is the sole signal
-    # that an order's trip is over. Orders must remain visible while the truck is active even after
-    # delivery notes and invoices are created (which would otherwise flip status to 'Completed').
+    # a trip is over. Completed/Closed orders stay visible on their truck (for value/weight review)
+    # but the frontend badges them as "Invoiced" and prevents reassignment.
     assigned = frappe.db.sql(f"""
-        SELECT DISTINCT {select_cols}
+        SELECT DISTINCT {select_cols},
+            so.status AS so_status
         FROM `tabSales Order` so {sp_join}
         WHERE so.docstatus IN (0, 1)
           AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
@@ -211,7 +212,6 @@ def check_and_auto_close_trucks():
           AND custom_truck_number IS NOT NULL
           AND custom_truck_number != ''
           AND IFNULL(custom_truck_closed, 0) != 1
-          AND status NOT IN ('Completed', 'Closed')
     """, as_dict=1)
 
     if not rows:
@@ -242,6 +242,7 @@ def check_and_auto_close_trucks():
             'truck_number': truck_num,
             'driver_name':  meta.get('driver_name', ''),
             'capacity_kg':  meta.get('capacity_kg', 0),
+            'trip_id':      meta.get('trip_id', ''),
             'closed_at':    str(frappe.utils.now_datetime()),
             'order_count':  len(orders),
             'total_weight': sum(float(o.total_net_weight) for o in orders),
@@ -263,3 +264,23 @@ def check_and_auto_close_trucks():
     frappe.db.set_default('crystal_truck_meta',    json.dumps(existing_meta))
     frappe.db.commit()
     return auto_closed
+
+
+@frappe.whitelist()
+def cleanup_stale_completed_orders():
+    """
+    One-shot cleanup: mark all truck-assigned Completed/Closed orders as custom_truck_closed=1
+    so they stop appearing on active trucks. Safe to run multiple times.
+    """
+    result = frappe.db.sql("""
+        UPDATE `tabSales Order`
+        SET custom_truck_closed = 1
+        WHERE custom_truck_number IS NOT NULL
+          AND custom_truck_number != ''
+          AND IFNULL(custom_truck_closed, 0) != 1
+          AND status IN ('Completed', 'Closed')
+    """)
+    frappe.db.commit()
+    count = frappe.db.sql("SELECT ROW_COUNT()")[0][0]
+    frappe.logger().info(f"cleanup_stale_completed_orders: marked {count} orders as truck_closed")
+    return {'updated': count}

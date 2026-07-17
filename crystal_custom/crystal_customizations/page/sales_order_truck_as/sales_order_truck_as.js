@@ -582,15 +582,19 @@ class TruckAssignmentManager {
 				` : ''}
 				${regions.length ? `<div class="ta-truck-routes">${regions.map(r => `<span class="ta-route-tag">${r}</span>`).join('')}</div>` : ''}
 				<div class="ta-truck-orders">
-					${truck_orders.map(o => `
-					<div class="ta-truck-order">
+					${truck_orders.map(o => {
+						const is_done = o.so_status === 'Completed' || o.so_status === 'Closed';
+						return `
+					<div class="ta-truck-order${is_done ? ' ta-order-invoiced' : ''}">
 						<div>
 							<a href="/app/sales-order/${o.name}" target="_blank" class="ta-order-link">${o.name}</a>
 							<span class="ta-order-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
 							${o.custom_location ? `<span class="ta-order-loc">${frappe.utils.escape_html(o.custom_location)}</span>` : ''}
+							${is_done ? '<span class="ta-invoiced-badge">Invoiced</span>' : ''}
 						</div>
-						<button class="btn btn-xs btn-default btn-unassign" data-order="${o.name}" title="Remove from truck">&#215;</button>
-					</div>`).join('')}
+						${!is_done ? `<button class="btn btn-xs btn-default btn-unassign" data-order="${o.name}" title="Remove from truck">&#215;</button>` : ''}
+					</div>`;
+					}).join('')}
 				</div>
 				` : '<div class="ta-empty-truck">No orders assigned</div>'}
 			</div>`;
@@ -1006,10 +1010,18 @@ class TruckAssignmentManager {
 	}
 
 	reassign_truck_orders(truck_number) {
-		const truck_orders  = this.orders.filter(o => o.custom_truck_number === truck_number);
+		// Only move orders that are not yet invoiced — completed/closed orders stay put
+		const truck_orders  = this.orders.filter(o =>
+			o.custom_truck_number === truck_number &&
+			o.so_status !== 'Completed' && o.so_status !== 'Closed'
+		);
 		const other_trucks  = this.available_trucks.filter(t => t.truck_number !== truck_number);
 		if (!other_trucks.length) {
 			frappe.msgprint(__('No other trucks available. Add another truck first.'));
+			return;
+		}
+		if (!truck_orders.length) {
+			frappe.msgprint(__('All orders on this truck are already invoiced and cannot be moved.'));
 			return;
 		}
 		frappe.prompt([{
@@ -1559,6 +1571,8 @@ ${driver_cols}
 		.ta-order-link { font-weight: 600; color: #3b82f6; }
 		.ta-order-cust { display: block; color: #6b7280; font-size: 11px; }
 		.ta-order-loc  { display: block; color: #94a3b8; font-size: 10px; font-style: italic; }
+		.ta-order-invoiced { opacity: 0.65; background: #f1f5f9 !important; }
+		.ta-invoiced-badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; background: #10b981; color: #fff; border-radius: 8px; margin-left: 5px; vertical-align: middle; letter-spacing: .3px; }
 		.ta-empty-truck { text-align: center; color: #94a3b8; padding: 16px; font-style: italic; }
 
 		/* Closed trucks */
