@@ -155,6 +155,173 @@ def get_closed_trucks():
 
 
 @frappe.whitelist()
+def create_active_truck_plan(truck_number, driver_name='', capacity_kg=5000, trip_id=''):
+    """
+    Create a Draft Crystal Truck Plan immediately when a truck is added.
+    The plan is submitted (dispatched) later via dispatch_and_restart_truck.
+    Returns the new plan name.
+    """
+    doc = frappe.get_doc({
+        'doctype': 'Crystal Truck Plan',
+        'truck_number': truck_number,
+        'driver_name': driver_name or '',
+        'capacity_kg': float(capacity_kg or 5000),
+        'trip_id': trip_id or '',
+        'plan_date': frappe.utils.today(),
+    })
+    doc.insert(ignore_permissions=True)
+    frappe.db.commit()
+    return doc.name
+
+
+@frappe.whitelist()
+def get_active_truck_plans():
+    """
+    Return all Draft (active) Crystal Truck Plans so trucks can be recovered
+    from the database if the crystal_truck_meta KV store is ever cleared.
+    """
+    return frappe.db.get_all(
+        'Crystal Truck Plan',
+        filters={'docstatus': 0},
+        fields=['name', 'truck_number', 'driver_name', 'capacity_kg', 'trip_id', 'plan_date'],
+        order_by='plan_date DESC',
+    )
+
+
+@frappe.whitelist()
+def dispatch_and_restart_truck(plan_name, truck_number, driver_name, capacity_kg, orders_json, new_trip_id):
+    """
+    Submit the active Draft CTP (recording the dispatched trip with all its orders),
+    then create a fresh Draft CTP for the same truck's next trip.
+    Handles the case where plan_name is missing (legacy truck without a plan).
+    Returns {'submitted_plan': name, 'new_plan': name}.
+    """
+    import json
+    orders = json.loads(orders_json) if isinstance(orders_json, str) else orders_json
+
+    def _fill_orders(plan_doc, order_list):
+        plan_doc.orders = []
+        for o in order_list:
+            plan_doc.append('orders', {
+                'sales_order':    o.get('name') or o.get('sales_order', ''),
+                'customer_name':  o.get('customer_name', ''),
+                'delivery_region': o.get('delivery_region') or o.get('custom_delivery_region', ''),
+                'grand_total':    float(o.get('grand_total', 0)),
+                'total_net_weight': float(o.get('total_net_weight', 0)),
+            })
+        plan_doc.order_count  = len(order_list)
+        plan_doc.total_weight = sum(float(o.get('total_net_weight', 0)) for o in order_list)
+        plan_doc.total_value  = sum(float(o.get('grand_total', 0))      for o in order_list)
+        regions = sorted({
+            o.get('custom_delivery_region') or o.get('delivery_region', '')
+            for o in order_list
+            if o.get('custom_delivery_region') or o.get('delivery_region')
+        })
+        plan_doc.delivery_regions = ', '.join(r for r in regions if r)
+        plan_doc.closed_from = 'Truck Assignment'
+
+    # Get or create the draft plan to submit
+    plan = None
+    if plan_name and frappe.db.exists('Crystal Truck Plan', plan_name):
+        candidate = frappe.get_doc('Crystal Truck Plan', plan_name)
+        if candidate.docstatus == 0:
+            plan = candidate
+
+    if plan is None:
+        # Legacy truck with no plan (or already-submitted plan) — create one to record this trip
+        plan = frappe.get_doc({
+            'doctype': 'Crystal Truck Plan',
+            'truck_number': truck_number,
+            'driver_name':  driver_name or '',
+            'capacity_kg':  float(capacity_kg or 0),
+            'plan_date':    frappe.utils.today(),
+        })
+        plan.insert(ignore_permissions=True)
+
+    _fill_orders(plan, orders)
+    plan.save(ignore_permissions=True)
+    plan.submit()
+    submitted_name = plan.name
+
+    # Create fresh Draft CTP for the truck's next trip
+    new_plan = frappe.get_doc({
+        'doctype': 'Crystal Truck Plan',
+        'truck_number': truck_number,
+        'driver_name':  driver_name or '',
+        'capacity_kg':  float(capacity_kg or 0),
+        'trip_id':      new_trip_id or '',
+        'plan_date':    frappe.utils.today(),
+    })
+    new_plan.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {'submitted_plan': submitted_name, 'new_plan': new_plan.name}
+
+
+@frappe.whitelist()
+def update_truck_plan_meta(plan_name, truck_number=None, driver_name=None, capacity_kg=None, trip_id=None):
+    """Update metadata fields on a Draft Crystal Truck Plan (e.g. after edit_truck_details)."""
+    if not plan_name or not frappe.db.exists('Crystal Truck Plan', plan_name):
+        return False
+    doc = frappe.get_doc('Crystal Truck Plan', plan_name)
+    if doc.docstatus != 0:
+        return False  # Don't mutate submitted plans
+    changed = False
+    if truck_number is not None:
+        doc.truck_number = truck_number; changed = True
+    if driver_name is not None:
+        doc.driver_name = driver_name; changed = True
+    if capacity_kg is not None:
+        doc.capacity_kg = float(capacity_kg); changed = True
+    if trip_id is not None:
+        doc.trip_id = trip_id; changed = True
+    if changed:
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+    return True
+
+
+@frappe.whitelist()
+def get_truck_history(limit=100):
+    """
+    Return dispatched trip records for the Trip History panel.
+    Primary source: submitted Crystal Truck Plans (docstatus=1).
+    Also merges legacy crystal_closed_trucks KV records that pre-date CTP tracking.
+    """
+    import json
+
+    plans = frappe.db.get_all(
+        'Crystal Truck Plan',
+        filters={'docstatus': 1},
+        fields=['name', 'truck_number', 'driver_name', 'capacity_kg', 'trip_id',
+                'plan_date', 'order_count', 'total_weight', 'total_value', 'delivery_regions'],
+        order_by='plan_date DESC',
+        limit=int(limit),
+    )
+
+    result = []
+    for p in plans:
+        orders = frappe.db.get_all(
+            'Crystal Truck Plan Order',
+            filters={'parent': p.name},
+            fields=['sales_order as name', 'customer_name', 'delivery_region',
+                    'grand_total', 'total_net_weight'],
+        )
+        entry          = dict(p)
+        entry['orders']    = [dict(o) for o in orders]
+        entry['closed_at'] = str(p.plan_date)
+        result.append(entry)
+
+    # Merge legacy KV records (trips closed before CTP tracking was introduced)
+    existing_trip_ids = {r.get('trip_id') for r in result if r.get('trip_id')}
+    for leg in json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]'):
+        if not leg.get('trip_id') or leg['trip_id'] not in existing_trip_ids:
+            result.append(leg)
+
+    return result
+
+
+@frappe.whitelist()
 def create_truck_plan(truck_number, driver_name, capacity_kg, orders_json, closed_from):
     """Create and submit a Crystal Truck Plan for permanent data persistence."""
     import json

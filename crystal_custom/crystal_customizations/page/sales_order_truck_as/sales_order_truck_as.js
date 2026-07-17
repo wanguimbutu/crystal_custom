@@ -85,7 +85,7 @@ class TruckAssignmentManager {
 	}
 
 	_gen_trip_id() {
-		return 'TRP-' + Date.now().toString(36).slice(-4).toUpperCase() + Math.random().toString(36).substr(2, 2).toUpperCase();
+		return 'TRP-' + Date.now().toString(36).slice(-4).toUpperCase() + Math.random().toString(36).slice(2, 4).toUpperCase();
 	}
 
 	add_new_truck() {
@@ -94,11 +94,74 @@ class TruckAssignmentManager {
 			{ label: 'Driver Name', fieldname: 'driver_name', fieldtype: 'Data' },
 			{ label: 'Capacity (kg)', fieldname: 'capacity_kg', fieldtype: 'Float', default: 5000 },
 		], (vals) => {
-			vals.trip_id = this._gen_trip_id();
-			this.available_trucks.push(vals);
-			this._save_truck_meta();
-			frappe.show_alert({ message: __('Truck {0} added ({1})', [vals.truck_number, vals.trip_id]), indicator: 'green' });
-			this.render_view();
+			const plate = (vals.truck_number || '').trim().toUpperCase();
+			if (!plate) return;
+			vals.truck_number = plate;
+
+			const existing = this.available_trucks.find(t => t.truck_number === plate);
+			if (existing) {
+				// Same plate re-added — fetch all active orders from DB (authoritative, unaffected by UI filters)
+				frappe.call({
+					method: 'frappe.client.get_list',
+					args: {
+						doctype: 'Sales Order',
+						fields: ['name', 'customer', 'customer_name', 'custom_delivery_region', 'grand_total', 'total_net_weight'],
+						filters: [
+							['Sales Order', 'custom_truck_number', '=', plate],
+							['Sales Order', 'custom_truck_closed', '!=', 1],
+						],
+						limit_page_length: 0,
+					},
+					callback: (r) => {
+						const truck_orders = r.message || [];
+						if (truck_orders.length) {
+							frappe.confirm(
+								__('Truck {0} has {1} active order(s) from the current trip. Archive that trip and start a new one?', [plate, truck_orders.length]),
+								() => {
+									// Update driver/capacity before archiving so new trip inherits updated values
+									existing.driver_name = vals.driver_name || existing.driver_name;
+									existing.capacity_kg = vals.capacity_kg != null ? vals.capacity_kg : existing.capacity_kg;
+									this._close_truck_batch(plate, truck_orders);
+								}
+							);
+						} else {
+							// No active orders — just reset trip and update meta
+							existing.driver_name = vals.driver_name || existing.driver_name;
+							existing.capacity_kg = vals.capacity_kg != null ? vals.capacity_kg : existing.capacity_kg;
+							existing.trip_id = this._gen_trip_id();
+							this._save_truck_meta();
+							frappe.show_alert({ message: __('New trip started for {0} ({1})', [plate, existing.trip_id]), indicator: 'green' });
+							this.render_view();
+						}
+					},
+				});
+			} else {
+				// Brand new truck — add to active list then create a Draft CTP immediately
+				vals.trip_id  = this._gen_trip_id();
+				vals.plan_name = '';
+				this.available_trucks.push(vals);
+				this._save_truck_meta();
+				frappe.show_alert({ message: __('Truck {0} added ({1})', [vals.truck_number, vals.trip_id]), indicator: 'green' });
+				this.render_view();
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.create_active_truck_plan',
+					args: {
+						truck_number: plate,
+						driver_name:  vals.driver_name || '',
+						capacity_kg:  vals.capacity_kg || 5000,
+						trip_id:      vals.trip_id,
+					},
+					callback: (r) => {
+						if (r.message) {
+							const idx = this.available_trucks.findIndex(t => t.truck_number === plate);
+							if (idx >= 0) {
+								this.available_trucks[idx].plan_name = r.message;
+								this._save_truck_meta();
+							}
+						}
+					},
+				});
+			}
 		}, __('Add Truck'), __('Add'));
 	}
 
@@ -137,25 +200,53 @@ class TruckAssignmentManager {
 										driver_name:  m.driver_name  || '',
 										capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
 										trip_id:      m.trip_id      || this._gen_trip_id(),
+										plan_name:    m.plan_name    || '',
 									});
 								}
 							});
-							// Persist any newly-generated trip IDs so they survive page reloads
 							if (this.available_trucks.some(t => !(this.saved_meta[t.truck_number] || {}).trip_id)) {
 								this._save_truck_meta();
 							}
 						}
-						// Fetch closed-truck history before first render
+						// Recover any trucks that exist as Draft CTPs but are not in saved_meta
 						frappe.call({
-							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_closed_trucks',
-							callback: (cr) => {
-								try { this.closed_trucks = JSON.parse(cr.message || '[]') || []; } catch(e) {}
-								// saved_meta (available_trucks) is authoritative for active trucks;
-								// closed_trucks is display-only history — do not filter active list by it,
-								// since trucks in rotation will appear in history AND be re-added as active.
-								this.load_data();
+							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_active_truck_plans',
+							callback: (pr) => {
+								let recovered = false;
+								(pr.message || []).forEach(p => {
+									const ex = this.available_trucks.find(t => t.truck_number === p.truck_number);
+									if (ex) {
+										if (!ex.plan_name) { ex.plan_name = p.name; recovered = true; }
+									} else {
+										this.available_trucks.push({
+											truck_number: p.truck_number,
+											driver_name:  p.driver_name || '',
+											capacity_kg:  p.capacity_kg != null ? p.capacity_kg : 5000,
+											trip_id:      p.trip_id     || this._gen_trip_id(),
+											plan_name:    p.name,
+										});
+										recovered = true;
+									}
+								});
+								if (recovered) this._save_truck_meta();
+
+								// Load trip history from Crystal Truck Plans (primary) + legacy KV fallback
+								frappe.call({
+									method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_history',
+									callback: (hr) => {
+										this.closed_trucks = hr.message || [];
+										this.load_data();
+									},
+									error: () => this.load_data(),
+								});
 							},
-							error: () => this.load_data(),
+							error: () => {
+								frappe.call({
+									method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_history',
+									callback: (hr) => { this.closed_trucks = hr.message || []; this.load_data(); },
+									error: () => this.load_data(),
+								});
+							},
 						});
 					},
 				});
@@ -311,6 +402,7 @@ class TruckAssignmentManager {
 			driver_name:  t.driver_name  || '',
 			capacity_kg:  t.capacity_kg  != null ? t.capacity_kg : 5000,
 			trip_id:      t.trip_id      || '',
+			plan_name:    t.plan_name    || '',
 		}));
 		// Update in-memory saved_meta so subsequent seeds in load_data() use fresh values
 		this.saved_meta = {};
@@ -560,8 +652,8 @@ class TruckAssignmentManager {
 						<button class="btn btn-xs btn-default btn-dl-manifest"   data-truck="${truck.truck_number}" title="Download manifest">&#8659;</button>
 						<button class="btn btn-xs btn-default btn-edit-truck"    data-truck="${truck.truck_number}" title="Edit">&#9998;</button>
 						${!is_empty ? `<button class="btn btn-xs btn-default btn-reassign-truck" data-truck="${truck.truck_number}" title="Move all orders to another truck">&#8644;</button>` : ''}
+						${!is_empty ? `<button class="btn btn-xs btn-primary btn-close-truck" data-truck="${truck.truck_number}" title="Dispatch truck — save trip record and keep truck ready for next load">Dispatch</button>` : ''}
 						<button class="btn btn-xs btn-danger  btn-delete-truck"  data-truck="${truck.truck_number}" title="${is_empty ? 'Remove truck' : 'Unassign all orders'}">&#215;</button>
-						${!is_empty ? `<button class="btn btn-xs btn-primary btn-close-truck" data-truck="${truck.truck_number}" title="Archive current orders and start a new trip">New Trip</button>` : ''}
 					</div>
 				</div>
 
@@ -981,6 +1073,20 @@ class TruckAssignmentManager {
 			truck.driver_name  = vals.driver_name;
 			truck.capacity_kg  = vals.capacity_kg;
 			this._save_truck_meta();
+
+			// Keep Crystal Truck Plan in sync
+			if (truck.plan_name) {
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.update_truck_plan_meta',
+					args: {
+						plan_name:    truck.plan_name,
+						truck_number: vals.truck_number,
+						driver_name:  vals.driver_name,
+						capacity_kg:  vals.capacity_kg,
+					},
+				});
+			}
+
 			if (old_num !== vals.truck_number) {
 				// Fetch ALL orders with the old truck number directly from DB — do not rely on
 				// this.orders which may be incomplete due to active SP/region/date filters.
@@ -1053,12 +1159,12 @@ class TruckAssignmentManager {
 
 	close_truck(truck_number) {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
-		if (!truck_orders.length) { frappe.msgprint(__('Cannot start a new trip on an empty truck')); return; }
+		if (!truck_orders.length) { frappe.msgprint(__('Cannot dispatch an empty truck')); return; }
 
 		const unsubmitted = truck_orders.filter(o => parseInt(o.docstatus) === 0);
 		const msg = unsubmitted.length
-			? __('Truck {0} has {1} unsubmitted order(s). Start new trip anyway? Current orders will be archived and the truck stays active for the next load.', [truck_number, unsubmitted.length])
-			: __('Start new trip for truck {0}? {1} current orders will be archived and the truck stays active for the next load.', [truck_number, truck_orders.length]);
+			? __('Truck {0} has {1} unsubmitted order(s). Dispatch anyway? Orders will be recorded and the truck stays available for the next load.', [truck_number, unsubmitted.length])
+			: __('Dispatch truck {0}? {1} orders will be recorded in a Trip Plan and the truck stays available for the next load.', [truck_number, truck_orders.length]);
 
 		frappe.confirm(msg, () => {
 			this.download_manifest(truck_number);
@@ -1067,7 +1173,9 @@ class TruckAssignmentManager {
 	}
 
 	_close_truck_batch(truck_number, truck_orders) {
-		const truck_info = this.available_trucks.find(t => t.truck_number === truck_number) || {};
+		const truck_info  = this.available_trucks.find(t => t.truck_number === truck_number) || {};
+		const new_trip_id = this._gen_trip_id();
+
 		const closure = {
 			trip_id:      truck_info.trip_id || '',
 			truck_number,
@@ -1084,49 +1192,60 @@ class TruckAssignmentManager {
 			})),
 		};
 
-		// Single batch call — marks all orders closed atomically in one SQL UPDATE
+		const orders_meta = truck_orders.map(o => ({
+			name:             o.name,
+			customer_name:    o.customer_name || o.customer || '',
+			delivery_region:  o.custom_delivery_region || '',
+			grand_total:      o.grand_total || 0,
+			total_net_weight: o.total_net_weight || 0,
+		}));
+
+		// Run both operations in parallel: mark orders closed on SOs + submit/restart CTP
+		let orders_done = false, plan_done = false, new_plan_name = '';
+
+		const finish = () => {
+			if (!orders_done || !plan_done) return;
+
+			// Update in-memory trip history (KV cache for quick access)
+			this.closed_trucks = [closure, ...this.closed_trucks];
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
+				args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
+			});
+
+			// Give truck a fresh trip ID and plan for the next load
+			const truck_idx = this.available_trucks.findIndex(t => t.truck_number === truck_number);
+			if (truck_idx >= 0) {
+				this.available_trucks[truck_idx].trip_id  = new_trip_id;
+				this.available_trucks[truck_idx].plan_name = new_plan_name;
+			}
+			this._save_truck_meta();
+
+			frappe.show_alert({ message: __('Trip dispatched for {0} — ready for next load', [truck_number]), indicator: 'green' });
+			this.load_data();
+		};
+
+		// 1. Batch-set custom_truck_closed=1 on all Sales Orders
 		frappe.call({
 			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.close_truck_orders',
-			args: { order_names_json: JSON.stringify(truck_orders.map(o => o.name)) },
-			callback: () => {
-				// Prepend to trip history and persist
-				this.closed_trucks = [closure, ...this.closed_trucks];
-				frappe.call({
-					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
-					args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
-				});
+			args:   { order_names_json: JSON.stringify(truck_orders.map(o => o.name)) },
+			callback: () => { orders_done = true; finish(); },
+			error:    () => { orders_done = true; finish(); },
+		});
 
-				// Persist as a submitted Crystal Truck Plan for permanent record
-				frappe.call({
-					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.create_truck_plan',
-					args: {
-						truck_number: truck_number,
-						driver_name:  truck_info.driver_name || '',
-						capacity_kg:  truck_info.capacity_kg || 0,
-						orders_json:  JSON.stringify(truck_orders.map(o => ({
-							name:             o.name,
-							customer_name:    o.customer_name || o.customer || '',
-							delivery_region:  o.custom_delivery_region || '',
-							grand_total:      o.grand_total || 0,
-							total_net_weight: o.total_net_weight || 0,
-						}))),
-						closed_from: 'Truck Assignment',
-					},
-				});
-
-				// Keep truck active but give it a fresh trip ID for the next load
-				const truck_idx = this.available_trucks.findIndex(t => t.truck_number === truck_number);
-				if (truck_idx >= 0) {
-					this.available_trucks[truck_idx].trip_id = this._gen_trip_id();
-				}
-				this._save_truck_meta();
-
-				frappe.show_alert({ message: __('Trip archived for {0} — truck ready for next load', [truck_number]), indicator: 'green' });
-				this.load_data();
+		// 2. Submit the active Crystal Truck Plan + create a new Draft for the next trip
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.dispatch_and_restart_truck',
+			args: {
+				plan_name:    truck_info.plan_name || '',
+				truck_number: truck_number,
+				driver_name:  truck_info.driver_name || '',
+				capacity_kg:  truck_info.capacity_kg || 0,
+				orders_json:  JSON.stringify(orders_meta),
+				new_trip_id:  new_trip_id,
 			},
-			error: () => {
-				frappe.msgprint(__('Failed to dispatch truck {0}. Please try again.', [truck_number]));
-			},
+			callback: (r) => { new_plan_name = (r.message || {}).new_plan || ''; plan_done = true; finish(); },
+			error:    () => { plan_done = true; finish(); },
 		});
 	}
 

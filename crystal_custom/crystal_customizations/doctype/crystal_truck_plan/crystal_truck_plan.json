@@ -8,6 +8,7 @@
  "field_order": [
   "naming_series",
   "truck_number",
+  "trip_id",
   "plan_date",
   "col_break_1",
   "closed_from",
@@ -36,6 +37,13 @@
    "reqd": 1,
    "in_list_view": 1,
    "bold": 1
+  },
+  {
+   "fieldname": "trip_id",
+   "fieldtype": "Data",
+   "label": "Trip ID",
+   "read_only": 1,
+   "in_list_view": 0
   },
   {
    "fieldname": "plan_date",
