@@ -16,6 +16,7 @@ class TruckAssignmentManager {
 		this.page_size = 50;
 		this.search_term = '';
 		this.selected_orders = new Set();
+		this.selected_trucks = new Set();
 		this.saved_meta = {};
 		this.closed_trucks = [];
 		this.trucks_tab = 'active';
@@ -256,6 +257,7 @@ class TruckAssignmentManager {
 
 	load_data() {
 		this.selected_orders.clear();
+		this.selected_trucks.clear();
 		this.container.html(this._loading_html());
 		const from = this.page.fields_dict.from_date.get_value();
 		const to   = this.page.fields_dict.to_date.get_value();
@@ -457,8 +459,11 @@ class TruckAssignmentManager {
 		).join('');
 
 		// Count selected orders visible in the full filtered list (all pages)
-		const sel_count   = all_orders.filter(o => this.selected_orders.has(o.name)).length;
+		const sel_orders  = all_orders.filter(o => this.selected_orders.has(o.name));
+		const sel_count   = sel_orders.length;
 		const all_checked = all_orders.length > 0 && sel_count === all_orders.length;
+		const sel_weight  = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+		const sel_value   = sel_orders.reduce((s, o) => s + (o.grand_total      || 0), 0);
 
 		let html = `
 		<datalist id="ta-trucks-list">${truck_opts}</datalist>
@@ -470,6 +475,11 @@ class TruckAssignmentManager {
 			</label>
 			<span class="ta-bulk-sep"></span>
 			<span class="ta-bulk-count">${sel_count} of ${all_orders.length} selected</span>
+			${sel_count ? `
+			<span class="ta-bulk-sel-stats">
+				<span class="ta-bulk-sel-stat" title="Total weight of selected orders">&#8981; ${sel_weight.toFixed(1)} kg</span>
+				<span class="ta-bulk-sel-stat" title="Total value of selected orders">${format_currency(sel_value, null, 0)}</span>
+			</span>` : ''}
 			<div class="ta-bulk-actions">
 				<input type="text" class="ta-bulk-truck-input form-control form-control-sm"
 				       list="ta-trucks-list" placeholder="Assign to truck…"
@@ -629,7 +639,32 @@ class TruckAssignmentManager {
 	_render_trucks(all_orders) {
 		if (!this.available_trucks.length) return '';
 
-		let html = '<div class="ta-trucks-grid">';
+		// Truck bulk action bar
+		const sel_t = this.selected_trucks.size;
+		let html = '';
+		if (sel_t) {
+			const sel_truck_objs = this.available_trucks.filter(t => this.selected_trucks.has(t.truck_number));
+			const sel_t_orders   = all_orders.filter(o => o.custom_truck_number && this.selected_trucks.has(o.custom_truck_number));
+			const sel_t_weight   = sel_truck_objs.reduce((s, t) => {
+				return s + all_orders.filter(o => o.custom_truck_number === t.truck_number).reduce((ws, o) => ws + (o.total_net_weight || 0), 0);
+			}, 0);
+			const sel_t_value    = sel_t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+			html += `
+			<div class="ta-truck-bulk-bar">
+				<span class="ta-truck-bulk-info">
+					<strong>${sel_t}</strong> truck${sel_t !== 1 ? 's' : ''} selected
+					&nbsp;·&nbsp; &#8981; ${sel_t_weight.toFixed(0)} kg
+					&nbsp;·&nbsp; ${format_currency(sel_t_value, null, 0)}
+				</span>
+				<div style="display:flex;gap:6px;">
+					<button class="btn btn-sm btn-primary ta-bulk-dispatch-trucks">Dispatch Selected</button>
+					<button class="btn btn-sm btn-danger  ta-bulk-remove-trucks">Remove Selected</button>
+					<button class="btn btn-sm btn-default ta-bulk-clear-trucks">Clear</button>
+				</div>
+			</div>`;
+		}
+
+		html += '<div class="ta-trucks-grid">';
 
 		this.available_trucks.forEach(truck => {
 			const truck_orders = all_orders.filter(o => o.custom_truck_number === truck.truck_number);
@@ -640,11 +675,15 @@ class TruckAssignmentManager {
 			const is_empty     = !truck_orders.length;
 			const not_picked   = truck_orders.filter(o => o.custom_call_not_picked === 1).length;
 			const regions      = [...new Set(truck_orders.map(o => o.custom_delivery_region).filter(Boolean))].sort();
+			const is_checked   = this.selected_trucks.has(truck.truck_number);
 
 			html += `
-			<div class="ta-truck-card${is_empty ? ' ta-truck-empty' : ''}">
+			<div class="ta-truck-card${is_empty ? ' ta-truck-empty' : ''}${is_checked ? ' ta-truck-selected' : ''}">
 				<div class="ta-truck-head">
-					<div>
+					<label class="ta-truck-chk-wrap" title="Select truck">
+						<input type="checkbox" class="ta-truck-chk" data-truck="${frappe.utils.escape_html(truck.truck_number)}" ${is_checked ? 'checked' : ''}>
+					</label>
+					<div style="flex:1;min-width:0;">
 						<div class="ta-truck-num">${frappe.utils.escape_html(truck.truck_number)}</div>
 						${truck.trip_id ? `<div style="font-size:10px;color:#94a3b8;letter-spacing:.5px;">${frappe.utils.escape_html(truck.trip_id)}</div>` : ''}
 					</div>
@@ -780,15 +819,28 @@ class TruckAssignmentManager {
 
 			$(this).closest('tr').toggleClass('ta-row-selected', checked);
 
-			// Update count label and button state
+			// Update count label, weight/value summary, and button state
 			const unassigned  = self.get_filtered_orders().filter(o => !o.custom_truck_number);
-			const sel_count   = unassigned.filter(o => self.selected_orders.has(o.name)).length;
+			const sel_orders  = unassigned.filter(o => self.selected_orders.has(o.name));
+			const sel_count   = sel_orders.length;
 			const all_checked = sel_count === unassigned.length && unassigned.length > 0;
+			const sel_weight  = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+			const sel_value   = sel_orders.reduce((s, o) => s + (o.grand_total      || 0), 0);
 
 			self.container.find('.ta-select-all-chk').prop('checked', all_checked);
 			self.container.find('.ta-bulk-count').text(`${sel_count} of ${unassigned.length} selected`);
 			self.container.find('.ta-bulk-assign-btn').prop('disabled', sel_count === 0);
 			self.container.find('.ta-bulk-truck-input').prop('disabled', sel_count === 0);
+
+			// Update or remove the weight/value summary block
+			self.container.find('.ta-bulk-sel-stats').remove();
+			if (sel_count > 0) {
+				const stats_html = `<span class="ta-bulk-sel-stats">
+					<span class="ta-bulk-sel-stat" title="Total weight">&#8981; ${sel_weight.toFixed(1)} kg</span>
+					<span class="ta-bulk-sel-stat" title="Total value">${format_currency(sel_value, null, 0)}</span>
+				</span>`;
+				self.container.find('.ta-bulk-count').after(stats_html);
+			}
 
 			// Show/hide Clear button
 			if (sel_count > 0 && !self.container.find('.ta-bulk-clear-btn').length) {
@@ -876,6 +928,70 @@ class TruckAssignmentManager {
 
 		this.container.find('.btn-close-truck').off('click').on('click', function () {
 			self.close_truck($(this).data('truck'));
+		});
+
+		// ── Truck multi-select ────────────────────────────────────────────────────
+		this.container.find('.ta-truck-chk').off('change').on('change', function () {
+			const tn = $(this).data('truck');
+			if ($(this).is(':checked')) self.selected_trucks.add(tn);
+			else self.selected_trucks.delete(tn);
+			// Update card highlight without full re-render
+			$(this).closest('.ta-truck-card').toggleClass('ta-truck-selected', $(this).is(':checked'));
+			// Re-render only the bulk bar area
+			self.render_view();
+		});
+
+		this.container.find('.ta-bulk-clear-trucks').off('click').on('click', () => {
+			self.selected_trucks.clear();
+			self.render_view();
+		});
+
+		this.container.find('.ta-bulk-dispatch-trucks').off('click').on('click', () => {
+			const trucks = [...self.selected_trucks];
+			if (!trucks.length) return;
+			frappe.confirm(
+				__('Dispatch {0} truck(s)? Their orders will be recorded in Trip Plans and the trucks will be ready for the next load.', [trucks.length]),
+				() => {
+					self.selected_trucks.clear();
+					// Dispatch sequentially so each confirm+manifest happens in order
+					const dispatch_next = (idx) => {
+						if (idx >= trucks.length) { self.load_data(); return; }
+						const tn = trucks[idx];
+						const truck_orders = self.orders.filter(o => o.custom_truck_number === tn);
+						if (truck_orders.length) {
+							self.download_manifest(tn);
+							self._close_truck_batch(tn, truck_orders);
+							// _close_truck_batch calls load_data; chain next after a brief wait
+							setTimeout(() => dispatch_next(idx + 1), 800);
+						} else {
+							dispatch_next(idx + 1);
+						}
+					};
+					dispatch_next(0);
+				}
+			);
+		});
+
+		this.container.find('.ta-bulk-remove-trucks').off('click').on('click', () => {
+			const trucks = [...self.selected_trucks];
+			if (!trucks.length) return;
+			const total_orders = trucks.reduce((s, tn) => s + self.orders.filter(o => o.custom_truck_number === tn).length, 0);
+			const msg = total_orders
+				? __('Remove {0} truck(s) and unassign {1} order(s)? Orders will return to the unassigned list.', [trucks.length, total_orders])
+				: __('Remove {0} empty truck(s)?', [trucks.length]);
+			frappe.confirm(msg, () => {
+				self.selected_trucks.clear();
+				trucks.forEach(tn => {
+					const truck_orders = self.orders.filter(o => o.custom_truck_number === tn);
+					if (truck_orders.length) {
+						self._set_truck_batch(truck_orders, '');
+					} else {
+						self.available_trucks = self.available_trucks.filter(t => t.truck_number !== tn);
+					}
+				});
+				self._save_truck_meta();
+				self.render_view();
+			});
 		});
 
 		this.container.find('.btn-dl-manifest').off('click').on('click', function () {
@@ -1565,10 +1681,29 @@ ${driver_cols}
 		.ta-bulk-select-label input { width:15px; height:15px; accent-color:#667eea; cursor:pointer; }
 		.ta-bulk-sep { flex: 1; }
 		.ta-bulk-count { font-size: 13px; color: #6b7280; white-space: nowrap; }
+		.ta-bulk-sel-stats { display:inline-flex; gap:8px; margin-left:8px; }
+		.ta-bulk-sel-stat { font-size:12px; font-weight:600; color:#1e293b; background:#e0f2fe; border-radius:4px; padding:2px 8px; white-space:nowrap; }
 		.ta-bulk-actions { display: flex; align-items: center; gap: 6px; }
 		.ta-bulk-truck-input { width: 160px !important; height: 30px !important; font-size: 12px !important; }
 		.ta-td-chk { width: 36px; text-align: center; }
 		.ta-row-selected td { background: #eff6ff !important; }
+
+		/* Truck multi-select */
+		.ta-truck-bulk-bar {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			background: #1e293b;
+			color: #fff;
+			border-radius: 8px;
+			padding: 10px 16px;
+			margin-bottom: 12px;
+			gap: 12px;
+		}
+		.ta-truck-bulk-info { font-size: 13px; }
+		.ta-truck-chk-wrap { display:flex; align-items:center; cursor:pointer; margin-right:8px; flex-shrink:0; }
+		.ta-truck-chk-wrap input { width:15px; height:15px; accent-color:#667eea; cursor:pointer; }
+		.ta-truck-selected { border-color: #667eea !important; box-shadow: 0 0 0 2px rgba(102,126,234,.25); }
 
 		/* Awaiting table */
 		.ta-table-wrap { overflow-x: auto; }
