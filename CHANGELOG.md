@@ -1,3 +1,11 @@
+# [1.26.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.5...v1.26.0) (2026-07-22)
+
+
+### Features
+
+* **truck-assignment:** Crystal Truck Plan as persistent source of truth ([10a718d](https://github.com/wanguimbutu/crystal_custom/commit/10a718d5982bc1ac7ff78235c36bc1c1a8b9ad5f))
+* **truck-assignment:** multi-select trucks + selected orders weight/value ([0c82d09](https://github.com/wanguimbutu/crystal_custom/commit/0c82d098a8d30497bb9dcc41306e26acbe2f4db4))
+
 ## [1.25.5](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.4...v1.25.5) (2026-06-26)
 
 
