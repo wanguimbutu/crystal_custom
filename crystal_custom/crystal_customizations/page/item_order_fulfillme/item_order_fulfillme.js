@@ -205,21 +205,32 @@ class OrderFulfillmentManager {
 		const stock_badge  = Object.keys(this._compute_item_summary()).length;
 
 		let html = `${this._styles()}
+		<div class="tf-page-intro">
+			<div>
+				<div class="tf-eyebrow">Dispatch workspace</div>
+				<h2>Order fulfilment overview</h2>
+				<p>Review demand, allocate available stock, and prepare each truck for dispatch.</p>
+			</div>
+			<div class="tf-live-status">
+				<span class="tf-live-dot"></span>
+				<span class="tf-stock-ts">${this._fmt_updated_at()}</span>
+			</div>
+		</div>
 		<div class="tf-tabs">
 			<button class="tf-tab-btn ${this.active_tab === 'trucks'    ? 'active' : ''}" data-tab="trucks">
-				Trucks
+				<span class="tf-tab-icon">&#128666;</span> Trucks
 				${trucks_badge ? `<span class="tf-tab-badge">${trucks_badge}</span>` : ''}
 			</button>
 			<button class="tf-tab-btn ${this.active_tab === 'stock'     ? 'active' : ''}" data-tab="stock">
-				Stock Overview
+				<span class="tf-tab-icon">&#9638;</span> Stock Overview
 				${stock_badge ? `<span class="tf-tab-badge">${stock_badge}</span>` : ''}
 			</button>
 			<button class="tf-tab-btn ${this.active_tab === 'customers' ? 'active' : ''}" data-tab="customers">
-				Customer View
+				<span class="tf-tab-icon">&#9787;</span> Customer View
 				${cust_badge ? `<span class="tf-tab-badge">${cust_badge}</span>` : ''}
 			</button>
 			<button class="tf-tab-btn ${this.active_tab === 'summary'   ? 'active' : ''}" data-tab="summary">
-				Item Summary
+				<span class="tf-tab-icon">&#9776;</span> Item Summary
 				${items_badge ? `<span class="tf-tab-badge">${items_badge}</span>` : ''}
 			</button>
 		</div>
@@ -1958,6 +1969,103 @@ ${truck_blocks}
 			padding: 1px 7px;
 			font-size: 11px;
 			font-weight: 700;
+		}
+
+		/* Refined workspace shell */
+		.tf-container {
+			--tf-primary: #4f46e5;
+			--tf-primary-soft: #eef2ff;
+			--tf-ink: #172033;
+			--tf-muted: #667085;
+			--tf-border: #e4e7ec;
+			margin-bottom: 40px;
+			color: var(--tf-ink);
+		}
+		.tf-page-intro {
+			display: flex;
+			align-items: flex-end;
+			justify-content: space-between;
+			gap: 24px;
+			padding: 22px 24px;
+			margin-bottom: 16px;
+			border: 1px solid var(--tf-border);
+			border-radius: 14px;
+			background:
+				radial-gradient(circle at 92% 10%, rgba(99,102,241,.13), transparent 30%),
+				linear-gradient(135deg, #fff 0%, #f8faff 100%);
+			box-shadow: 0 1px 2px rgba(16,24,40,.04);
+		}
+		.tf-page-intro h2 { margin: 2px 0 5px; font-size: 22px; line-height: 1.25; color: var(--tf-ink); }
+		.tf-page-intro p { margin: 0; color: var(--tf-muted); font-size: 13px; }
+		.tf-eyebrow { color: var(--tf-primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+		.tf-live-status {
+			display: flex; align-items: center; gap: 7px; flex-shrink: 0;
+			padding: 7px 11px; border: 1px solid #d1fae5; border-radius: 999px;
+			background: #f0fdf4; color: #047857; font-size: 11px; font-weight: 600;
+		}
+		.tf-live-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.14); }
+
+		.tf-tabs {
+			gap: 6px; padding: 5px; border: 1px solid var(--tf-border);
+			border-radius: 12px; background: #f8fafc; overflow-x: auto;
+		}
+		.tf-tab-btn {
+			margin-bottom: 0; padding: 9px 15px; border: 1px solid transparent;
+			border-radius: 8px; border-bottom-width: 1px; white-space: nowrap;
+			transition: background .15s, color .15s, box-shadow .15s;
+		}
+		.tf-tab-btn:hover { color: var(--tf-primary); background: var(--tf-primary-soft); }
+		.tf-tab-btn.active {
+			color: var(--tf-primary); background: #fff; border-color: var(--tf-border);
+			box-shadow: 0 1px 3px rgba(16,24,40,.08);
+		}
+		.tf-tab-icon { font-size: 14px; opacity: .8; }
+		.tf-tab-badge { background: var(--tf-primary-soft); color: var(--tf-primary); }
+		.tf-tab-btn.active .tf-tab-badge { background: var(--tf-primary); color: #fff; }
+
+		.tf-kpi, .tf-section {
+			border: 1px solid var(--tf-border); border-radius: 12px;
+			box-shadow: 0 1px 2px rgba(16,24,40,.04);
+		}
+		.tf-table { border: 1px solid var(--tf-border); border-radius: 10px; overflow: hidden; }
+		.tf-table thead th {
+			background: #f8fafc; color: #475467;
+			border-bottom: 1px solid var(--tf-border) !important;
+		}
+		.tf-table td { border-color: #eef0f3 !important; }
+		.tf-status-badge { border-radius: 999px; }
+		.tf-trucks-grid { gap: 18px; }
+		.tf-truck-card {
+			border-color: var(--tf-border); border-radius: 12px;
+			box-shadow: 0 2px 5px rgba(16,24,40,.05);
+			transition: transform .15s ease, box-shadow .15s ease;
+		}
+		.tf-truck-card:hover { transform: translateY(-1px); box-shadow: 0 7px 16px rgba(16,24,40,.08); }
+		.tf-truck-head { padding: 14px 16px; background: linear-gradient(135deg, #263248, #172033); gap: 12px; }
+		.tf-truck-actions { border-color: var(--tf-border); border-radius: 10px; }
+		.tf-subtabs { gap: 8px; border-bottom: 0; }
+		.tf-subtab-btn {
+			margin-bottom: 0; padding: 7px 14px; border: 1px solid var(--tf-border);
+			border-radius: 999px; border-bottom-width: 1px; background: #fff;
+		}
+		.tf-subtab-btn.active { color: #6d28d9; border-color: #c4b5fd; background: #f5f3ff; }
+
+		@media (max-width: 767px) {
+			.tf-container { margin-top: 10px; }
+			.tf-page-intro { align-items: flex-start; padding: 17px; }
+			.tf-page-intro h2 { font-size: 18px; }
+			.tf-page-intro p { max-width: 300px; }
+			.tf-live-status { display: none; }
+			.tf-tabs { margin-left: -5px; margin-right: -5px; border-radius: 8px; }
+			.tf-tab-btn { padding: 8px 11px; }
+			.tf-trucks-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+			.tf-truck-head { align-items: flex-start; flex-direction: column; }
+			.tf-truck-head > div:last-child { width: 100%; flex-wrap: wrap; }
+			.tf-section { padding: 12px; }
+			.tf-header-note { display: none; }
+			.tf-card-table { min-width: 560px; }
+			.tf-truck-card { overflow-x: auto; }
+			.tf-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 		}
 		</style>`;
 	}
