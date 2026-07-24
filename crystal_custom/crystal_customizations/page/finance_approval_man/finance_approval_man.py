@@ -165,6 +165,89 @@ def reject_order_state(order_name, reason):
 
 
 @frappe.whitelist()
+def get_approved_orders(from_date=None, to_date=None, sales_persons_json=None, delivery_region=None):
+    """
+    Return orders currently in 'Pending Customer Order Reconfirmation' — i.e. approved
+    by finance — so they can be reviewed and reversed if needed.
+    """
+    import json
+    sps = json.loads(sales_persons_json) if sales_persons_json else []
+
+    sp_join  = ''
+    sp_where = ''
+    params   = {}
+
+    if sps:
+        sp_join  = 'INNER JOIN `tabSales Team` st ON st.parent = so.name AND st.parenttype = "Sales Order"'
+        sp_ph    = ', '.join([f'%(sp{i})s' for i in range(len(sps))])
+        sp_where = f'AND st.sales_person IN ({sp_ph})'
+        for i, sp in enumerate(sps):
+            params[f'sp{i}'] = sp
+
+    date_where = ''
+    if from_date:
+        params['from_date'] = from_date
+        date_where += ' AND DATE(so.transaction_date) >= %(from_date)s'
+    if to_date:
+        params['to_date'] = to_date
+        date_where += ' AND DATE(so.transaction_date) <= %(to_date)s'
+
+    region_where = ''
+    if delivery_region:
+        params['region'] = delivery_region
+        region_where = ' AND so.custom_delivery_region = %(region)s'
+
+    rows = frappe.db.sql(f"""
+        SELECT DISTINCT
+            so.name, so.customer, so.customer_name, so.transaction_date,
+            so.grand_total, so.custom_delivery_region, so.owner,
+            so.workflow_state, so.modified,
+            so.custom_finance_rejection_note,
+            (SELECT GROUP_CONCAT(DISTINCT st2.sales_person ORDER BY st2.sales_person SEPARATOR ', ')
+             FROM `tabSales Team` st2 WHERE st2.parent = so.name) AS sales_persons
+        FROM `tabSales Order` so {sp_join}
+        WHERE so.docstatus = 0
+          AND so.workflow_state = 'Pending Customer Order Reconfirmation'
+          {sp_where} {date_where} {region_where}
+        ORDER BY so.modified DESC
+        LIMIT 500
+    """, params, as_dict=1)
+
+    return [dict(r) for r in rows]
+
+
+@frappe.whitelist()
+def reverse_to_pending_finance(order_names_json, reason=''):
+    """
+    Move incorrectly-approved orders back to 'Pending Finance Approval' so they
+    can be reviewed and properly rejected. Records the reason as a finance note.
+    """
+    import json
+    names = json.loads(order_names_json) if isinstance(order_names_json, str) else order_names_json
+
+    updated, skipped = [], []
+    for name in names:
+        state = frappe.db.get_value('Sales Order', name, 'workflow_state')
+        if state != 'Pending Customer Order Reconfirmation':
+            skipped.append(name)
+            continue
+        note = f'[Approval reversed] {reason}'.strip() if reason else '[Approval reversed — returned for re-review]'
+        frappe.db.set_value(
+            'Sales Order', name,
+            {
+                'workflow_state': 'Pending Finance Approval',
+                'custom_finance_rejection_note': note,
+            },
+            update_modified=False,
+        )
+        updated.append(name)
+
+    if updated:
+        frappe.db.commit()
+    return {'updated': updated, 'skipped': skipped}
+
+
+@frappe.whitelist()
 def notify_rejection(order_name, reason, owner):
 	"""
 	Create a Notification Log for the order submitter and push a realtime alert.

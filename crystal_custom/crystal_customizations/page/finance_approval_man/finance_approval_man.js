@@ -11,10 +11,12 @@ class FinanceApprovalManager {
 	constructor(page) {
 		this.page = page;
 		this.orders = [];
+		this.approved_orders = [];
 		this.financials = {};   // keyed by customer
 		this.current_page = 1;
 		this.page_size = 50;
 		this._sps = new Set();
+		this._tab = 'pending';  // 'pending' | 'approved'
 		this.setup_page();
 		this.load_data();
 	}
@@ -56,9 +58,33 @@ class FinanceApprovalManager {
 
 		this.page.set_primary_action('Approve Selected', () => this.approve_selected(), 'octicon octicon-check');
 		this.page.add_button('Reject Selected', () => this.reject_selected(), 'octicon octicon-x');
-		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
+		this.page.add_button('Refresh', () => this._tab === 'approved' ? this.load_approved() : this.load_data(), 'octicon octicon-sync');
 
 		this.container = $('<div class="fa-container"></div>').appendTo(this.page.main);
+
+		// Tab switcher rendered just above the container
+		this._tab_bar = $(`
+			<div class="fa-tab-bar">
+				<button class="fa-tab-btn fa-tab-active" data-tab="pending">Pending Approval</button>
+				<button class="fa-tab-btn" data-tab="approved">Recently Approved</button>
+			</div>
+		`).insertBefore(this.container);
+		const self = this;
+		this._tab_bar.on('click', '.fa-tab-btn', function () {
+			const tab = $(this).data('tab');
+			if (tab === self._tab) return;
+			self._tab = tab;
+			self._tab_bar.find('.fa-tab-btn').removeClass('fa-tab-active');
+			$(this).addClass('fa-tab-active');
+			self.current_page = 1;
+			if (tab === 'approved') {
+				self.load_approved();
+				self.page.set_primary_action('Reverse Approval', () => self.reverse_selected(), 'octicon octicon-arrow-left');
+			} else {
+				self.load_data();
+				self.page.set_primary_action('Approve Selected', () => self.approve_selected(), 'octicon octicon-check');
+			}
+		});
 	}
 
 	// ── Data loading ──────────────────────────────────────────────────────────
@@ -105,6 +131,134 @@ class FinanceApprovalManager {
 				});
 			},
 		});
+	}
+
+	load_approved() {
+		this.container.html(this._loading_html());
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.finance_approval_man.finance_approval_man.get_approved_orders',
+			args: {
+				from_date:           this.page.fields_dict.from_date.get_value(),
+				to_date:             this.page.fields_dict.to_date.get_value(),
+				sales_persons_json:  JSON.stringify([...this._sps]),
+				delivery_region:     this.page.fields_dict.delivery_region.get_value() || '',
+			},
+			callback: (r) => {
+				this.approved_orders = r.message || [];
+				this.render_approved();
+			},
+			error: () => {
+				this.container.html('<div class="alert alert-danger" style="margin-top:20px;">Failed to load approved orders.</div>');
+			},
+		});
+	}
+
+	render_approved() {
+		const orders = this.approved_orders;
+
+		if (!orders.length) {
+			this.container.html(`
+				<div class="alert alert-info" style="margin-top:20px;">
+					<strong>No recently approved orders found</strong> in this date range.
+					Try widening the date filter.
+				</div>${this._styles()}`);
+			return;
+		}
+
+		const total_value = orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+
+		let html = `
+		<div class="fa-summary-row">
+			${this._kpi('Recently Approved', orders.length, '#667eea')}
+			${this._kpi('Total Value', format_currency(total_value), '#10b981')}
+		</div>
+		<div class="fa-table-wrap">
+		<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+			<label style="font-weight:600;cursor:pointer;">
+				<input type="checkbox" id="fa-select-all" style="margin-right:6px;">
+				Select All (${orders.length})
+			</label>
+			<span style="font-size:12px;color:#6b7280;">
+				Showing orders currently at <strong>Pending Customer Order Reconfirmation</strong> — approved by finance.
+				Select and click <strong>Reverse Approval</strong> to send back to the finance queue.
+			</span>
+		</div>
+		<table class="table table-bordered fa-table">
+			<thead><tr>
+				<th width="3%"></th>
+				<th width="20%">Sales Order</th>
+				<th width="14%">Customer</th>
+				<th width="9%">Order Amt</th>
+				<th width="10%">Sales Person(s)</th>
+				<th width="9%">Region</th>
+				<th width="10%">Date</th>
+				<th width="12%">Approved On</th>
+			</tr></thead>
+			<tbody>`;
+
+		orders.forEach(o => {
+			html += `
+			<tr class="fa-row" data-order="${o.name}">
+				<td><input type="checkbox" class="fa-approved-chk" data-order="${o.name}"></td>
+				<td><a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a></td>
+				<td title="${o.customer}">${frappe.utils.escape_html(o.customer_name || o.customer)}</td>
+				<td class="fa-amt">${format_currency(o.grand_total || 0)}</td>
+				<td style="font-size:11px;color:#475569;">${frappe.utils.escape_html(o.sales_persons || '—')}</td>
+				<td><span class="fa-tag">${frappe.utils.escape_html(o.custom_delivery_region || '—')}</span></td>
+				<td>${frappe.datetime.str_to_user(o.transaction_date)}</td>
+				<td style="font-size:11px;color:#6b7280;">${frappe.datetime.str_to_user(o.modified ? o.modified.split(' ')[0] : '')}</td>
+			</tr>`;
+		});
+
+		html += `</tbody></table></div>${this._styles()}`;
+		this.container.html(html);
+
+		$('#fa-select-all').off('change').on('change', function () {
+			$('.fa-approved-chk').prop('checked', $(this).is(':checked'));
+		});
+	}
+
+	reverse_selected() {
+		if (this._tab !== 'approved') { this.approve_selected(); return; }
+
+		const sel = [];
+		$('.fa-approved-chk:checked').each(function () { sel.push($(this).data('order')); });
+		if (!sel.length) { frappe.msgprint(__('Select at least one order.')); return; }
+
+		frappe.prompt(
+			[{ label: 'Reason (optional)', fieldname: 'reason', fieldtype: 'Small Text' }],
+			(vals) => {
+				frappe.confirm(
+					__('Return {0} order(s) to Pending Finance Approval? They will reappear in the finance queue so you can properly reject them.', [sel.length]),
+					() => {
+						frappe.call({
+							method: 'crystal_custom.crystal_customizations.page.finance_approval_man.finance_approval_man.reverse_to_pending_finance',
+							args: { order_names_json: JSON.stringify(sel), reason: vals.reason || '' },
+							callback: (r) => {
+								const result  = r.message || {};
+								const updated = result.updated || [];
+								const skipped = result.skipped || [];
+								if (skipped.length) {
+									frappe.msgprint({
+										title: __('Done with skips'),
+										message: __('Reversed {0}. Skipped {1} (state mismatch): {2}',
+											[updated.length, skipped.length, skipped.join(', ')]),
+										indicator: 'orange',
+									});
+								} else {
+									frappe.show_alert({
+										message: __('{0} order(s) returned to finance queue', [updated.length]),
+										indicator: 'green',
+									});
+								}
+								this.load_approved();
+							},
+						});
+					}
+				);
+			},
+			__('Reverse Approval'), __('Confirm')
+		);
 	}
 
 	get_filtered_orders() {
@@ -499,6 +653,10 @@ class FinanceApprovalManager {
 
 	_styles() {
 		return `<style>
+		.fa-tab-bar { display:flex; gap:4px; margin:12px 0 0; border-bottom:2px solid #e2e8f0; padding-bottom:0; }
+		.fa-tab-btn { background:none; border:none; padding:8px 18px; font-size:13px; font-weight:600; color:#6b7280; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; border-radius:4px 4px 0 0; transition:color .15s; }
+		.fa-tab-btn:hover { color:#1e293b; }
+		.fa-tab-active { color:#667eea !important; border-bottom-color:#667eea !important; }
 		.fa-container { margin-top: 16px; }
 		.fa-summary-row {
 			display: grid;
