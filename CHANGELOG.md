@@ -1,3 +1,10 @@
+# [1.27.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.26.0...v1.27.0) (2026-07-24)
+
+
+### Features
+
+* **finance-manager:** Recently Approved tab with Reverse Approval ([dba0dc8](https://github.com/wanguimbutu/crystal_custom/commit/dba0dc8b361d2d5bbb978cd0f1a787c7f2e8e658))
+
 # [1.26.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.25.5...v1.26.0) (2026-07-22)
 
 
