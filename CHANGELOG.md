@@ -1,3 +1,10 @@
+# [1.28.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.27.1...v1.28.0) (2026-07-27)
+
+
+### Features
+
+* **weight-consolidation:** Status filter defaulting to Pending Customer Order Reconfirmation ([f75ce06](https://github.com/wanguimbutu/crystal_custom/commit/f75ce06317528e2c5618a28ee800d5b8a209435b))
+
 ## [1.27.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.27.0...v1.27.1) (2026-07-27)
 
 
