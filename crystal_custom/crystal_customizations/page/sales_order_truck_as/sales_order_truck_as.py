@@ -143,8 +143,10 @@ def get_truck_meta():
 
 @frappe.whitelist()
 def save_closed_trucks(closed_trucks_json):
-    """Persist the list of closed truck records."""
-    frappe.db.set_default('crystal_closed_trucks', closed_trucks_json)
+    """Persist up to 50 most recent records (full history lives in Crystal Truck Plans)."""
+    import json as _json
+    records = _json.loads(closed_trucks_json) if isinstance(closed_trucks_json, str) else closed_trucks_json
+    frappe.db.set_default('crystal_closed_trucks', _json.dumps((records or [])[:50]))
     frappe.db.commit()
     return True
 
@@ -399,35 +401,96 @@ def check_and_auto_close_trucks():
     existing_closed = json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
     existing_meta   = json.loads(frappe.db.get_default('crystal_truck_meta')    or '[]')
 
+    import random, string
+    def _gen_trip_id():
+        chars = string.ascii_uppercase + string.digits
+        return 'TRP-' + ''.join(random.choices(chars, k=6))
+
     auto_closed = []
     for truck_num, orders in to_close:
         for o in orders:
             frappe.db.set_value('Sales Order', o.name, 'custom_truck_closed', 1)
 
-        meta = next((m for m in existing_meta if m.get('truck_number') == truck_num), {})
+        meta       = next((m for m in existing_meta if m.get('truck_number') == truck_num), {})
+        old_trip   = meta.get('trip_id', '')
+        new_trip   = _gen_trip_id()
+
+        # Submit the existing Draft CTP (or create one) to record this auto-closed trip
+        existing_plans = frappe.db.get_all(
+            'Crystal Truck Plan',
+            filters={'truck_number': truck_num, 'docstatus': 0},
+            fields=['name'],
+            order_by='creation DESC',
+            limit=1,
+        )
+        if existing_plans:
+            plan = frappe.get_doc('Crystal Truck Plan', existing_plans[0].name)
+        else:
+            plan = frappe.get_doc({
+                'doctype':     'Crystal Truck Plan',
+                'truck_number': truck_num,
+                'driver_name':  meta.get('driver_name', ''),
+                'capacity_kg':  float(meta.get('capacity_kg', 0) or 0),
+                'trip_id':      old_trip,
+                'plan_date':    frappe.utils.today(),
+            })
+            plan.insert(ignore_permissions=True)
+
+        plan.orders = []
+        for o in orders:
+            plan.append('orders', {
+                'sales_order':    o.name,
+                'customer_name':  o.customer_name or '',
+                'delivery_region': o.custom_delivery_region or '',
+                'grand_total':    float(o.grand_total),
+                'total_net_weight': float(o.total_net_weight),
+            })
+        plan.order_count  = len(orders)
+        plan.total_weight = sum(float(o.total_net_weight) for o in orders)
+        plan.total_value  = sum(float(o.grand_total)      for o in orders)
+        plan.closed_from  = 'Auto-Close'
+        plan.save(ignore_permissions=True)
+        plan.submit()
+
+        # Create a fresh Draft CTP so the truck stays active for its next trip
+        new_plan = frappe.get_doc({
+            'doctype':     'Crystal Truck Plan',
+            'truck_number': truck_num,
+            'driver_name':  meta.get('driver_name', ''),
+            'capacity_kg':  float(meta.get('capacity_kg', 0) or 0),
+            'trip_id':      new_trip,
+            'plan_date':    frappe.utils.today(),
+        })
+        new_plan.insert(ignore_permissions=True)
+
+        # Update the truck's meta entry with the new trip_id and plan (keep truck active)
+        for m in existing_meta:
+            if m.get('truck_number') == truck_num:
+                m['trip_id']   = new_trip
+                m['plan_name'] = new_plan.name
+                break
+
+        # Only keep a compact record in the KV cache — full data is in the CTP
         existing_closed.insert(0, {
             'truck_number': truck_num,
             'driver_name':  meta.get('driver_name', ''),
             'capacity_kg':  meta.get('capacity_kg', 0),
-            'trip_id':      meta.get('trip_id', ''),
+            'trip_id':      old_trip,
             'closed_at':    str(frappe.utils.now_datetime()),
             'order_count':  len(orders),
             'total_weight': sum(float(o.total_net_weight) for o in orders),
             'total_value':  sum(float(o.grand_total)      for o in orders),
             'auto_closed':  True,
             'orders': [
-                {
-                    'name':            o.name,
-                    'customer_name':   o.customer_name or '',
-                    'delivery_region': o.custom_delivery_region or '',
-                }
+                {'name': o.name, 'customer_name': o.customer_name or '',
+                 'delivery_region': o.custom_delivery_region or ''}
                 for o in orders
             ],
         })
-        existing_meta = [m for m in existing_meta if m.get('truck_number') != truck_num]
         auto_closed.append(truck_num)
 
-    frappe.db.set_default('crystal_closed_trucks', json.dumps(existing_closed))
+    # Cap KV cache at 50 entries — older records live permanently in Crystal Truck Plans
+    frappe.db.set_default('crystal_closed_trucks', json.dumps(existing_closed[:50]))
     frappe.db.set_default('crystal_truck_meta',    json.dumps(existing_meta))
     frappe.db.commit()
     return auto_closed

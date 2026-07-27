@@ -60,7 +60,7 @@
    "fieldname": "closed_from",
    "fieldtype": "Select",
    "label": "Closed From",
-   "options": "\nTruck Assignment\nOrder Fulfillment",
+   "options": "\nTruck Assignment\nOrder Fulfillment\nAuto-Close",
    "in_list_view": 1
   },
   {
