@@ -1,3 +1,10 @@
+## [1.27.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.27.0...v1.27.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* DataError — crystal_closed_trucks KV value exceeded column limit ([2e889a5](https://github.com/wanguimbutu/crystal_custom/commit/2e889a52beea35c92fb34742b06d8433c51d253b))
+
 # [1.27.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.26.0...v1.27.0) (2026-07-24)
 
 
