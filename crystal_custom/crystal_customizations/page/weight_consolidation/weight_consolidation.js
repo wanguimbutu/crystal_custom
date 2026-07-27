@@ -37,6 +37,12 @@ class WeightConsolidationManager {
 			change: () => this.render(),
 		});
 		this.page.add_field({
+			label: 'Status', fieldtype: 'Select', fieldname: 'workflow_state',
+			options: '\nPending Customer Order Reconfirmation\nPending Finance Approval\nOrder Confirmed\nProceed To Order',
+			default: 'Pending Customer Order Reconfirmation',
+			change: () => this.load_data(),
+		});
+		this.page.add_field({
 			label: 'Sales Person', fieldtype: 'Link', fieldname: 'sales_person',
 			options: 'Sales Person',
 			placeholder: 'Add…',
@@ -62,11 +68,13 @@ class WeightConsolidationManager {
 	load_data() {
 		this.container.html(this._loading_html());
 
+		const workflow_state = this.page.fields_dict.workflow_state.get_value();
 		const filters = [
 			['Sales Order', 'docstatus', '!=', 2],
 			['Sales Order', 'per_delivered', '=', 0],
 			['Sales Order', 'per_billed', '=', 0],
 		];
+		if (workflow_state) filters.push(['Sales Order', 'workflow_state', '=', workflow_state]);
 		if (this._sps.size) filters.push(['Sales Team', 'sales_person', 'in', [...this._sps]]);
 
 		frappe.call({
