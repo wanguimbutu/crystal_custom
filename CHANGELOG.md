@@ -1,3 +1,10 @@
+# [1.29.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.28.0...v1.29.0) (2026-07-29)
+
+
+### Features
+
+* **item-order-fulfillment:** scope all stock queries to Finished Goods - CAL ([7fe8603](https://github.com/wanguimbutu/crystal_custom/commit/7fe860333a6c9f35a43c89561e3037e897043c3e))
+
 # [1.28.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.27.1...v1.28.0) (2026-07-27)
 
 
