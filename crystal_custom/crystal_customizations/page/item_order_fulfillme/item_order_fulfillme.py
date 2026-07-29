@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 
 FINANCE_APPROVED_STATES = ('Pending Customer Order Reconfirmation', 'Order Confirmed')
+STOCK_WAREHOUSE = 'Finished Goods - CAL'
 
 _NOTES_COL_CACHE = None
 
@@ -56,8 +57,8 @@ def get_sales_order_fulfillment(from_date=None, to_date=None):
         available_qty = frappe.db.sql("""
             SELECT IFNULL(SUM(actual_qty), 0) as available_qty
             FROM `tabBin`
-            WHERE item_code = %s
-        """, (item.item_code,), as_dict=1)[0].available_qty
+            WHERE item_code = %s AND warehouse = %s
+        """, (item.item_code, STOCK_WAREHOUSE), as_dict=1)[0].available_qty
 
         shortage = item.required_qty - available_qty
         result.append({
@@ -120,8 +121,8 @@ def get_truck_fulfillment_data():
         item_ph = ', '.join(['%s'] * len(unique_items))
         stock_rows = frappe.db.sql(
             f"SELECT item_code, IFNULL(SUM(actual_qty),0) AS available_qty "
-            f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
-            unique_items, as_dict=1,
+            f"FROM `tabBin` WHERE item_code IN ({item_ph}) AND warehouse = %s GROUP BY item_code",
+            unique_items + [STOCK_WAREHOUSE], as_dict=1,
         )
         stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
     item_names = {r.item_code: r.item_name for r in rows}
@@ -243,8 +244,8 @@ def get_truck_customer_data():
         item_ph = ', '.join(['%s'] * len(unique_items))
         stock_rows = frappe.db.sql(
             f"SELECT item_code, IFNULL(SUM(actual_qty), 0) AS available_qty "
-            f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
-            unique_items, as_dict=1,
+            f"FROM `tabBin` WHERE item_code IN ({item_ph}) AND warehouse = %s GROUP BY item_code",
+            unique_items + [STOCK_WAREHOUSE], as_dict=1,
         )
         stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
 
@@ -335,8 +336,8 @@ def get_region_fulfillment_data(regions_json=None):
         item_ph = ', '.join(['%s'] * len(unique_items))
         stock_rows = frappe.db.sql(
             f"SELECT item_code, IFNULL(SUM(actual_qty),0) AS available_qty "
-            f"FROM `tabBin` WHERE item_code IN ({item_ph}) GROUP BY item_code",
-            unique_items, as_dict=1,
+            f"FROM `tabBin` WHERE item_code IN ({item_ph}) AND warehouse = %s GROUP BY item_code",
+            unique_items + [STOCK_WAREHOUSE], as_dict=1,
         )
         stock_map = {s.item_code: float(s.available_qty) for s in stock_rows}
     item_names = {r.item_code: r.item_name for r in rows}
@@ -590,16 +591,12 @@ def create_requisition_from_shortage_items(shortage_items):
     mr.schedule_date    = frappe.utils.add_days(frappe.utils.today(), 7)
 
     for item in items:
-        warehouse = (
-            frappe.db.get_value('Item Default', {'parent': item['item_code']}, 'default_warehouse')
-            or frappe.db.get_value('Warehouse', {'is_group': 0, 'disabled': 0}, 'name')
-        )
         mr.append('items', {
             'item_code':     item['item_code'],
             'qty':           float(item['shortage_qty']),
             'uom':           item.get('uom', ''),
             'schedule_date': mr.schedule_date,
-            'warehouse':     warehouse,
+            'warehouse':     STOCK_WAREHOUSE,
         })
 
     mr.insert(ignore_permissions=False)
