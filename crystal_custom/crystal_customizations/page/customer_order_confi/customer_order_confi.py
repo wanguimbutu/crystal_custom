@@ -112,13 +112,19 @@ def save_order_changes(order_name, items_json):
 
 
 @frappe.whitelist()
-def cancel_order(order_name):
-    """Cancel a Sales Order during reconfirmation (draft → delete, submitted → cancel)."""
+def cancel_order(order_name, reason=None):
+    """Cancel a Sales Order during reconfirmation — preserves the record for audit trail."""
     so = frappe.get_doc('Sales Order', order_name)
-    if so.docstatus == 0:
-        frappe.delete_doc('Sales Order', order_name, ignore_permissions=True)
-    elif so.docstatus == 1:
-        so.cancel()
-    else:
+    if so.docstatus == 2:
         frappe.throw('Order is already cancelled.')
+    if so.docstatus == 1:
+        so.cancel()
+        return {'status': 'cancelled'}
+    # Draft: change workflow_state so it drops out of the active queue without being deleted
+    note = '[Customer Cancelled]' + (f' {reason}' if reason else '')
+    existing_notes = so.get('custom_call_notes') or ''
+    frappe.db.set_value('Sales Order', order_name, {
+        'workflow_state': 'Cancelled',
+        'custom_call_notes': (existing_notes + '\n' + note).strip(),
+    })
     return {'status': 'cancelled'}

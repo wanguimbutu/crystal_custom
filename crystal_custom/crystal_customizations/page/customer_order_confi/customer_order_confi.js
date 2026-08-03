@@ -985,10 +985,14 @@ class OrderConfirmationManager {
 
         // Cancel order
         $container.on('click', '.oc-cancel-order-btn', function () {
-            frappe.confirm(
-                __('Cancel order {0}? This cannot be undone.', [order_name]),
-                () => self._do_cancel_order(order_name)
-            );
+            frappe.prompt([{
+                label: 'Reason for Cancellation',
+                fieldname: 'reason',
+                fieldtype: 'Small Text',
+                description: 'Optional — will be saved on the order for reference',
+            }], (vals) => {
+                self._do_cancel_order(order_name, vals.reason || '');
+            }, __('Cancel Order — {0}', [order_name]), __('Confirm Cancellation'));
         });
     }
 
@@ -1114,10 +1118,10 @@ class OrderConfirmationManager {
         });
     }
 
-    _do_cancel_order(order_name) {
+    _do_cancel_order(order_name, reason) {
         frappe.call({
             method: 'crystal_custom.crystal_customizations.page.customer_order_confi.customer_order_confi.cancel_order',
-            args: { order_name },
+            args: { order_name, reason },
             callback: r => {
                 if (!r.message) return;
                 // Remove from local list and re-render
