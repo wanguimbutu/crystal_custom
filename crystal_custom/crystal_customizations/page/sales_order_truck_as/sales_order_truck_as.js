@@ -16,19 +16,59 @@ class TruckAssignmentManager {
 		this.page_size = 50;
 		this.search_term = '';
 		this.selected_orders = new Set();
-		this.selected_trucks = new Set();
-		this.saved_meta = {};
 		this.closed_trucks = [];
 		this.trucks_tab = 'active';
 		this._sps = new Set();
 		this._regions = new Set();
+		this.profitability_threshold = 33;
 		this.setup_page();
 		this.load_trucks_from_orders();
+		this._fetch_fleet_settings();
 	}
 
 	// ── Toolbar ───────────────────────────────────────────────────────────────
 
 	setup_page() {
+		// Nexus Spatial Engine Map Styles
+		if (!$('#nexus-map-styles').length) {
+			$('<style id="nexus-map-styles">').text(`
+				.nexus-map-marker { background-color: #1e3a8a; color: white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4); font-size: 13px; font-weight: bold; pointer-events: auto !important; }
+				.nexus-factory-marker { background-color: #0f172a; color: #fbbf24; border-radius: 6px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.5); font-size: 18px; }
+				.nexus-route-panel { position: fixed; top: 0; right: -60vw; width: 55vw; height: 100vh; background-color: #ffffff; box-shadow: -10px 0 30px rgba(0,0,0,0.2); z-index: 9999; transition: right 0.35s cubic-bezier(0.4, 0, 0.2, 1); display: flex; flex-direction: column; }
+				.nexus-route-panel.active { right: 0; }
+				.nexus-panel-backdrop { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.6); z-index: 9998; display: none; backdrop-filter: blur(3px); }
+				.nexus-panel-backdrop.active { display: block; }
+				.nexus-panel-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 16px 20px; background-color: #1e293b; color: #ffffff; border-bottom: 1px solid #334155; }
+				.nexus-panel-title { font-size: 18px; font-weight: 700; margin-top: 4px; color: #fff; }
+				.btn-close-panel { background: transparent; border: none; color: #94a3b8; font-size: 28px; line-height: 1; padding: 0; cursor: pointer; transition: color 0.2s; }
+				.btn-close-panel:hover { color: #ffffff; }
+				.nexus-fuel-banner { display: flex; justify-content: space-between; padding: 15px 20px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; }
+				.nexus-eco-stat { display: flex; flex-direction: column; }
+				.nexus-eco-stat span { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; }
+				.nexus-eco-stat b { font-size: 18px; color: #0f172a; }
+
+				/* 🚨 NEW: Margin Analysis panel — mirrors the route panel's slide
+				   mechanic, but slides in from the LEFT (opposite side), matching
+				   nexus_load_optimizer.js's existing .nexus-margin-panel pattern. */
+				.nexus-margin-panel { position: fixed; top: 0; left: -60vw; width: 55vw; height: 100vh; background-color: #ffffff; box-shadow: 10px 0 30px rgba(0,0,0,0.2); z-index: 9999; transition: left 0.35s cubic-bezier(0.4, 0, 0.2, 1); display: flex; flex-direction: column; }
+				.nexus-margin-panel.active { left: 0; }
+				.nexus-margin-backdrop { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.6); z-index: 9998; display: none; backdrop-filter: blur(3px); }
+				.nexus-margin-backdrop.active { display: block; }
+				.nexus-margin-panel-title { font-size: 18px; font-weight: 700; margin-top: 4px; color: #fff; }
+				.btn-close-margin-panel { background: transparent; border: none; color: #94a3b8; font-size: 28px; line-height: 1; padding: 0; cursor: pointer; transition: color 0.2s; }
+				.btn-close-margin-panel:hover { color: #ffffff; }
+				.margin-stat-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+				.margin-stat-label { font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+				.margin-stat-value { font-size: 15px; font-weight: 700; color: #0f172a; }
+				.margin-headline { text-align: center; padding: 20px; border-radius: 10px; margin-top: 16px; }
+				.margin-headline.profitable { background: #dcfce7; border: 2px solid #10b981; }
+				.margin-headline.loss { background: #fee2e2; border: 2px solid #ef4444; }
+				.margin-headline-value { font-size: 28px; font-weight: 900; }
+				.margin-headline-pct { font-size: 16px; font-weight: 700; margin-top: 4px; }
+				.margin-zero-cost-warning { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px; margin-top: 16px; font-size: 12px; color: #92400e; }
+			`).appendTo('head');
+		}
+
 		const today = frappe.datetime.get_today();
 
 		this.page.add_field({
@@ -80,184 +120,132 @@ class TruckAssignmentManager {
 		});
 
 		this.page.set_primary_action('Add Truck', () => this.add_new_truck(), 'octicon octicon-plus');
-		this.page.add_button('Refresh', () => this.load_data(), 'octicon octicon-sync');
+		this.page.add_button('Refresh', () => this.load_trucks_from_orders(), 'octicon octicon-sync');
 
 		this.container = $('<div class="ta-container"></div>').appendTo(this.page.main);
+		
+		// Inject Leaflet Offcanvas Panel (Updated UI Layout)
+		this.map_panel = $(`
+			<div class="nexus-route-panel">
+				<div class="nexus-panel-header">
+				    <div>
+				        <div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.5px;">Route Optimization</div>
+					    <div class="nexus-panel-title">Active Route</div>
+					</div>
+					<button class="btn-close-panel" title="Close Panel">&times;</button>
+				</div>
+				<div class="nexus-fuel-banner" style="display:none;">
+					<div class="nexus-eco-stat"><span>Distance</span><b id="nx-dist">0 km</b></div>
+					<div class="nexus-eco-stat"><span>Est. Duration</span><b id="nx-dur">0 hrs</b></div>
+					<div class="nexus-eco-stat"><span>Fuel Est. (KES)</span><b id="nx-fuel-cost" style="color:#ef4444">0</b></div>
+				</div>
+				<div id="nexus-unmapped-banner" style="display:none; background:#fffbeb; border-bottom:1px solid #fef3c7; padding:12px 20px; font-size:12px; color:#92400e;">
+					<div style="font-weight:700; margin-bottom:4px;"><i class="fa fa-exclamation-triangle"></i> Unmapped Orders Excluded from Route:</div>
+					<div id="nexus-unmapped-list" style="line-height:1.4;"></div>
+				</div>
+				<div id="nexus-leaflet-map" style="flex-grow: 1; background: #e2e8f0;"></div>
+			</div>
+			<div class="nexus-panel-backdrop"></div>
+		`).appendTo(this.page.wrapper);
+
+		this.map_panel.find('.btn-close-panel, .nexus-panel-backdrop').on('click', () => {
+			this.page.wrapper.find('.nexus-route-panel, .nexus-panel-backdrop').removeClass('active');
+		});
+
+		// 🚨 NEW: Margin Analysis panel, created once at page load. Content
+		// is populated on demand by render_margin_panel().
+		this.margin_panel = $(`
+			<div class="nexus-margin-panel">
+				<div class="nexus-panel-header">
+					<div>
+						<div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.5px;">Margin Analysis</div>
+						<div class="nexus-margin-panel-title">Margin Preview</div>
+					</div>
+					<button class="btn-close-margin-panel" title="Close Panel">&times;</button>
+				</div>
+				<div id="nexus-margin-content" style="flex-grow:1; overflow-y:auto; padding:20px;">
+					<div class="text-center text-muted py-5">Select a truck or orders and click "Analyse Margins".</div>
+				</div>
+			</div>
+			<div class="nexus-margin-backdrop"></div>
+		`).appendTo(this.page.wrapper);
+
+		this.margin_panel.find('.btn-close-margin-panel, .nexus-margin-backdrop').on('click', () => {
+			this.close_margin_panel();
+		});
 	}
 
-	_gen_trip_id() {
-		return 'TRP-' + Date.now().toString(36).slice(-4).toUpperCase() + Math.random().toString(36).slice(2, 4).toUpperCase();
+	_fetch_fleet_settings() {
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_fleet_settings',
+			callback: (r) => {
+				if (r.message && r.message.narrowed_margin_profitability_threshold !== undefined) {
+					const parsed = parseFloat(r.message.narrowed_margin_profitability_threshold);
+					if (!isNaN(parsed)) {
+						this.profitability_threshold = parsed;
+					}
+				}
+			}
+		});
+	}
+
+	open_margin_panel() {
+		this.page.wrapper.find('.nexus-margin-panel').addClass('active');
+		this.page.wrapper.find('.nexus-margin-backdrop').addClass('active');
+	}
+
+	close_margin_panel() {
+		this.page.wrapper.find('.nexus-margin-panel, .nexus-margin-backdrop').removeClass('active');
 	}
 
 	add_new_truck() {
 		frappe.prompt([
 			{ label: 'Truck Number', fieldname: 'truck_number', fieldtype: 'Data', reqd: 1 },
 			{ label: 'Driver Name', fieldname: 'driver_name', fieldtype: 'Data' },
-			{ label: 'Capacity (kg)', fieldname: 'capacity_kg', fieldtype: 'Float', default: 5000 },
+			{ label: 'Vehicle Type', fieldname: 'capacity_kg', fieldtype: 'Link', options: 'Vehicle Type', reqd: 1 },
 		], (vals) => {
-			const plate = (vals.truck_number || '').trim().toUpperCase();
-			if (!plate) return;
-			vals.truck_number = plate;
-
-			const existing = this.available_trucks.find(t => t.truck_number === plate);
-			if (existing) {
-				// Same plate re-added — fetch all active orders from DB (authoritative, unaffected by UI filters)
-				frappe.call({
-					method: 'frappe.client.get_list',
-					args: {
-						doctype: 'Sales Order',
-						fields: ['name', 'customer', 'customer_name', 'custom_delivery_region', 'grand_total', 'total_net_weight'],
-						filters: [
-							['Sales Order', 'custom_truck_number', '=', plate],
-							['Sales Order', 'custom_truck_closed', '!=', 1],
-						],
-						limit_page_length: 0,
-					},
-					callback: (r) => {
-						const truck_orders = r.message || [];
-						if (truck_orders.length) {
-							frappe.confirm(
-								__('Truck {0} has {1} active order(s) from the current trip. Archive that trip and start a new one?', [plate, truck_orders.length]),
-								() => {
-									// Update driver/capacity before archiving so new trip inherits updated values
-									existing.driver_name = vals.driver_name || existing.driver_name;
-									existing.capacity_kg = vals.capacity_kg != null ? vals.capacity_kg : existing.capacity_kg;
-									this._close_truck_batch(plate, truck_orders);
-								}
-							);
-						} else {
-							// No active orders — just reset trip and update meta
-							existing.driver_name = vals.driver_name || existing.driver_name;
-							existing.capacity_kg = vals.capacity_kg != null ? vals.capacity_kg : existing.capacity_kg;
-							existing.trip_id = this._gen_trip_id();
-							this._save_truck_meta();
-							frappe.show_alert({ message: __('New trip started for {0} ({1})', [plate, existing.trip_id]), indicator: 'green' });
-							this.render_view();
-						}
-					},
-				});
-			} else {
-				// Brand new truck — add to active list then create a Draft CTP immediately
-				vals.trip_id  = this._gen_trip_id();
-				vals.plan_name = '';
-				this.available_trucks.push(vals);
-				this._save_truck_meta();
-				frappe.show_alert({ message: __('Truck {0} added ({1})', [vals.truck_number, vals.trip_id]), indicator: 'green' });
-				this.render_view();
-				frappe.call({
-					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.create_active_truck_plan',
-					args: {
-						truck_number: plate,
-						driver_name:  vals.driver_name || '',
-						capacity_kg:  vals.capacity_kg || 5000,
-						trip_id:      vals.trip_id,
-					},
-					callback: (r) => {
-						if (r.message) {
-							const idx = this.available_trucks.findIndex(t => t.truck_number === plate);
-							if (idx >= 0) {
-								this.available_trucks[idx].plan_name = r.message;
-								this._save_truck_meta();
-							}
-						}
-					},
-				});
-			}
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.add_active_truck',
+				args: {
+					truck_number: vals.truck_number,
+					driver_name: vals.driver_name || '',
+					capacity_kg: vals.capacity_kg || 5000
+				},
+				callback: (r) => {
+					if (!r.exc) {
+						frappe.show_alert({ message: __('Truck {0} added', [vals.truck_number]), indicator: 'green' });
+						this.load_trucks_from_orders();
+					}
+				}
+			});
 		}, __('Add Truck'), __('Add'));
 	}
 
 	// ── Data loading ──────────────────────────────────────────────────────────
 
 	load_trucks_from_orders() {
-		// Load saved truck metadata first, then discover truck numbers from orders
+		// Fetch Master Active Trucks
 		frappe.call({
-			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_meta',
-			callback: (meta_r) => {
-				try {
-					(JSON.parse(meta_r.message || '[]') || []).forEach(t => {
-						this.saved_meta[t.truck_number] = t;
-					});
-				} catch(e) {}
-
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_active_trucks',
+			callback: (r) => {
+				this.available_trucks = r.message || [];
+				
+				// Fetch Dispatched / History Trucks
 				frappe.call({
-					method: 'frappe.client.get_list',
-					args: {
-						doctype: 'Sales Order',
-						fields: ['custom_truck_number'],
-						filters: [
-							['Sales Order', 'docstatus', 'in', [0, 1]],
-							['Sales Order', 'custom_truck_number', '!=', ''],
-							['Sales Order', 'custom_truck_closed', '!=', 1],
-						],
-						limit_page_length: 500,
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_dispatched_trucks',
+					callback: (cr) => {
+						this.closed_trucks = cr.message || [];
+						this.load_data();
 					},
-					callback: (r) => {
-						if (r.message) {
-							[...new Set(r.message.map(o => o.custom_truck_number).filter(Boolean))].forEach(t => {
-								if (!this.available_trucks.find(x => x.truck_number === t)) {
-									const m = this.saved_meta[t] || {};
-									this.available_trucks.push({
-										truck_number: t,
-										driver_name:  m.driver_name  || '',
-										capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
-										trip_id:      m.trip_id      || this._gen_trip_id(),
-										plan_name:    m.plan_name    || '',
-									});
-								}
-							});
-							if (this.available_trucks.some(t => !(this.saved_meta[t.truck_number] || {}).trip_id)) {
-								this._save_truck_meta();
-							}
-						}
-						// Recover any trucks that exist as Draft CTPs but are not in saved_meta
-						frappe.call({
-							method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_active_truck_plans',
-							callback: (pr) => {
-								let recovered = false;
-								(pr.message || []).forEach(p => {
-									const ex = this.available_trucks.find(t => t.truck_number === p.truck_number);
-									if (ex) {
-										if (!ex.plan_name) { ex.plan_name = p.name; recovered = true; }
-									} else {
-										this.available_trucks.push({
-											truck_number: p.truck_number,
-											driver_name:  p.driver_name || '',
-											capacity_kg:  p.capacity_kg != null ? p.capacity_kg : 5000,
-											trip_id:      p.trip_id     || this._gen_trip_id(),
-											plan_name:    p.name,
-										});
-										recovered = true;
-									}
-								});
-								if (recovered) this._save_truck_meta();
-
-								// Load trip history from Crystal Truck Plans (primary) + legacy KV fallback
-								frappe.call({
-									method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_history',
-									callback: (hr) => {
-										this.closed_trucks = hr.message || [];
-										this.load_data();
-									},
-									error: () => this.load_data(),
-								});
-							},
-							error: () => {
-								frappe.call({
-									method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_history',
-									callback: (hr) => { this.closed_trucks = hr.message || []; this.load_data(); },
-									error: () => this.load_data(),
-								});
-							},
-						});
-					},
+					error: () => this.load_data()
 				});
 			},
+			error: () => this.load_data()
 		});
 	}
 
 	load_data() {
 		this.selected_orders.clear();
-		this.selected_trucks.clear();
 		this.container.html(this._loading_html());
 		const from = this.page.fields_dict.from_date.get_value();
 		const to   = this.page.fields_dict.to_date.get_value();
@@ -284,22 +272,28 @@ class TruckAssignmentManager {
 					o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
 				);
 
-				// Seed any newly-seen truck numbers, restoring saved metadata
-				let seeded_new_trip_id = false;
+				// Seed any newly-seen truck numbers automatically into the master DocType DB
+				let missing = [];
 				this.orders.forEach(o => {
 					if (o.custom_truck_number && !this.available_trucks.find(t => t.truck_number === o.custom_truck_number)) {
-						const m = this.saved_meta[o.custom_truck_number] || {};
-						const trip_id = m.trip_id || this._gen_trip_id();
-						if (!m.trip_id) seeded_new_trip_id = true;
+						missing.push(o.custom_truck_number);
 						this.available_trucks.push({
 							truck_number: o.custom_truck_number,
-							driver_name:  m.driver_name  || '',
-							capacity_kg:  m.capacity_kg  != null ? m.capacity_kg : 5000,
-							trip_id,
+							driver_name:  '',
+							capacity_kg:  5000,
+							trip_id:      '',
+							warehouse_status: 'Pending' // Explicitly track state
 						});
 					}
 				});
-				if (seeded_new_trip_id) this._save_truck_meta();
+				
+				// BULK CREATION FIX: Prevents Naming Series Deadlocks (Error 1020).
+				if (missing.length) {
+					frappe.call({
+						method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.sync_missing_active_trucks',
+						args: { truck_numbers_json: JSON.stringify([...new Set(missing)]) }
+					});
+				}
 
 				// Fetch customer locations then render
 				const customers = [...new Set(this.orders.map(o => o.customer).filter(Boolean))];
@@ -398,24 +392,6 @@ class TruckAssignmentManager {
 		this._attach_events();
 	}
 
-	_save_truck_meta() {
-		const data = this.available_trucks.map(t => ({
-			truck_number: t.truck_number,
-			driver_name:  t.driver_name  || '',
-			capacity_kg:  t.capacity_kg  != null ? t.capacity_kg : 5000,
-			trip_id:      t.trip_id      || '',
-			plan_name:    t.plan_name    || '',
-		}));
-		// Update in-memory saved_meta so subsequent seeds in load_data() use fresh values
-		this.saved_meta = {};
-		data.forEach(t => { this.saved_meta[t.truck_number] = t; });
-
-		frappe.call({
-			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_truck_meta',
-			args: { trucks_json: JSON.stringify(data) },
-		});
-	}
-
 	_kpi(label, value, color) {
 		return `<div class="ta-kpi" style="border-top:4px solid ${color}">
 			<div class="ta-kpi-label">${label}</div>
@@ -459,11 +435,8 @@ class TruckAssignmentManager {
 		).join('');
 
 		// Count selected orders visible in the full filtered list (all pages)
-		const sel_orders  = all_orders.filter(o => this.selected_orders.has(o.name));
-		const sel_count   = sel_orders.length;
+		const sel_count   = all_orders.filter(o => this.selected_orders.has(o.name)).length;
 		const all_checked = all_orders.length > 0 && sel_count === all_orders.length;
-		const sel_weight  = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
-		const sel_value   = sel_orders.reduce((s, o) => s + (o.grand_total      || 0), 0);
 
 		let html = `
 		<datalist id="ta-trucks-list">${truck_opts}</datalist>
@@ -475,12 +448,18 @@ class TruckAssignmentManager {
 			</label>
 			<span class="ta-bulk-sep"></span>
 			<span class="ta-bulk-count">${sel_count} of ${all_orders.length} selected</span>
-			${sel_count ? `
-			<span class="ta-bulk-sel-stats">
-				<span class="ta-bulk-sel-stat" title="Total weight of selected orders">&#8981; ${sel_weight.toFixed(1)} kg</span>
-				<span class="ta-bulk-sel-stat" title="Total value of selected orders">${format_currency(sel_value, null, 0)}</span>
-			</span>` : ''}
-			<div class="ta-bulk-actions">
+			<div class="ta-bulk-actions" style="align-items: center; gap: 8px;">
+				<label class="ta-bulk-select-label" style="font-weight: normal; font-size: 12px;" title="Combine selected awaiting orders with orders already assigned to this truck">
+					<input type="checkbox" class="ta-include-current-chk" disabled style="width:14px; height:14px; accent-color:#667eea; cursor:pointer;">
+					Include Truck's Current Load
+				</label>
+				<button class="btn btn-sm btn-outline-dark btn-analyse-margins-awaiting" title="Analyse Margins for selected orders" ${!sel_count ? 'disabled' : ''}>
+					Analyse Margins
+				</button>
+				<button class="btn btn-sm btn-black-action btn-optimize-awaiting" title="Optimize Route for selected orders" ${!sel_count ? 'disabled' : ''}>
+					Optimize Route
+				</button>
+				<div style="width: 1px; height: 20px; background-color: #cbd5e1; margin: 0 4px;"></div>
 				<input type="text" class="ta-bulk-truck-input form-control form-control-sm"
 				       list="ta-trucks-list" placeholder="Assign to truck…"
 				       ${!sel_count ? 'disabled' : ''}>
@@ -533,8 +512,13 @@ class TruckAssignmentManager {
 						${not_picked ? '<span class="ta-warn-badge" title="Call not picked">!</span>' : ''}
 					</td>
 					<td title="${frappe.utils.escape_html(o.customer)}">
-						${frappe.utils.escape_html(o.customer_name || o.customer)}
-						${not_picked && o.custom_call_notes ? `<br><small class="ta-note">${frappe.utils.escape_html(o.custom_call_notes)}</small>` : ''}
+						<div style="display:flex; justify-content:space-between; align-items:center;">
+							<span>${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
+							${(o.custom_latitude && o.custom_longitude && parseFloat(o.custom_latitude) !== 0 && parseFloat(o.custom_longitude) !== 0) 
+								? `<span class="ta-gps-badge ta-gps-mapped" title="GPS Available">&#10003; Mapped</span>`
+								: `<span class="ta-gps-badge ta-gps-missing" title="No GPS Coordinates">No GPS</span>`}
+						</div>
+						${not_picked && o.custom_call_notes ? `<small class="ta-note">${frappe.utils.escape_html(o.custom_call_notes)}</small>` : ''}
 					</td>
 					<td>${o.custom_location ? frappe.utils.escape_html(o.custom_location) : '<span class="text-muted">—</span>'}</td>
 					<td>${o.custom_delivery_region || '—'}</td>
@@ -639,95 +623,97 @@ class TruckAssignmentManager {
 	_render_trucks(all_orders) {
 		if (!this.available_trucks.length) return '';
 
-		// Truck bulk action bar
-		const sel_t = this.selected_trucks.size;
-		let html = '';
-		if (sel_t) {
-			const sel_truck_objs = this.available_trucks.filter(t => this.selected_trucks.has(t.truck_number));
-			const sel_t_orders   = all_orders.filter(o => o.custom_truck_number && this.selected_trucks.has(o.custom_truck_number));
-			const sel_t_weight   = sel_truck_objs.reduce((s, t) => {
-				return s + all_orders.filter(o => o.custom_truck_number === t.truck_number).reduce((ws, o) => ws + (o.total_net_weight || 0), 0);
-			}, 0);
-			const sel_t_value    = sel_t_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
-			html += `
-			<div class="ta-truck-bulk-bar">
-				<span class="ta-truck-bulk-info">
-					<strong>${sel_t}</strong> truck${sel_t !== 1 ? 's' : ''} selected
-					&nbsp;·&nbsp; &#8981; ${sel_t_weight.toFixed(0)} kg
-					&nbsp;·&nbsp; ${format_currency(sel_t_value, null, 0)}
-				</span>
-				<div style="display:flex;gap:6px;">
-					<button class="btn btn-sm btn-primary ta-bulk-dispatch-trucks">Dispatch Selected</button>
-					<button class="btn btn-sm btn-danger  ta-bulk-remove-trucks">Remove Selected</button>
-					<button class="btn btn-sm btn-default ta-bulk-clear-trucks">Clear</button>
-				</div>
-			</div>`;
-		}
-
-		html += '<div class="ta-trucks-grid">';
+		let html = '<div class="ta-trucks-grid">';
 
 		this.available_trucks.forEach(truck => {
 			const truck_orders = all_orders.filter(o => o.custom_truck_number === truck.truck_number);
 			const total_weight = truck_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
 			const total_value  = truck_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
-			const capacity     = truck.capacity_kg || 0;
+			const capacity     = truck.max_tonnage || 0; // Use max_tonnage extracted by backend
 			const cap_pct      = capacity > 0 ? Math.min((total_weight / capacity) * 100, 100).toFixed(0) : 0;
 			const is_empty     = !truck_orders.length;
 			const not_picked   = truck_orders.filter(o => o.custom_call_not_picked === 1).length;
 			const regions      = [...new Set(truck_orders.map(o => o.custom_delivery_region).filter(Boolean))].sort();
-			const is_checked   = this.selected_trucks.has(truck.truck_number);
+
+			const is_loaded = truck.warehouse_status === 'Loaded';
+			let loaded_badge = '';
+			if (is_loaded) {
+				loaded_badge = `<span style="font-size:10px; background:#10b981; color:#fff; padding:2px 7px; border-radius:12px; margin-left:8px; vertical-align:middle; text-transform:uppercase; letter-spacing:0.5px; font-weight:700; box-shadow: 0 0 5px rgba(16,185,129,0.4);">Ready for Dispatch</span>`;
+			} else {
+				loaded_badge = `<span style="font-size:10px; background:#f59e0b; color:#fff; padding:2px 7px; border-radius:12px; margin-left:8px; vertical-align:middle; text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Pending Loading</span>`;
+			}
 
 			html += `
-			<div class="ta-truck-card${is_empty ? ' ta-truck-empty' : ''}${is_checked ? ' ta-truck-selected' : ''}">
-				<div class="ta-truck-head">
-					<label class="ta-truck-chk-wrap" title="Select truck">
-						<input type="checkbox" class="ta-truck-chk" data-truck="${frappe.utils.escape_html(truck.truck_number)}" ${is_checked ? 'checked' : ''}>
-					</label>
-					<div style="flex:1;min-width:0;">
-						<div class="ta-truck-num">${frappe.utils.escape_html(truck.truck_number)}</div>
-						${truck.trip_id ? `<div style="font-size:10px;color:#94a3b8;letter-spacing:.5px;">${frappe.utils.escape_html(truck.trip_id)}</div>` : ''}
-					</div>
-					<div class="ta-truck-btns">
-						<button class="btn btn-xs btn-default btn-dl-manifest"   data-truck="${truck.truck_number}" title="Download manifest">&#8659;</button>
-						<button class="btn btn-xs btn-default btn-edit-truck"    data-truck="${truck.truck_number}" title="Edit">&#9998;</button>
-						${!is_empty ? `<button class="btn btn-xs btn-default btn-reassign-truck" data-truck="${truck.truck_number}" title="Move all orders to another truck">&#8644;</button>` : ''}
-						${!is_empty ? `<button class="btn btn-xs btn-primary btn-close-truck" data-truck="${truck.truck_number}" title="Dispatch truck — save trip record and keep truck ready for next load">Dispatch</button>` : ''}
-						<button class="btn btn-xs btn-danger  btn-delete-truck"  data-truck="${truck.truck_number}" title="${is_empty ? 'Remove truck' : 'Unassign all orders'}">&#215;</button>
-					</div>
-				</div>
-
-				${truck.driver_name ? `<div class="ta-truck-driver">${frappe.utils.escape_html(truck.driver_name)}</div>` : ''}
-				${not_picked ? `<div class="ta-truck-warn">${not_picked} customer(s) did not answer — driver should contact on arrival</div>` : ''}
-
-				${!is_empty ? `
-				<div class="ta-truck-stats">
-					<div class="ta-truck-stat"><span>${truck_orders.length}</span>Orders</div>
-					<div class="ta-truck-stat"><span>${total_weight.toFixed(0)} kg</span>Weight</div>
-					<div class="ta-truck-stat"><span>${format_currency(total_value, null, 0)}</span>Value</div>
-				</div>
-				${capacity > 0 ? `
-				<div class="ta-cap-bar">
-					<div class="ta-cap-fill" style="width:${cap_pct}%;background:${cap_pct > 90 ? '#ef4444' : '#10b981'}"></div>
-				</div>
-				<div class="ta-cap-label">${cap_pct}% capacity (${total_weight.toFixed(0)} / ${capacity} kg)</div>
-				` : ''}
-				${regions.length ? `<div class="ta-truck-routes">${regions.map(r => `<span class="ta-route-tag">${r}</span>`).join('')}</div>` : ''}
-				<div class="ta-truck-orders">
-					${truck_orders.map(o => {
-						const is_done = o.so_status === 'Completed' || o.so_status === 'Closed';
-						return `
-					<div class="ta-truck-order${is_done ? ' ta-order-invoiced' : ''}">
+			<div class="ta-truck-card${is_empty ? ' ta-truck-empty' : ''}" style="${is_loaded ? 'border: 2px solid #10b981;' : 'border: 1px solid #fcd34d;'}">
+				
+				<!-- HEADER SECTION -->
+				<div class="ta-card-header">
+					<div class="ta-truck-head">
 						<div>
-							<a href="/app/sales-order/${o.name}" target="_blank" class="ta-order-link">${o.name}</a>
-							<span class="ta-order-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
-							${o.custom_location ? `<span class="ta-order-loc">${frappe.utils.escape_html(o.custom_location)}</span>` : ''}
-							${is_done ? '<span class="ta-invoiced-badge">Invoiced</span>' : ''}
+							<div class="ta-truck-num">${frappe.utils.escape_html(truck.truck_number)}${loaded_badge}</div>
+							${truck.trip_id ? `<div style="font-size:10px;color:#94a3b8;letter-spacing:.5px;">${frappe.utils.escape_html(truck.trip_id)}</div>` : ''}
 						</div>
-						${!is_done ? `<button class="btn btn-xs btn-default btn-unassign" data-order="${o.name}" title="Remove from truck">&#215;</button>` : ''}
-					</div>`;
-					}).join('')}
+					</div>
+
+					${truck.driver_name ? `<div class="ta-truck-driver"><i class="fa fa-user" style="color:#94a3b8; margin-right:4px;"></i>${frappe.utils.escape_html(truck.driver_name)}</div>` : ''}
+					
+					${!is_empty ? `
+					<div class="ta-truck-stats">
+						<div class="ta-truck-stat"><span>${truck_orders.length}</span>Orders</div>
+						<div class="ta-truck-stat"><span>${total_weight.toFixed(0)} kg</span>Weight</div>
+						<div class="ta-truck-stat"><span>${format_currency(total_value, null, 0)}</span>Value</div>
+					</div>
+					${capacity > 0 ? `
+					<div class="ta-cap-bar">
+						<div class="ta-cap-fill" style="width:${cap_pct}%;background:${cap_pct > 90 ? '#ef4444' : '#10b981'}"></div>
+					</div>
+					<div class="ta-cap-label">${cap_pct}% capacity (${total_weight.toFixed(0)} / ${capacity} kg)</div>
+					` : ''}
+					${regions.length ? `<div class="ta-truck-routes">${regions.map(r => `<span class="ta-route-tag"><i class="fa fa-map-marker"></i> ${r}</span>`).join('')}</div>` : ''}
+					` : '<div class="ta-empty-truck">Waiting for assignments...</div>'}
+
+					<!-- NEATLY ARRANGED ACTION BUTTONS — TWO ROWS -->
+					<div class="ta-truck-btns-container">
+						${!is_empty ? `
+						<div class="ta-truck-actions-primary">
+							<button class="btn btn-sm btn-outline-dark btn-analyse-margins-truck" data-truck="${truck.truck_number}">Analyse Margins</button>
+							<button class="btn btn-sm btn-black-action btn-optimize-truck" data-truck="${truck.truck_number}">Optimize Route</button>
+							<button class="btn btn-sm btn-primary btn-close-truck" data-truck="${truck.truck_number}">Dispatch</button>
+						</div>` : ''}
+						<div class="ta-truck-actions-icons">
+							<button class="btn btn-xs btn-default btn-dl-manifest" data-truck="${truck.truck_number}" title="Download manifest"><i class="fa fa-download"></i></button>
+							<button class="btn btn-xs btn-default btn-edit-truck" data-truck="${truck.truck_number}" title="Edit"><i class="fa fa-pencil"></i></button>
+							${!is_empty ? `<button class="btn btn-xs btn-default btn-reassign-truck" data-truck="${truck.truck_number}" title="Move all orders to another truck"><i class="fa fa-exchange"></i></button>` : ''}
+							<button class="btn btn-xs btn-danger btn-delete-truck" data-truck="${truck.truck_number}" title="${is_empty ? 'Remove truck' : 'Unassign all orders'}"><i class="fa fa-trash"></i></button>
+						</div>
+					</div>
 				</div>
-				` : '<div class="ta-empty-truck">No orders assigned</div>'}
+
+				<!-- SALES ORDERS SECTION -->
+				<div class="ta-card-orders-section">
+					<div class="ta-orders-header">Assigned Orders</div>
+					${not_picked ? `<div class="ta-truck-warn">${not_picked} customer(s) did not answer — driver should contact on arrival</div>` : ''}
+
+					${!is_empty ? `
+					<div class="ta-truck-orders">
+						${truck_orders.map(o => `
+						<div class="ta-truck-order">
+							<div style="width:100%;">
+								<div style="display:flex; justify-content:space-between;">
+									<a href="/app/sales-order/${o.name}" target="_blank" class="ta-order-link">${o.name}</a>
+									${(o.custom_latitude && o.custom_longitude && parseFloat(o.custom_latitude) !== 0 && parseFloat(o.custom_longitude) !== 0) 
+										? `<span style="color:#10b981; font-size:10px; font-weight:600;">&#10003; Mapped</span>`
+										: `<span style="color:#94a3b8; font-size:10px;">No GPS</span>`}
+								</div>
+								<span class="ta-order-cust">${frappe.utils.escape_html(o.customer_name || o.customer)}</span>
+								${o.custom_location ? `<span class="ta-order-loc"><i class="fa fa-map-pin" style="color:#94a3b8;"></i> ${frappe.utils.escape_html(o.custom_location)}</span>` : ''}
+							</div>
+							<button class="btn btn-xs btn-default btn-unassign" data-order="${o.name}" title="Remove from truck">&#215;</button>
+						</div>`).join('')}
+					</div>
+					` : ''}
+				</div>
+
 			</div>`;
 		});
 
@@ -758,29 +744,33 @@ class TruckAssignmentManager {
 
 			html += `
 			<div class="ta-truck-card ta-closed-card">
-				<div class="ta-truck-head" style="background:#475569;">
-					<div>
-						<div class="ta-truck-num">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</div>
-						${ct.driver_name ? `<div class="ta-truck-driver" style="color:#cbd5e1;">${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
-						${ct.trip_id ? `<div style="font-size:10px;color:#94a3b8;letter-spacing:.5px;">${frappe.utils.escape_html(ct.trip_id)}</div>` : ''}
+				<div class="ta-card-header" style="background:#f1f5f9;">
+					<div class="ta-truck-head">
+						<div>
+							<div class="ta-truck-num" style="color:#334155;">&#10003; ${frappe.utils.escape_html(ct.truck_number)}</div>
+							${ct.trip_id ? `<div style="font-size:10px;color:#94a3b8;letter-spacing:.5px;">${frappe.utils.escape_html(ct.trip_id)}</div>` : ''}
+						</div>
+						<div style="text-align:right;">
+							<div style="font-size:11px;color:#64748b;font-weight:600;">${frappe.utils.escape_html(closed_label)}</div>
+						</div>
 					</div>
-					<div style="text-align:right;">
-						<div style="font-size:11px;color:#94a3b8;">${frappe.utils.escape_html(closed_label)}</div>
+					${ct.driver_name ? `<div class="ta-truck-driver"><i class="fa fa-user" style="color:#94a3b8; margin-right:4px;"></i>${frappe.utils.escape_html(ct.driver_name)}</div>` : ''}
+					
+					<div class="ta-truck-stats">
+						<div class="ta-truck-stat"><span>${ct.order_count}</span>Orders</div>
+						<div class="ta-truck-stat"><span>${(ct.total_weight || 0).toFixed(0)} kg</span>Weight</div>
+						<div class="ta-truck-stat"><span>${format_currency(ct.total_value || 0, null, 0)}</span>Value</div>
 					</div>
 				</div>
 
-				<div class="ta-truck-stats">
-					<div class="ta-truck-stat"><span>${ct.order_count}</span>Orders</div>
-					<div class="ta-truck-stat"><span>${(ct.total_weight || 0).toFixed(0)} kg</span>Weight</div>
-					<div class="ta-truck-stat"><span>${format_currency(ct.total_value || 0, null, 0)}</span>Value</div>
-				</div>
-
-				<div class="ta-orders-section">
-					<div class="ta-closed-toggle" data-idx="${idx}">
-						&#9658; View ${(ct.orders || []).length} order${(ct.orders || []).length !== 1 ? 's' : ''}
-					</div>
-					<div class="ta-closed-orders-list" id="ta-closed-orders-${idx}" style="display:none;">
-						${order_rows}
+				<div class="ta-card-orders-section">
+					<div class="ta-orders-section">
+						<div class="ta-closed-toggle" data-idx="${idx}">
+							&#9658; View ${(ct.orders || []).length} order${(ct.orders || []).length !== 1 ? 's' : ''}
+						</div>
+						<div class="ta-closed-orders-list" id="ta-closed-orders-${idx}" style="display:none;">
+							${order_rows}
+						</div>
 					</div>
 				</div>
 			</div>`;
@@ -819,28 +809,17 @@ class TruckAssignmentManager {
 
 			$(this).closest('tr').toggleClass('ta-row-selected', checked);
 
-			// Update count label, weight/value summary, and button state
+			// Update count label and button state
 			const unassigned  = self.get_filtered_orders().filter(o => !o.custom_truck_number);
-			const sel_orders  = unassigned.filter(o => self.selected_orders.has(o.name));
-			const sel_count   = sel_orders.length;
+			const sel_count   = unassigned.filter(o => self.selected_orders.has(o.name)).length;
 			const all_checked = sel_count === unassigned.length && unassigned.length > 0;
-			const sel_weight  = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
-			const sel_value   = sel_orders.reduce((s, o) => s + (o.grand_total      || 0), 0);
 
 			self.container.find('.ta-select-all-chk').prop('checked', all_checked);
 			self.container.find('.ta-bulk-count').text(`${sel_count} of ${unassigned.length} selected`);
 			self.container.find('.ta-bulk-assign-btn').prop('disabled', sel_count === 0);
 			self.container.find('.ta-bulk-truck-input').prop('disabled', sel_count === 0);
-
-			// Update or remove the weight/value summary block
-			self.container.find('.ta-bulk-sel-stats').remove();
-			if (sel_count > 0) {
-				const stats_html = `<span class="ta-bulk-sel-stats">
-					<span class="ta-bulk-sel-stat" title="Total weight">&#8981; ${sel_weight.toFixed(1)} kg</span>
-					<span class="ta-bulk-sel-stat" title="Total value">${format_currency(sel_value, null, 0)}</span>
-				</span>`;
-				self.container.find('.ta-bulk-count').after(stats_html);
-			}
+			self.container.find('.btn-optimize-awaiting').prop('disabled', sel_count === 0);
+			self.container.find('.btn-analyse-margins-awaiting').prop('disabled', sel_count === 0);
 
 			// Show/hide Clear button
 			if (sel_count > 0 && !self.container.find('.ta-bulk-clear-btn').length) {
@@ -877,6 +856,100 @@ class TruckAssignmentManager {
 			self.render_view();
 		});
 
+		// ── Dynamic UI Validation: Toggle Checkbox based on Truck Input ─────────────────────
+		this.container.find('.ta-bulk-truck-input').off('input.chk-toggle').on('input.chk-toggle', function() {
+			const hasVal = $(this).val().trim().length > 0;
+			const $chk = self.container.find('.ta-include-current-chk');
+			$chk.prop('disabled', !hasVal);
+			
+			if (!hasVal) {
+				const wasChecked = $chk.prop('checked');
+				$chk.prop('checked', false);
+				// Automatically re-optimize if the map is open and the box was forced unchecked
+				if (wasChecked && self.page.wrapper.find('.nexus-route-panel').hasClass('active')) {
+					self.container.find('.btn-optimize-awaiting').trigger('click');
+				}
+			}
+		});
+
+		// ── Dynamic Re-optimization on Checkbox Toggle ──────────────────────────────
+		this.container.find('.ta-include-current-chk').off('change.chk-reopt').on('change.chk-reopt', function() {
+			// Only trigger API computation if the spatial map panel is currently active
+			if (self.page.wrapper.find('.nexus-route-panel').hasClass('active')) {
+				self.container.find('.btn-optimize-awaiting').trigger('click');
+			}
+		});
+
+		// ── Route Optimization Buttons ──────────────────────────────────────────────
+
+		this.container.find('.btn-optimize-awaiting').off('click').on('click', () => {
+			const unassigned = this.get_filtered_orders().filter(o => !o.custom_truck_number);
+			let selected_orders_data = unassigned.filter(o => this.selected_orders.has(o.name));
+
+			// Capture the currently typed truck number from the bulk assignment input
+			const truck_input_val = this.container.find('.ta-bulk-truck-input').val().trim();
+			const include_current = this.container.find('.ta-include-current-chk').is(':checked');
+
+			// If checkbox is checked and a truck is specified, concatenate current manifest orders
+			if (include_current && truck_input_val) {
+				const current_truck_orders = this.orders.filter(o => o.custom_truck_number === truck_input_val);
+				
+				// Merge arrays while preventing duplicate order entries if an assigned order was somehow also selected
+				const selectedNames = new Set(selected_orders_data.map(o => o.name));
+				const uniqueExisting = current_truck_orders.filter(o => !selectedNames.has(o.name));
+				
+				selected_orders_data = [...selected_orders_data, ...uniqueExisting];
+			}
+			
+			// Search loaded available trucks for the matching parameters
+			const truck_info = this.available_trucks.find(t => t.truck_number === truck_input_val);
+			
+			// Extract vehicle type (stored in capacity_kg based on your DocType link)
+			const vehicle_type = truck_info ? truck_info.capacity_kg : null;
+			const truck_number = truck_input_val || null;
+
+			// Pass the extracted variables to the spatial engine
+			this.open_route_optimizer('Pre-Analysis: Awaiting Orders', selected_orders_data, vehicle_type, truck_number);
+		});
+
+		this.container.find('.btn-optimize-truck').off('click').on('click', (e) => {
+			const tn = $(e.currentTarget).data('truck');
+			const truck_orders = this.orders.filter(o => o.custom_truck_number === tn);
+			const truck_info = this.available_trucks.find(t => t.truck_number === tn);
+			this.open_route_optimizer(`Active Route: ${tn}`, truck_orders, truck_info ? truck_info.capacity_kg : null, tn);
+		});
+
+		// 🚨 NEW: Analyse Margins — reuses the exact same selection/merge
+		// logic as .btn-optimize-awaiting above, just routed to the margin
+		// analyzer instead of the route panel.
+		this.container.find('.btn-analyse-margins-awaiting').off('click').on('click', () => {
+			const unassigned = this.get_filtered_orders().filter(o => !o.custom_truck_number);
+			let selected_orders_data = unassigned.filter(o => this.selected_orders.has(o.name));
+
+			const truck_input_val = this.container.find('.ta-bulk-truck-input').val().trim();
+			const include_current = this.container.find('.ta-include-current-chk').is(':checked');
+
+			if (include_current && truck_input_val) {
+				const current_truck_orders = this.orders.filter(o => o.custom_truck_number === truck_input_val);
+				const selectedNames = new Set(selected_orders_data.map(o => o.name));
+				const uniqueExisting = current_truck_orders.filter(o => !selectedNames.has(o.name));
+				selected_orders_data = [...selected_orders_data, ...uniqueExisting];
+			}
+
+			const truck_info = this.available_trucks.find(t => t.truck_number === truck_input_val);
+			const vehicle_type = truck_info ? truck_info.capacity_kg : null;
+			const truck_number = truck_input_val || null;
+
+			this.open_margin_analyzer('Margin Analysis: Awaiting Orders', selected_orders_data, vehicle_type, truck_number);
+		});
+
+		this.container.find('.btn-analyse-margins-truck').off('click').on('click', (e) => {
+			const tn = $(e.currentTarget).data('truck');
+			const truck_orders = this.orders.filter(o => o.custom_truck_number === tn);
+			const truck_info = this.available_trucks.find(t => t.truck_number === tn);
+			this.open_margin_analyzer(`Margin Analysis: ${tn}`, truck_orders, truck_info ? truck_info.capacity_kg : null, tn);
+		});
+
 		// ── Per-row truck assignment ───────────────────────────────────────────────
 
 		// Truck assignment via text input (on change / blur)
@@ -884,15 +957,15 @@ class TruckAssignmentManager {
 			const order_name   = $(this).data('order');
 			const truck_number = $(this).val().trim();
 			if (truck_number && !self.available_trucks.find(t => t.truck_number === truck_number)) {
-				const m = self.saved_meta[truck_number] || {};
-				self.available_trucks.push({
-					truck_number,
-					driver_name: m.driver_name || '',
-					capacity_kg: m.capacity_kg != null ? m.capacity_kg : 5000,
-					trip_id:     m.trip_id     || self._gen_trip_id(),
+				// Call backend to ensure DocType is created immediately
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.add_active_truck',
+					args: { truck_number },
+					callback: () => self._set_truck(order_name, truck_number)
 				});
+			} else {
+				self._set_truck(order_name, truck_number);
 			}
-			self._set_truck(order_name, truck_number);
 		});
 
 		// Also assign on Enter key
@@ -928,70 +1001,6 @@ class TruckAssignmentManager {
 
 		this.container.find('.btn-close-truck').off('click').on('click', function () {
 			self.close_truck($(this).data('truck'));
-		});
-
-		// ── Truck multi-select ────────────────────────────────────────────────────
-		this.container.find('.ta-truck-chk').off('change').on('change', function () {
-			const tn = $(this).data('truck');
-			if ($(this).is(':checked')) self.selected_trucks.add(tn);
-			else self.selected_trucks.delete(tn);
-			// Update card highlight without full re-render
-			$(this).closest('.ta-truck-card').toggleClass('ta-truck-selected', $(this).is(':checked'));
-			// Re-render only the bulk bar area
-			self.render_view();
-		});
-
-		this.container.find('.ta-bulk-clear-trucks').off('click').on('click', () => {
-			self.selected_trucks.clear();
-			self.render_view();
-		});
-
-		this.container.find('.ta-bulk-dispatch-trucks').off('click').on('click', () => {
-			const trucks = [...self.selected_trucks];
-			if (!trucks.length) return;
-			frappe.confirm(
-				__('Dispatch {0} truck(s)? Their orders will be recorded in Trip Plans and the trucks will be ready for the next load.', [trucks.length]),
-				() => {
-					self.selected_trucks.clear();
-					// Dispatch sequentially so each confirm+manifest happens in order
-					const dispatch_next = (idx) => {
-						if (idx >= trucks.length) { self.load_data(); return; }
-						const tn = trucks[idx];
-						const truck_orders = self.orders.filter(o => o.custom_truck_number === tn);
-						if (truck_orders.length) {
-							self.download_manifest(tn);
-							self._close_truck_batch(tn, truck_orders);
-							// _close_truck_batch calls load_data; chain next after a brief wait
-							setTimeout(() => dispatch_next(idx + 1), 800);
-						} else {
-							dispatch_next(idx + 1);
-						}
-					};
-					dispatch_next(0);
-				}
-			);
-		});
-
-		this.container.find('.ta-bulk-remove-trucks').off('click').on('click', () => {
-			const trucks = [...self.selected_trucks];
-			if (!trucks.length) return;
-			const total_orders = trucks.reduce((s, tn) => s + self.orders.filter(o => o.custom_truck_number === tn).length, 0);
-			const msg = total_orders
-				? __('Remove {0} truck(s) and unassign {1} order(s)? Orders will return to the unassigned list.', [trucks.length, total_orders])
-				: __('Remove {0} empty truck(s)?', [trucks.length]);
-			frappe.confirm(msg, () => {
-				self.selected_trucks.clear();
-				trucks.forEach(tn => {
-					const truck_orders = self.orders.filter(o => o.custom_truck_number === tn);
-					if (truck_orders.length) {
-						self._set_truck_batch(truck_orders, '');
-					} else {
-						self.available_trucks = self.available_trucks.filter(t => t.truck_number !== tn);
-					}
-				});
-				self._save_truck_meta();
-				self.render_view();
-			});
 		});
 
 		this.container.find('.btn-dl-manifest').off('click').on('click', function () {
@@ -1052,47 +1061,51 @@ class TruckAssignmentManager {
 			return;
 		}
 
-		if (!this.available_trucks.find(t => t.truck_number === truck_number)) {
-			const m = this.saved_meta[truck_number] || {};
-			this.available_trucks.push({
-				truck_number,
-				driver_name: m.driver_name || '',
-				capacity_kg: m.capacity_kg != null ? m.capacity_kg : 5000,
-				trip_id:     m.trip_id     || this._gen_trip_id(),
-			});
-		}
-
-		const over = this._check_capacity(truck_number, to_assign);
-		if (over) {
-			frappe.msgprint({
-				title: __('Truck Over Capacity'),
-				message: __(
-					'Cannot assign {0} order(s) to truck <strong>{1}</strong>.<br>' +
-					'Current load: <strong>{2} kg</strong><br>' +
-					'These orders add: <strong>{3} kg</strong><br>' +
-					'Total would be: <strong>{4} kg</strong> — exceeds capacity of <strong>{5} kg</strong>.',
-					[to_assign.length, truck_number,
-					 over.current.toFixed(0), over.adding.toFixed(0),
-					 over.total.toFixed(0), over.capacity.toFixed(0)]
-				),
-				indicator: 'red',
-			});
-			return;
-		}
-
-		frappe.confirm(
-			__('Assign {0} order(s) to truck {1}?', [to_assign.length, truck_number]),
-			() => {
-				this._set_truck_batch(to_assign, truck_number, () => {
-					this.selected_orders.clear();
-					frappe.show_alert({
-						message: __('✓ {0} orders assigned to {1}', [to_assign.length, truck_number]),
-						indicator: 'green',
-					});
-					this.load_data();
+		const proceed_assignment = () => {
+			const over = this._check_capacity(truck_number, to_assign);
+			if (over) {
+				frappe.msgprint({
+					title: __('Truck Over Capacity'),
+					message: __(
+						'Cannot assign {0} order(s) to truck <strong>{1}</strong>.<br>' +
+						'Current load: <strong>{2} kg</strong><br>' +
+						'These orders add: <strong>{3} kg</strong><br>' +
+						'Total would be: <strong>{4} kg</strong> — exceeds capacity of <strong>{5} kg</strong>.',
+						[to_assign.length, truck_number,
+						 over.current.toFixed(0), over.adding.toFixed(0),
+						 over.total.toFixed(0), over.capacity.toFixed(0)]
+					),
+					indicator: 'red',
 				});
+				return;
 			}
-		);
+
+			frappe.confirm(
+				__('Assign {0} order(s) to truck {1}?', [to_assign.length, truck_number]),
+				() => {
+					this._set_truck_batch(to_assign, truck_number, () => {
+						this.selected_orders.clear();
+						frappe.show_alert({
+							message: __('✓ {0} orders assigned to {1}', [to_assign.length, truck_number]),
+							indicator: 'green',
+						});
+						this.load_trucks_from_orders();
+					});
+				}
+			);
+		};
+
+		if (!this.available_trucks.find(t => t.truck_number === truck_number)) {
+			// Fast UI update, then ensure backend catches up before assigning
+			this.available_trucks.push({ truck_number, driver_name: '', capacity_kg: 5000, trip_id: '' });
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.add_active_truck',
+				args: { truck_number },
+				callback: proceed_assignment
+			});
+		} else {
+			proceed_assignment();
+		}
 	}
 
 	// ── Backend calls ─────────────────────────────────────────────────────────
@@ -1149,30 +1162,26 @@ class TruckAssignmentManager {
 					message: truck_number ? __('Assigned to {0}', [truck_number]) : __('Truck unassigned'),
 					indicator: truck_number ? 'green' : 'orange',
 				});
-				this.load_data();
+				this.load_trucks_from_orders();
 			},
 		});
 	}
 
 	_set_truck_batch(orders, truck_number, on_done) {
-		let done = 0;
-		const next = () => {
-			if (done >= orders.length) {
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_batch_atomic',
+			args: { 
+				truck_number: truck_number,
+				order_names_json: JSON.stringify(orders.map(o => o.name || o)) 
+			},
+			callback: () => {
 				if (on_done) on_done();
 				else {
 					frappe.show_alert({ message: __('Done — {0} orders updated', [orders.length]), indicator: 'green' });
-					this.load_data();
+					this.load_trucks_from_orders();
 				}
-				return;
 			}
-			frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_number',
-				args: { order_name: orders[done].name, truck_number },
-				callback: () => { done++; next(); },
-				error:    () => { done++; next(); },
-			});
-		};
-		next();
+		});
 	}
 
 	// ── Actions ───────────────────────────────────────────────────────────────
@@ -1180,70 +1189,30 @@ class TruckAssignmentManager {
 	edit_truck_details(truck_number) {
 		const truck = this.available_trucks.find(t => t.truck_number === truck_number);
 		frappe.prompt([
-			{ label: 'Truck Number', fieldname: 'truck_number', fieldtype: 'Data',  default: truck.truck_number, reqd: 1 },
+			{ label: 'Truck Number', fieldname: 'truck_number', fieldtype: 'Data',  default: truck.truck_number, reqd: 1, read_only: 1 },
 			{ label: 'Driver Name',  fieldname: 'driver_name',  fieldtype: 'Data',  default: truck.driver_name },
-			{ label: 'Capacity (kg)', fieldname: 'capacity_kg', fieldtype: 'Float', default: truck.capacity_kg || 5000 },
+			{ label: 'Vehicle Type', fieldname: 'capacity_kg', fieldtype: 'Link', options: 'Vehicle Type', default: truck.capacity_kg, reqd: 1 },
 		], (vals) => {
-			const old_num = truck.truck_number;
-			truck.truck_number = vals.truck_number;
-			truck.driver_name  = vals.driver_name;
-			truck.capacity_kg  = vals.capacity_kg;
-			this._save_truck_meta();
-
-			// Keep Crystal Truck Plan in sync
-			if (truck.plan_name) {
-				frappe.call({
-					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.update_truck_plan_meta',
-					args: {
-						plan_name:    truck.plan_name,
-						truck_number: vals.truck_number,
-						driver_name:  vals.driver_name,
-						capacity_kg:  vals.capacity_kg,
-					},
-				});
-			}
-
-			if (old_num !== vals.truck_number) {
-				// Fetch ALL orders with the old truck number directly from DB — do not rely on
-				// this.orders which may be incomplete due to active SP/region/date filters.
-				frappe.call({
-					method: 'frappe.client.get_list',
-					args: {
-						doctype: 'Sales Order',
-						fields: ['name'],
-						filters: [['Sales Order', 'custom_truck_number', '=', old_num]],
-						limit_page_length: 0,
-					},
-					callback: (r) => {
-						const all_orders = r.message || [];
-						if (all_orders.length) {
-							this._set_truck_batch(all_orders, vals.truck_number);
-						} else {
-							this.load_data();
-						}
-					},
-					error: () => this.load_data(),
-				});
-			} else {
-				this.render_view();
-			}
-			frappe.show_alert({ message: __('Truck updated'), indicator: 'green' });
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.update_active_truck',
+				args: {
+					truck_number: vals.truck_number,
+					driver_name: vals.driver_name,
+					capacity_kg: vals.capacity_kg
+				},
+				callback: () => {
+					frappe.show_alert({ message: __('Truck updated'), indicator: 'green' });
+					this.load_trucks_from_orders();
+				}
+			});
 		}, __('Edit Truck'), __('Update'));
 	}
 
 	reassign_truck_orders(truck_number) {
-		// Only move orders that are not yet invoiced — completed/closed orders stay put
-		const truck_orders  = this.orders.filter(o =>
-			o.custom_truck_number === truck_number &&
-			o.so_status !== 'Completed' && o.so_status !== 'Closed'
-		);
+		const truck_orders  = this.orders.filter(o => o.custom_truck_number === truck_number);
 		const other_trucks  = this.available_trucks.filter(t => t.truck_number !== truck_number);
 		if (!other_trucks.length) {
 			frappe.msgprint(__('No other trucks available. Add another truck first.'));
-			return;
-		}
-		if (!truck_orders.length) {
-			frappe.msgprint(__('All orders on this truck are already invoiced and cannot be moved.'));
 			return;
 		}
 		frappe.prompt([{
@@ -1260,111 +1229,62 @@ class TruckAssignmentManager {
 
 	delete_truck(truck_number) {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
+		
+		const finalize_delete = () => {
+			frappe.call({
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.delete_active_truck',
+				args: { truck_number },
+				callback: () => {
+					frappe.show_alert({ message: __('Truck removed'), indicator: 'green' });
+					this.load_trucks_from_orders();
+				}
+			});
+		};
+
 		if (!truck_orders.length) {
-			this.available_trucks = this.available_trucks.filter(t => t.truck_number !== truck_number);
-			this._save_truck_meta();
-			frappe.show_alert({ message: __('Truck removed'), indicator: 'green' });
-			this.render_view();
+			finalize_delete();
 		} else {
 			frappe.confirm(
 				__('Unassign {0} orders from {1}? They will return to the unassigned list.', [truck_orders.length, truck_number]),
-				() => this._set_truck_batch(truck_orders, '')
+				() => {
+					// Empty assignment batch call unlinks them first
+					this._set_truck_batch(truck_orders, '', finalize_delete);
+				}
 			);
 		}
 	}
 
 	close_truck(truck_number) {
 		const truck_orders = this.orders.filter(o => o.custom_truck_number === truck_number);
-		if (!truck_orders.length) { frappe.msgprint(__('Cannot dispatch an empty truck')); return; }
+		if (!truck_orders.length) { frappe.msgprint(__('Cannot close an empty truck')); return; }
 
+		const truck = this.available_trucks.find(t => t.truck_number === truck_number);
+		const is_pending = truck && truck.warehouse_status !== 'Loaded';
 		const unsubmitted = truck_orders.filter(o => parseInt(o.docstatus) === 0);
-		const msg = unsubmitted.length
-			? __('Truck {0} has {1} unsubmitted order(s). Dispatch anyway? Orders will be recorded and the truck stays available for the next load.', [truck_number, unsubmitted.length])
-			: __('Dispatch truck {0}? {1} orders will be recorded in a Trip Plan and the truck stays available for the next load.', [truck_number, truck_orders.length]);
+
+		let msg = '';
+		if (is_pending) {
+			msg = __('The warehouse is still <strong>Pending Loading</strong>. Dispatch anyway?<br><br><span style="font-size:12px;color:#64748b;">(Trip will be recorded and truck cleared for the next load).</span>');
+		} else if (unsubmitted.length) {
+			msg = __('Truck {0} has {1} unsubmitted order(s). Dispatch anyway? Trip will be recorded and truck cleared for the next load.', [truck_number, unsubmitted.length]);
+		} else {
+			msg = __('Dispatch truck {0} with {1} orders? Trip will be recorded and truck cleared for the next load.', [truck_number, truck_orders.length]);
+		}
 
 		frappe.confirm(msg, () => {
 			this.download_manifest(truck_number);
-			this._close_truck_batch(truck_number, truck_orders);
-		});
-	}
-
-	_close_truck_batch(truck_number, truck_orders) {
-		const truck_info  = this.available_trucks.find(t => t.truck_number === truck_number) || {};
-		const new_trip_id = this._gen_trip_id();
-
-		const closure = {
-			trip_id:      truck_info.trip_id || '',
-			truck_number,
-			driver_name:  truck_info.driver_name || '',
-			capacity_kg:  truck_info.capacity_kg || 0,
-			closed_at:    frappe.datetime.now_datetime(),
-			order_count:  truck_orders.length,
-			total_weight: truck_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0),
-			total_value:  truck_orders.reduce((s, o) => s + (o.grand_total || 0), 0),
-			orders: truck_orders.map(o => ({
-				name:            o.name,
-				customer_name:   o.customer_name || o.customer,
-				delivery_region: o.custom_delivery_region || '',
-			})),
-		};
-
-		const orders_meta = truck_orders.map(o => ({
-			name:             o.name,
-			customer_name:    o.customer_name || o.customer || '',
-			delivery_region:  o.custom_delivery_region || '',
-			grand_total:      o.grand_total || 0,
-			total_net_weight: o.total_net_weight || 0,
-		}));
-
-		// Run both operations in parallel: mark orders closed on SOs + submit/restart CTP
-		let orders_done = false, plan_done = false, new_plan_name = '';
-
-		const finish = () => {
-			if (!orders_done || !plan_done) return;
-
-			// Update in-memory trip history (KV cache for quick access)
-			this.closed_trucks = [closure, ...this.closed_trucks];
+			
 			frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
-				args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
+				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.dispatch_truck',
+				args: { truck_number: truck_number },
+				callback: () => {
+					frappe.show_alert({ message: __('Trip recorded for {0}', [truck_number]), indicator: 'green' });
+					this.load_trucks_from_orders();
+				},
+				error: () => frappe.msgprint(__('Failed to dispatch truck {0}. Please try again.', [truck_number]))
 			});
-
-			// Give truck a fresh trip ID and plan for the next load
-			const truck_idx = this.available_trucks.findIndex(t => t.truck_number === truck_number);
-			if (truck_idx >= 0) {
-				this.available_trucks[truck_idx].trip_id  = new_trip_id;
-				this.available_trucks[truck_idx].plan_name = new_plan_name;
-			}
-			this._save_truck_meta();
-
-			frappe.show_alert({ message: __('Trip dispatched for {0} — ready for next load', [truck_number]), indicator: 'green' });
-			this.load_data();
-		};
-
-		// 1. Batch-set custom_truck_closed=1 on all Sales Orders
-		frappe.call({
-			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.close_truck_orders',
-			args:   { order_names_json: JSON.stringify(truck_orders.map(o => o.name)) },
-			callback: () => { orders_done = true; finish(); },
-			error:    () => { orders_done = true; finish(); },
-		});
-
-		// 2. Submit the active Crystal Truck Plan + create a new Draft for the next trip
-		frappe.call({
-			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.dispatch_and_restart_truck',
-			args: {
-				plan_name:    truck_info.plan_name || '',
-				truck_number: truck_number,
-				driver_name:  truck_info.driver_name || '',
-				capacity_kg:  truck_info.capacity_kg || 0,
-				orders_json:  JSON.stringify(orders_meta),
-				new_trip_id:  new_trip_id,
-			},
-			callback: (r) => { new_plan_name = (r.message || {}).new_plan || ''; plan_done = true; finish(); },
-			error:    () => { plan_done = true; finish(); },
 		});
 	}
-
 
 	reopen_truck(idx) {
 		const ct = this.closed_trucks[idx];
@@ -1373,62 +1293,14 @@ class TruckAssignmentManager {
 		frappe.confirm(
 			__('Reopen truck {0}? Orders will be restored to active.', [ct.truck_number]),
 			() => {
-				// Always look up by truck number in the DB — works even for trucks
-				// closed before the orders array was stored in the closure record.
 				frappe.call({
-					method: 'frappe.client.get_list',
-					args: {
-						doctype: 'Sales Order',
-						fields: ['name'],
-						filters: [
-							['Sales Order', 'custom_truck_number', '=', ct.truck_number],
-							['Sales Order', 'custom_truck_closed', '=', 1],
-						],
-						limit_page_length: 500,
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.reopen_dispatched_truck',
+					args: { truck_number: ct.truck_number },
+					callback: () => {
+						frappe.show_alert({ message: __('Truck {0} reopened', [ct.truck_number]), indicator: 'green' });
+						this.load_trucks_from_orders();
 					},
-					callback: (r) => {
-						const orders = r.message || [];
-						let done = 0;
-						const finish = () => {
-							// Remove from closed history and persist
-							this.closed_trucks.splice(idx, 1);
-							frappe.call({
-								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
-								args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
-							});
-
-							// Restore to active truck list and persist meta
-							if (!this.available_trucks.find(t => t.truck_number === ct.truck_number)) {
-								this.available_trucks.push({
-									truck_number: ct.truck_number,
-									driver_name:  ct.driver_name  || '',
-									capacity_kg:  ct.capacity_kg  || 5000,
-									trip_id:      this._gen_trip_id(),
-								});
-								this._save_truck_meta();
-							}
-
-							frappe.show_alert({
-								message: __('Truck {0} reopened — {1} order(s) restored', [ct.truck_number, orders.length]),
-								indicator: 'green',
-							});
-							this.load_data();
-						};
-
-						if (!orders.length) { finish(); return; }
-
-						const next = () => {
-							if (done >= orders.length) { finish(); return; }
-							frappe.call({
-								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.set_truck_closed',
-								args: { order_name: orders[done].name, value: 0 },
-								callback: () => { done++; next(); },
-								error:    () => { done++; next(); },
-							});
-						};
-						next();
-					},
-					error: () => frappe.msgprint(__('Could not load orders for truck {0}', [ct.truck_number])),
+					error: () => frappe.msgprint(__('Could not reopen truck {0}', [ct.truck_number]))
 				});
 			}
 		);
@@ -1442,15 +1314,21 @@ class TruckAssignmentManager {
 			{ label: 'Driver Name',   fieldname: 'driver_name', fieldtype: 'Data',  default: ct.driver_name || '' },
 			{ label: 'Capacity (kg)', fieldname: 'capacity_kg', fieldtype: 'Float', default: ct.capacity_kg  || 5000 },
 		], (vals) => {
-			ct.driver_name = vals.driver_name;
-			ct.capacity_kg = vals.capacity_kg;
+			// Closed trucks are Submitted DocTypes, so we use Frappe's set_value to alter metadata
 			frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.save_closed_trucks',
-				args: { closed_trucks_json: JSON.stringify(this.closed_trucks) },
+				method: 'frappe.client.set_value',
+				args: {
+					doctype: 'Crystal Truck Plan',
+					name: ct.trip_id,
+					fieldname: {
+						driver_name: vals.driver_name,
+						capacity_kg: vals.capacity_kg
+					}
+				},
 				callback: () => {
 					frappe.show_alert({ message: __('Truck {0} updated', [ct.truck_number]), indicator: 'green' });
-					this.render_view();
-				},
+					this.load_trucks_from_orders();
+				}
 			});
 		}, __('Edit Truck {0}', [ct.truck_number]), __('Save'));
 	}
@@ -1520,6 +1398,403 @@ ${driver_cols}
 		frappe.show_alert({ message: __('Manifest downloaded for {0}', [truck_number]), indicator: 'green' });
 	}
 
+// ── Spatial / Routing Logic (Leaflet + Nexus Backend) ─────────────────────
+
+	open_route_optimizer(title, orders, vehicle_type, truck_number = null) {
+		// 1. Reveal Panel and Reset State
+		this.page.wrapper.find('.nexus-route-panel').addClass('active');
+		this.page.wrapper.find('.nexus-panel-backdrop').addClass('active');
+		this.page.wrapper.find('.nexus-panel-title').text(title);
+		
+		$('#nx-dist').html('<i class="fa fa-spinner fa-spin"></i>');
+		$('#nx-dur').html('<i class="fa fa-spinner fa-spin"></i>');
+		$('#nx-fuel-cost').html('<i class="fa fa-spinner fa-spin"></i>');
+		$('.nexus-fuel-banner').show();
+
+		// 2. Load Leaflet and Execute Pipeline
+		frappe.require([
+			"/assets/nexus_supply_chain/leaflet/leaflet.css",
+			"/assets/nexus_supply_chain/leaflet/leaflet.js"
+		], () => {
+			this._execute_route_mapping(orders, vehicle_type, 'nexus-leaflet-map', truck_number);
+		});
+	}
+
+	_execute_route_mapping(orders, vehicle_type, container_id, truck_number = null) {
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_company_coordinates',
+			callback: (r) => {
+				if (!r.message || r.message.status === 'error') {
+					frappe.msgprint("Factory coordinates not set in Global Defaults. Cannot map route.");
+					return;
+				}
+				
+				// FIX: Force factory coordinates into strict floats
+				const factory_lat = parseFloat(r.message.lat);
+				const factory_lng = parseFloat(r.message.lng);
+
+				// FIX: Harden filter to rigorously check for and exclude 0 values
+				const valid_stops = orders.filter(o => 
+					o.custom_latitude && 
+					o.custom_longitude && 
+					parseFloat(o.custom_latitude) !== 0 && 
+					parseFloat(o.custom_longitude) !== 0
+				);
+				
+				const unmapped_stops = orders.filter(o => 
+					!o.custom_latitude || 
+					!o.custom_longitude || 
+					parseFloat(o.custom_latitude) === 0 || 
+					parseFloat(o.custom_longitude) === 0
+				);
+				
+				// Display the Unmapped Banner if there are any skipped orders
+				if (unmapped_stops.length > 0) {
+					const unmapped_html = unmapped_stops.map(o => `<b>${o.name}</b> (${frappe.utils.escape_html(o.customer_name)})`).join(', ');
+					$('#nexus-unmapped-list').html(unmapped_html);
+					$('#nexus-unmapped-banner').slideDown(200);
+				} else {
+					$('#nexus-unmapped-banner').hide();
+				}
+
+				// Handle edge case where NO orders have GPS coordinates
+				if (valid_stops.length === 0) {
+					frappe.msgprint("None of the mapped orders have valid GPS coordinates. Showing unmapped load.");
+					$('#nx-dist').text('0 km');
+					$('#nx-dur').text('0 hrs');
+					$('#nx-fuel-cost').text('N/A');
+					// Render the map centered on the factory with just the banner
+					this._render_leaflet_map({features: []}, factory_lat, factory_lng, [], container_id);
+					return;
+				}
+
+				// Build Sequence [lng, lat]
+				let coordinates = [[factory_lng, factory_lat]];
+				valid_stops.forEach(o => {
+					coordinates.push([parseFloat(o.custom_longitude), parseFloat(o.custom_latitude)]);
+				});
+				coordinates.push([factory_lng, factory_lat]);
+
+				// 🚨 UPDATED: Routed through Frappe's calculate_route_proxy instead
+				// of calling Crystal API directly from the browser — a secret
+				// embedded in client-side JS is visible in dev tools and can never
+				// safely gate this call, so the proxy attaches it server-side.
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.calculate_route_proxy',
+					args: { coordinates_json: JSON.stringify(coordinates) },
+					callback: (route_r) => {
+						const data = route_r.message;
+						if (!data || data.error) {
+							frappe.msgprint("Map Engine Error: " + (data ? data.error : "Unknown error"));
+							return;
+						}
+
+						let ordered_stops = valid_stops;
+						if (Array.isArray(data.waypoint_order) && data.waypoint_order.length === valid_stops.length) {
+							ordered_stops = data.waypoint_order.map(idx => valid_stops[idx]).filter(Boolean);
+						}
+
+						// Draw Map — numbered per the real route sequence
+						this._render_leaflet_map(data, factory_lat, factory_lng, ordered_stops, container_id);
+
+						// Extract Economics
+						const distance_km = data.features[0].properties.summary.distance / 1000;
+						const duration_hrs = data.features[0].properties.summary.duration / 3600;
+
+						$('#nx-dist').text(distance_km.toFixed(1) + ' km');
+						$('#nx-dur').text(duration_hrs.toFixed(1) + ' hrs');
+
+						if (truck_number) {
+							const sequence = ordered_stops.map(o => o.name);
+							frappe.call({
+								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.reorder_truck_plan_orders',
+								args: { truck_number: truck_number, sales_order_sequence_json: JSON.stringify(sequence) }
+							});
+						}
+
+						// Now calls get_vehicle_routing_economics
+						if (vehicle_type || truck_number) {
+							frappe.call({
+								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_vehicle_routing_economics',
+								args: { distance_km: distance_km, vehicle_type: vehicle_type, truck_number: truck_number },
+								callback: (cost_r) => {
+									if (cost_r.message && cost_r.message.status === 'success') {
+										const estCost = parseFloat(cost_r.message.estimated_fuel_cost) || 0.0;
+										$('#nx-fuel-cost').text(`${cost_r.message.currency} ${estCost.toLocaleString(undefined, {minimumFractionDigits: 2})}`);
+									} else {
+										const errMsg = cost_r.message && cost_r.message.message ? cost_r.message.message : 'Unknown Backend Error';
+										console.warn("Vehicle Routing Economics:", errMsg);
+										$('#nx-fuel-cost').text('Math Err');
+									}
+								}
+							});
+						} else {
+							$('#nx-fuel-cost').text('Select Truck to Estimate');
+						}
+					},
+					error: () => {
+						frappe.msgprint("Failed to communicate with the routing engine orchestrator.");
+					}
+				});
+			}
+		});
+	}
+
+	_render_leaflet_map(geojson_data, factory_lat, factory_lng, valid_stops, container_id) {
+		if (!this.route_map) {
+			this.route_map = L.map(container_id, { zoomControl: false }).setView([factory_lat, factory_lng], 12);
+			L.control.zoom({ position: 'topright' }).addTo(this.route_map);
+			L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'Nexus Spatial Engine' }).addTo(this.route_map);
+			this.map_layers = [];
+		}
+
+		this.map_layers.forEach(layer => this.route_map.removeLayer(layer));
+		this.map_layers = [];
+
+		const routeLayer = L.geoJSON(geojson_data, { 
+			style: { color: '#3b82f6', weight: 6, opacity: 0.85, dashArray: '10, 6' } 
+		}).addTo(this.route_map);
+		this.map_layers.push(routeLayer);
+
+		const factoryIcon = L.divIcon({ 
+			className: '', html: `<div class="nexus-factory-marker"><i class="fa fa-industry" style="color:white;"></i></div>`, iconSize: [36, 36], iconAnchor: [18, 18] 
+		});
+		const f_marker = L.marker([factory_lat, factory_lng], { icon: factoryIcon, zIndexOffset: 1000 })
+			.addTo(this.route_map).bindPopup("Factory Dispatch");
+		this.map_layers.push(f_marker);
+
+		// Drop sequence markers using exact VROOM logic 
+		valid_stops.forEach((so, i) => {
+			const icon = L.divIcon({ 
+				className: '', html: `<div class="nexus-map-marker">${i+1}</div>`, iconSize: [28, 28], iconAnchor: [14, 14] 
+			});
+			const m = L.marker([so.custom_latitude, so.custom_longitude], { icon: icon }).addTo(this.route_map)
+				.bindPopup(`<b>Stop ${i+1}: ${so.customer_name}</b><br>Order Value: ${format_currency(so.grand_total)}<br>Tonnage: ${(so.total_net_weight || 0).toFixed(1)} kg`);
+			this.map_layers.push(m);
+		});
+
+		// Prevent Leaflet crash if the bounds are entirely empty
+		if (valid_stops.length > 0) {
+			this.route_map.fitBounds(routeLayer.getBounds(), { padding: [60, 60] });
+		} else {
+			this.route_map.setView([factory_lat, factory_lng], 12);
+		}
+		
+		// Invalidate size to fix off-canvas rendering glitches
+		setTimeout(() => { this.route_map.invalidateSize(); }, 350);
+	}
+
+	// ── Margin Analysis Logic (mirrors the routing logic above, opposite panel) ─
+
+	open_margin_analyzer(title, orders, vehicle_type, truck_number = null) {
+		this.page.wrapper.find('.nexus-margin-panel-title').text(title);
+		this.open_margin_panel();
+		$('#nexus-margin-content').html(`
+			<div class="text-center py-5">
+				<i class="fa fa-spinner fa-spin fa-2x text-primary"></i>
+				<p class="text-muted mt-3">Computing margin analysis...</p>
+			</div>
+		`);
+		this._execute_margin_analysis(orders, vehicle_type, truck_number);
+	}
+
+	_execute_margin_analysis(orders, vehicle_type, truck_number) {
+		if (!orders.length) {
+			$('#nexus-margin-content').html(`<div class="alert alert-warning mt-2">No orders selected for margin analysis.</div>`);
+			return;
+		}
+
+		// Same valid_stops/unmapped_stops filter used by _execute_route_mapping —
+		// orders with null/zero coordinates are excluded from the distance
+		// computation entirely, never coerced to (0,0).
+		const valid_stops = orders.filter(o =>
+			o.custom_latitude &&
+			o.custom_longitude &&
+			parseFloat(o.custom_latitude) !== 0 &&
+			parseFloat(o.custom_longitude) !== 0
+		);
+		const unmapped_stops = orders.filter(o =>
+			!o.custom_latitude ||
+			!o.custom_longitude ||
+			parseFloat(o.custom_latitude) === 0 ||
+			parseFloat(o.custom_longitude) === 0
+		);
+
+		const sales_order_names = orders.map(o => o.name);
+
+		const run_analysis = (distance_km) => {
+			frappe.call({
+				method: 'nexus_supply_chain.routing.margin_analysis.get_margin_analysis',
+				args: {
+					sales_orders: JSON.stringify(sales_order_names),
+					distance_km: distance_km,
+					vehicle_type: vehicle_type,
+					truck_number: truck_number
+				},
+				callback: (r) => {
+					this.render_margin_panel(orders.length, r.message, unmapped_stops.length);
+				},
+				error: () => {
+					$('#nexus-margin-content').html(`<div class="alert alert-danger mt-2">Server error computing margin analysis.</div>`);
+				}
+			});
+		};
+
+		if (valid_stops.length === 0) {
+			// No GPS on any order — skip the route call entirely; distance
+			// stays null and get_margin_analysis reports it as unavailable
+			// rather than fabricating a 0 km figure.
+			run_analysis(null);
+			return;
+		}
+
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_company_coordinates',
+			callback: (r) => {
+				if (!r.message || r.message.status === 'error') {
+					run_analysis(null);
+					return;
+				}
+
+				const factory_lat = parseFloat(r.message.lat);
+				const factory_lng = parseFloat(r.message.lng);
+
+				let coordinates = [[factory_lng, factory_lat]];
+				valid_stops.forEach(o => {
+					coordinates.push([parseFloat(o.custom_longitude), parseFloat(o.custom_latitude)]);
+				});
+				coordinates.push([factory_lng, factory_lat]);
+
+				// 🚨 UPDATED: Routed through Frappe's calculate_route_proxy — see
+				// the matching note in _execute_route_mapping above.
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.calculate_route_proxy',
+					args: { coordinates_json: JSON.stringify(coordinates) },
+					callback: (route_r) => {
+						const data = route_r.message;
+						if (!data || data.error) {
+							run_analysis(null);
+							return;
+						}
+						const distance_km = data.features[0].properties.summary.distance / 1000;
+						run_analysis(distance_km);
+					},
+					error: () => {
+						run_analysis(null);
+					}
+				});
+			}
+		});
+	}
+
+	render_margin_panel(order_count, data, unmapped_count) {
+		if (!data || data.status !== 'success') {
+			$('#nexus-margin-content').html(`
+				<div class="alert alert-danger mt-2">
+					<i class="fa fa-exclamation-triangle me-2"></i>
+					Failed to compute margin analysis.
+				</div>
+			`);
+			return;
+		}
+
+		const currency = data.currency || 'KES';
+		const fmt = (val) => `${currency} ${parseFloat(val || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+		const is_profitable = data.narrowed_gross_margin_percentage >= this.profitability_threshold;
+		const headline_class = is_profitable ? 'profitable' : 'loss';
+		const headline_color = is_profitable ? '#166534' : '#991b1b';
+
+		let fuel_html = '';
+		if (data.distance_available && data.fuel_available) {
+			fuel_html = `
+				<div class="margin-stat-row">
+					<span class="margin-stat-label">Route Distance (Roundtrip)</span>
+					<span class="margin-stat-value">${data.distance_km.toFixed(1)} km</span>
+				</div>
+				<div class="margin-stat-row">
+					<span class="margin-stat-label">Estimated Fuel Cost</span>
+					<span class="margin-stat-value" style="color:#ef4444;">${fmt(data.approximate_fuel_cost)}</span>
+				</div>
+			`;
+		} else if (data.distance_available && !data.fuel_available) {
+			fuel_html = `
+				<div class="alert alert-warning mt-2" style="font-size:12px;">
+					Fuel estimate unavailable — assign a Vehicle Type to this truck to estimate fuel cost.
+				</div>
+			`;
+		} else {
+			fuel_html = `
+				<div class="alert alert-secondary mt-2" style="font-size:12px;">
+					Distance unavailable — no GPS data on any selected order.
+				</div>
+			`;
+		}
+
+		let unmapped_html = '';
+		if (unmapped_count > 0) {
+			unmapped_html = `
+				<div class="alert alert-warning mt-2" style="font-size:12px;">
+					<i class="fa fa-exclamation-triangle me-1"></i>
+					${unmapped_count} order(s) excluded from the distance/fuel estimate — no GPS coordinates.
+				</div>
+			`;
+		}
+
+		let zero_cost_html = '';
+		if (data.zero_cost_items && data.zero_cost_items.length > 0) {
+			zero_cost_html = `
+				<div class="margin-zero-cost-warning">
+					<b><i class="fa fa-exclamation-triangle me-1"></i> Margin Accuracy Warning</b><br>
+					The following item(s) have no Default BOM — their cost was treated as 0, which inflates the margin above:
+					<div class="mt-1"><b>${data.zero_cost_items.join(', ')}</b></div>
+				</div>
+			`;
+		}
+
+		const html = `
+			<div class="mb-3 text-muted" style="font-size:12px;">${order_count} order(s) analysed</div>
+
+			<div class="margin-stat-row">
+				<span class="margin-stat-label">Total Order Value (Incl. VAT)</span>
+				<span class="margin-stat-value">${fmt(data.total_order_value)}</span>
+			</div>
+			<div class="margin-stat-row">
+				<span class="margin-stat-label">VAT (${data.vat_rate_percentage.toFixed(0)}%)</span>
+				<span class="margin-stat-value text-muted">- ${fmt(data.vat_amount)}</span>
+			</div>
+			<div class="margin-stat-row">
+				<span class="margin-stat-label">Revenue (Excl. VAT)</span>
+				<span class="margin-stat-value">${fmt(data.revenue_excl_vat)}</span>
+			</div>
+			<div class="margin-stat-row">
+				<span class="margin-stat-label">Total Theoretical Cost (COGS)</span>
+				<span class="margin-stat-value text-muted">- ${fmt(data.total_theoretical_cost)}</span>
+			</div>
+			<div class="margin-stat-row">
+				<span class="margin-stat-label">Gross Profit</span>
+				<span class="margin-stat-value">${fmt(data.gross_profit)}</span>
+			</div>
+			<div class="margin-stat-row" style="border-bottom:none;">
+				<span class="margin-stat-label">Gross Margin %</span>
+				<span class="margin-stat-value">${data.gross_margin_percentage.toFixed(2)}%</span>
+			</div>
+
+			${fuel_html}
+			${unmapped_html}
+
+			<div class="margin-headline ${headline_class}">
+				<div class="margin-stat-label" style="color:${headline_color};">Narrowed Gross Margin</div>
+				<div class="margin-headline-value" style="color:${headline_color};">${fmt(data.narrowed_gross_profit)}</div>
+				<div class="margin-headline-pct" style="color:${headline_color};">${data.narrowed_gross_margin_percentage.toFixed(2)}% — ${is_profitable ? 'Profitable' : 'Loss'}</div>
+			</div>
+
+			${zero_cost_html}
+		`;
+
+		$('#nexus-margin-content').html(html);
+	}
+
 	// ── SP Pills ──────────────────────────────────────────────────────────────
 
 	_render_sp_pills() {
@@ -1557,6 +1832,25 @@ ${driver_cols}
 	_styles() {
 		return `<style>
 		.ta-container { margin-top: 16px; }
+
+		/* Custom Black Action Button for Optimize Route */
+		.btn-black-action {
+			background-color: #111827 !important;
+			color: #ffffff !important;
+			font-weight: 600 !important;
+			letter-spacing: normal !important;
+			border: 1px solid #111827 !important;
+		}
+		.btn-black-action:hover {
+			background-color: #000000 !important;
+			color: #ffffff !important;
+		}
+		.btn-black-action:disabled {
+			background-color: #6b7280 !important;
+			border-color: #6b7280 !important;
+			opacity: 0.7;
+			cursor: not-allowed;
+		}
 
 		/* Search bar */
 		.ta-search-row {
@@ -1681,29 +1975,10 @@ ${driver_cols}
 		.ta-bulk-select-label input { width:15px; height:15px; accent-color:#667eea; cursor:pointer; }
 		.ta-bulk-sep { flex: 1; }
 		.ta-bulk-count { font-size: 13px; color: #6b7280; white-space: nowrap; }
-		.ta-bulk-sel-stats { display:inline-flex; gap:8px; margin-left:8px; }
-		.ta-bulk-sel-stat { font-size:12px; font-weight:600; color:#1e293b; background:#e0f2fe; border-radius:4px; padding:2px 8px; white-space:nowrap; }
 		.ta-bulk-actions { display: flex; align-items: center; gap: 6px; }
 		.ta-bulk-truck-input { width: 160px !important; height: 30px !important; font-size: 12px !important; }
 		.ta-td-chk { width: 36px; text-align: center; }
 		.ta-row-selected td { background: #eff6ff !important; }
-
-		/* Truck multi-select */
-		.ta-truck-bulk-bar {
-			display: flex;
-			align-items: center;
-			justify-content: space-between;
-			background: #1e293b;
-			color: #fff;
-			border-radius: 8px;
-			padding: 10px 16px;
-			margin-bottom: 12px;
-			gap: 12px;
-		}
-		.ta-truck-bulk-info { font-size: 13px; }
-		.ta-truck-chk-wrap { display:flex; align-items:center; cursor:pointer; margin-right:8px; flex-shrink:0; }
-		.ta-truck-chk-wrap input { width:15px; height:15px; accent-color:#667eea; cursor:pointer; }
-		.ta-truck-selected { border-color: #667eea !important; box-shadow: 0 0 0 2px rgba(102,126,234,.25); }
 
 		/* Awaiting table */
 		.ta-table-wrap { overflow-x: auto; }
@@ -1755,33 +2030,100 @@ ${driver_cols}
 		.ta-truck-input { font-size: 12px; height: 28px; padding: 2px 8px; }
 		.ta-empty { color: #6b7280; font-style: italic; padding: 20px; text-align: center; }
 
-		/* Truck cards */
+		/* Truck cards - 3 COLUMNS */
 		.ta-trucks-grid {
 			display: grid;
-			grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+			grid-template-columns: repeat(3, minmax(0, 1fr));
 			gap: 16px;
 		}
+		@media (max-width: 1200px) {
+			.ta-trucks-grid {
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+			}
+		}
+		@media (max-width: 768px) {
+			.ta-trucks-grid {
+				grid-template-columns: minmax(0, 1fr);
+			}
+		}
+
+		/* Segmented Card Design */
 		.ta-truck-card {
 			border: 1px solid #e2e8f0;
 			border-radius: 8px;
-			padding: 14px;
 			background: #fff;
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
 		}
 		.ta-truck-card.ta-truck-empty {
 			border: 2px dashed #cbd5e1;
-			background: #f8fafc;
 		}
+		
+		.ta-card-header {
+			padding: 14px;
+			background: #f8fafc;
+			border-bottom: 2px solid #e2e8f0;
+		}
+		.ta-card-orders-section {
+			padding: 14px;
+			flex-grow: 1;
+			background: #ffffff;
+		}
+		.ta-orders-header {
+			font-size: 11px;
+			font-weight: 700;
+			color: #64748b;
+			text-transform: uppercase;
+			letter-spacing: 0.5px;
+			margin-bottom: 10px;
+			padding-bottom: 6px;
+			border-bottom: 1px solid #f1f5f9;
+		}
+		
 		.ta-truck-head {
 			display: flex;
 			justify-content: space-between;
 			align-items: center;
-			margin-bottom: 10px;
-			padding-bottom: 10px;
-			border-bottom: 1px solid #f1f5f9;
+			margin-bottom: 6px;
 		}
 		.ta-truck-num { font-size: 15px; font-weight: 700; color: #1e293b; }
-		.ta-truck-btns { display: flex; gap: 4px; flex-wrap: wrap; }
-		.ta-truck-driver { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+		
+		/* Spaced Action Buttons — two rows: primary actions, then icon utilities */
+		.ta-truck-btns-container { 
+			display: flex; 
+			flex-direction: column;
+			gap: 8px; 
+			margin-top: 12px;
+			padding-top: 12px;
+			border-top: 1px solid #e2e8f0;
+		}
+		.ta-truck-actions-primary {
+			display: flex;
+			gap: 6px;
+			width: 100%;
+		}
+		.ta-truck-actions-primary .btn {
+			flex: 1;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			white-space: nowrap;
+		}
+		.ta-truck-actions-icons {
+			display: flex;
+			gap: 6px;
+			flex-wrap: wrap;
+			align-items: center;
+		}
+		.ta-truck-actions-icons .btn {
+			display: inline-flex;
+			align-items: center;
+			gap: 4px;
+		}
+		
+		.ta-truck-driver { font-size: 12px; color: #475569; margin-bottom: 8px; font-weight:600; }
 		.ta-truck-warn {
 			background: #fef3c7;
 			border: 1px solid #f59e0b;
@@ -1789,12 +2131,13 @@ ${driver_cols}
 			padding: 6px 10px;
 			font-size: 11px;
 			color: #92400e;
-			margin-bottom: 8px;
+			margin-bottom: 12px;
 		}
 		.ta-truck-stats { display: flex; gap: 8px; margin-bottom: 8px; }
 		.ta-truck-stat {
 			flex: 1;
-			background: #f8fafc;
+			background: #ffffff;
+			border: 1px solid #e2e8f0;
 			border-radius: 4px;
 			padding: 6px;
 			text-align: center;
@@ -1808,29 +2151,29 @@ ${driver_cols}
 		.ta-cap-label { font-size: 10px; color: #6b7280; margin-bottom: 8px; }
 		.ta-truck-routes { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 		.ta-route-tag {
-			background: #f1f5f9;
+			background: #ffffff;
+			border: 1px solid #e2e8f0;
 			color: #475569;
 			border-radius: 3px;
-			padding: 1px 6px;
+			padding: 2px 6px;
 			font-size: 11px;
 		}
-		.ta-truck-orders { max-height: 200px; overflow-y: auto; }
+		.ta-truck-orders { max-height: 220px; overflow-y: auto; padding-right: 4px; }
 		.ta-truck-order {
 			display: flex;
 			justify-content: space-between;
 			align-items: center;
-			padding: 6px;
-			margin-bottom: 4px;
+			padding: 8px;
+			margin-bottom: 6px;
 			background: #f8fafc;
+			border: 1px solid #f1f5f9;
 			border-radius: 4px;
 			font-size: 12px;
 		}
 		.ta-order-link { font-weight: 600; color: #3b82f6; }
-		.ta-order-cust { display: block; color: #6b7280; font-size: 11px; }
-		.ta-order-loc  { display: block; color: #94a3b8; font-size: 10px; font-style: italic; }
-		.ta-order-invoiced { opacity: 0.65; background: #f1f5f9 !important; }
-		.ta-invoiced-badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; background: #10b981; color: #fff; border-radius: 8px; margin-left: 5px; vertical-align: middle; letter-spacing: .3px; }
-		.ta-empty-truck { text-align: center; color: #94a3b8; padding: 16px; font-style: italic; }
+		.ta-order-cust { display: block; color: #6b7280; font-size: 11px; margin-top:2px; }
+		.ta-order-loc  { display: block; color: #64748b; font-size: 10px; margin-top:2px; }
+		.ta-empty-truck { text-align: center; color: #94a3b8; padding: 10px; font-style: italic; font-size: 12px;}
 
 		/* Closed trucks */
 		.ta-closed-card { opacity: 0.85; }
@@ -1843,9 +2186,10 @@ ${driver_cols}
 			cursor: pointer;
 			background: #f8fafc;
 			user-select: none;
+			border-radius: 4px;
 		}
 		.ta-closed-toggle:hover { background: #f1f5f9; color: #475569; }
-		.ta-closed-orders-list { border-top: 1px solid #f1f5f9; }
+		.ta-closed-orders-list { margin-top: 8px; }
 
 		/* Pagination */
 		.ta-pg-bar {
@@ -1859,6 +2203,17 @@ ${driver_cols}
 		}
 		.ta-pg-info { font-size: 13px; color: #64748b; }
 		.ta-pg-bar .btn { min-width: 70px; }
+		/* GPS Badges */
+		.ta-gps-badge {
+			padding: 2px 6px;
+			border-radius: 4px;
+			font-size: 10px;
+			font-weight: 700;
+			text-transform: uppercase;
+		}
+		.ta-gps-mapped { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+		.ta-gps-missing { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+
 		</style>`;
 	}
 }

@@ -56,6 +56,16 @@ fixtures = [
     },
 ]
 
+# ─── DOCUMENT EVENTS (HOOKS) ──────────────────────────────────────────────────
+# Listens natively to standard ERPNext documents to trigger background syncs
+
+doc_events = {
+    "Delivery Note": {
+        "on_submit": "crystal_custom.crystal_customizations.events.delivery_note.on_submit",
+        "on_cancel": "crystal_custom.crystal_customizations.events.delivery_note.on_cancel"
+    }
+}
+
 # Apps
 # ------------------
 

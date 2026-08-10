@@ -1,0 +1,19 @@
+<!-- 
+  apps/crystal_custom/crystal_custom/crystal_customizations/page/sales_order_truck_as/sales_order_truck_as.html
+
+  Purpose: Dependency injection for the Spatial Presentation Layer.
+  The UI DOM (KPIs, Tables, and Map Panels) is fully generated and managed by 
+  sales_order_truck_as.js using frappe.ui.make_app_page() and jQuery injections.
+-->
+
+<!-- Leaflet Map Dependencies (Hosted locally via Nexus Supply Chain custom app) -->
+<link rel="stylesheet" href="/assets/nexus_supply_chain/leaflet/leaflet.css">
+<script src="/assets/nexus_supply_chain/leaflet/leaflet.js"></script>
+
+<!-- 
+  Legacy Note: 
+  The old static DOM elements (.tonnage-plan-wrapper, .planner-card, etc.) 
+  have been omitted. The new JavaScript controller dynamically constructs the 
+  entire layout, including the Leaflet sliding offcanvas panel, to maintain 
+  the microservice-aligned architecture.
+-->
