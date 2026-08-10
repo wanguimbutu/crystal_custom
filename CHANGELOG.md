@@ -1,3 +1,10 @@
+# [1.31.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.30.0...v1.31.0) (2026-08-10)
+
+
+### Features
+
+* truck plan/ settings ([cb35921](https://github.com/wanguimbutu/crystal_custom/commit/cb35921fa46a9cb6b2b23a01f0f06c02db1b38b1))
+
 # [1.30.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.29.0...v1.30.0) (2026-08-10)
 
 
