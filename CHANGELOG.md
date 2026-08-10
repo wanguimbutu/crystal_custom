@@ -1,3 +1,15 @@
+# [1.30.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.29.0...v1.30.0) (2026-08-10)
+
+
+### Bug Fixes
+
+* **customer-order-confirmation:** preserve cancelled orders instead of deleting ([d67c026](https://github.com/wanguimbutu/crystal_custom/commit/d67c026908ab71bb2bd4c7a13374cdcf8e329032))
+
+
+### Features
+
+* add truck route optimizer ([1e235ec](https://github.com/wanguimbutu/crystal_custom/commit/1e235ec2bbe8ab3952717926e1dc75b1d0950992))
+
 # [1.29.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.28.0...v1.29.0) (2026-07-29)
 
 
