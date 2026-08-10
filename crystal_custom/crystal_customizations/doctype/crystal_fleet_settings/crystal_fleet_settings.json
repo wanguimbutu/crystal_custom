@@ -1,0 +1,52 @@
+{
+ "actions": [],
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "narrowed_margin_profitability_threshold"
+ ],
+ "fields": [
+  {
+   "default": "33",
+   "description": "Truck plans with a Narrowed Gross Margin % at or above this threshold are flagged Profitable; below it, Loss.",
+   "fieldname": "narrowed_margin_profitability_threshold",
+   "fieldtype": "Percent",
+   "label": "Narrowed Margin Profitability Threshold (%)",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crystal Customizations",
+ "name": "Crystal Fleet Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
