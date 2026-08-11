@@ -331,10 +331,11 @@ class TruckAssignmentManager {
 		if (this.search_term) {
 			const q = this.search_term.toLowerCase();
 			orders = orders.filter(o =>
-				(o.name          || '').toLowerCase().includes(q) ||
-				(o.customer_name || '').toLowerCase().includes(q) ||
-				(o.customer      || '').toLowerCase().includes(q) ||
-				(o.sales_persons || '').toLowerCase().includes(q)
+				(o.name                 || '').toLowerCase().includes(q) ||
+				(o.customer_name        || '').toLowerCase().includes(q) ||
+				(o.customer             || '').toLowerCase().includes(q) ||
+				(o.sales_persons        || '').toLowerCase().includes(q) ||
+				(o.custom_truck_number  || '').toLowerCase().includes(q)
 			);
 		}
 		return orders;
