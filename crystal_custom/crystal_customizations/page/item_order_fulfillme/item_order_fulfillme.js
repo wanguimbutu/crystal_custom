@@ -284,8 +284,16 @@ class OrderFulfillmentManager {
 			const status    = is_region ? 'Pre-Fulfilment' : (is_closed ? 'Dispatched' : 'Active');
 			const status_color = is_region ? '#0d9488' : (is_closed ? '#64748b' : '#8b5cf6');
 
+			// Items live at truck level in the Trucks tab; check them once per truck
+			const truck_matched_items = (truck.items || []).filter(i =>
+				(i.item_code || '').toLowerCase().includes(q) ||
+				(i.item_name || '').toLowerCase().includes(q)
+			);
+			const truck_item_hit = truck_matched_items.length > 0;
+
 			(truck.orders || []).forEach(o => {
-				const matched_items = (o.items || []).filter(i =>
+				// Customer-view data attaches items per order; truck-view data does not
+				const order_matched_items = (o.items || []).filter(i =>
 					(i.item_code || '').toLowerCase().includes(q) ||
 					(i.item_name || '').toLowerCase().includes(q)
 				);
@@ -295,7 +303,9 @@ class OrderFulfillmentManager {
 					(o.customer_name   || '').toLowerCase().includes(q) ||
 					(o.delivery_region || '').toLowerCase().includes(q) ||
 					(o.sales_persons   || '').toLowerCase().includes(q) ||
-					matched_items.length > 0;
+					order_matched_items.length > 0 ||
+					truck_item_hit;
+				const matched_items = order_matched_items.length ? order_matched_items : truck_matched_items;
 				if (hit) matches.push({ o, tn, is_region, status, status_color, matched_items });
 			});
 		});
