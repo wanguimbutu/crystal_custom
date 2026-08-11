@@ -1,3 +1,10 @@
+## [1.33.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.33.1...v1.33.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* remove wrong confirmed filter ([3edb829](https://github.com/wanguimbutu/crystal_custom/commit/3edb82964d4724691868fa0467420f069ca8e6b6))
+
 ## [1.33.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.33.0...v1.33.1) (2026-08-11)
 
 
