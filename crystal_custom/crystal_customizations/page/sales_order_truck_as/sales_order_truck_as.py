@@ -258,6 +258,13 @@ def get_dispatched_trucks():
     return result
 
 
+@frappe.whitelist()
+def get_closed_trucks():
+    """Backward-compat alias — callers expect a JSON string."""
+    import json
+    return json.dumps(get_dispatched_trucks())
+
+
 # ─── SYNCING ASSIGNMENTS (THE ROW-LEVEL LOCK) ────────────────────────────────
 
 @frappe.whitelist()
