@@ -435,7 +435,10 @@ class TruckAssignmentManager {
 		).join('');
 
 		// Count selected orders visible in the full filtered list (all pages)
-		const sel_count   = all_orders.filter(o => this.selected_orders.has(o.name)).length;
+		const sel_orders  = all_orders.filter(o => this.selected_orders.has(o.name));
+		const sel_count   = sel_orders.length;
+		const sel_weight  = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+		const sel_value   = sel_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
 		const all_checked = all_orders.length > 0 && sel_count === all_orders.length;
 
 		let html = `
@@ -448,6 +451,12 @@ class TruckAssignmentManager {
 			</label>
 			<span class="ta-bulk-sep"></span>
 			<span class="ta-bulk-count">${sel_count} of ${all_orders.length} selected</span>
+			<span class="ta-bulk-stats-wrap">${sel_count ? `
+				<span class="ta-bulk-stat-sep">·</span>
+				<span class="ta-bulk-stat" title="Total weight of selected orders">&#9878; ${sel_weight.toFixed(1)} kg</span>
+				<span class="ta-bulk-stat-sep">·</span>
+				<span class="ta-bulk-stat" title="Total value of selected orders">${format_currency(sel_value, null, 0)}</span>
+			` : ''}</span>
 			<div class="ta-bulk-actions" style="align-items: center; gap: 8px;">
 				<label class="ta-bulk-select-label" style="font-weight: normal; font-size: 12px;" title="Combine selected awaiting orders with orders already assigned to this truck">
 					<input type="checkbox" class="ta-include-current-chk" disabled style="width:14px; height:14px; accent-color:#667eea; cursor:pointer;">
@@ -810,12 +819,21 @@ class TruckAssignmentManager {
 			$(this).closest('tr').toggleClass('ta-row-selected', checked);
 
 			// Update count label and button state
-			const unassigned  = self.get_filtered_orders().filter(o => !o.custom_truck_number);
-			const sel_count   = unassigned.filter(o => self.selected_orders.has(o.name)).length;
-			const all_checked = sel_count === unassigned.length && unassigned.length > 0;
+			const unassigned   = self.get_filtered_orders().filter(o => !o.custom_truck_number);
+			const sel_orders   = unassigned.filter(o => self.selected_orders.has(o.name));
+			const sel_count    = sel_orders.length;
+			const all_checked  = sel_count === unassigned.length && unassigned.length > 0;
+			const sel_weight_u = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+			const sel_value_u  = sel_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
 
 			self.container.find('.ta-select-all-chk').prop('checked', all_checked);
 			self.container.find('.ta-bulk-count').text(`${sel_count} of ${unassigned.length} selected`);
+			self.container.find('.ta-bulk-stats-wrap').html(sel_count ? `
+				<span class="ta-bulk-stat-sep">·</span>
+				<span class="ta-bulk-stat" title="Total weight of selected orders">&#9878; ${sel_weight_u.toFixed(1)} kg</span>
+				<span class="ta-bulk-stat-sep">·</span>
+				<span class="ta-bulk-stat" title="Total value of selected orders">${format_currency(sel_value_u, null, 0)}</span>
+			` : '');
 			self.container.find('.ta-bulk-assign-btn').prop('disabled', sel_count === 0);
 			self.container.find('.ta-bulk-truck-input').prop('disabled', sel_count === 0);
 			self.container.find('.btn-optimize-awaiting').prop('disabled', sel_count === 0);
@@ -1975,6 +1993,8 @@ ${driver_cols}
 		.ta-bulk-select-label input { width:15px; height:15px; accent-color:#667eea; cursor:pointer; }
 		.ta-bulk-sep { flex: 1; }
 		.ta-bulk-count { font-size: 13px; color: #6b7280; white-space: nowrap; }
+		.ta-bulk-stat { font-size: 13px; color: #1e293b; white-space: nowrap; }
+		.ta-bulk-stat-sep { color: #cbd5e1; font-size: 16px; line-height: 1; padding: 0 2px; }
 		.ta-bulk-actions { display: flex; align-items: center; gap: 6px; }
 		.ta-bulk-truck-input { width: 160px !important; height: 30px !important; font-size: 12px !important; }
 		.ta-td-chk { width: 36px; text-align: center; }
