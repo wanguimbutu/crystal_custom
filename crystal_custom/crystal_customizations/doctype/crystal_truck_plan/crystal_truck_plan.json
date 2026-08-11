@@ -1,19 +1,18 @@
 {
  "actions": [],
  "allow_import": 1,
- "autoname": "naming_series:",
- "creation": "2026-06-18 00:00:00.000000",
+ "autoname": "CTP-.truck_number.-.YYYY.-.MM.-.DD.-.####",
+ "creation": "2026-06-18 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "naming_series",
   "truck_number",
-  "trip_id",
   "plan_date",
   "col_break_1",
   "closed_from",
   "driver_name",
   "capacity_kg",
+  "warehouse_status",
   "section_summary",
   "order_count",
   "total_weight",
@@ -21,36 +20,42 @@
   "total_value",
   "delivery_regions",
   "section_orders",
-  "orders"
+  "orders",
+  "allocations_section",
+  "allocations",
+  "amended_from",
+  "allocations_confirmed",
+  "section_route_fuel",
+  "approximate_total_distance_km",
+  "approximate_trip_duration",
+  "col_break_route",
+  "approximate_fuel_consumption_ltrs",
+  "approximate_fuel_cost",
+  "actual_fuel_fuelled",
+  "route_geojson",
+  "section_margin_analysis",
+  "total_order_value",
+  "total_theoretical_cost",
+  "col_break_margin",
+  "narrowed_gross_profit",
+  "narrowed_gross_margin_percentage",
+  "profitability_status"
  ],
  "fields": [
   {
-   "fieldname": "naming_series",
-   "fieldtype": "Select",
-   "label": "Series",
-   "options": "CTP-.YYYY.MM.-"
-  },
-  {
+   "bold": 1,
    "fieldname": "truck_number",
    "fieldtype": "Data",
-   "label": "Truck Number",
-   "reqd": 1,
    "in_list_view": 1,
-   "bold": 1
+   "label": "Truck Number",
+   "reqd": 1
   },
   {
-   "fieldname": "trip_id",
-   "fieldtype": "Data",
-   "label": "Trip ID",
-   "read_only": 1,
-   "in_list_view": 0
-  },
-  {
+   "default": "Today",
    "fieldname": "plan_date",
    "fieldtype": "Date",
-   "label": "Plan Date",
-   "default": "Today",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "label": "Plan Date"
   },
   {
    "fieldname": "col_break_1",
@@ -59,20 +64,21 @@
   {
    "fieldname": "closed_from",
    "fieldtype": "Select",
+   "in_list_view": 1,
    "label": "Closed From",
-   "options": "\nTruck Assignment\nOrder Fulfillment\nAuto-Close",
-   "in_list_view": 1
+   "options": "\nTruck Assignment\nOrder Fulfillment"
   },
   {
    "fieldname": "driver_name",
    "fieldtype": "Data",
-   "label": "Driver Name",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "label": "Driver Name"
   },
   {
    "fieldname": "capacity_kg",
-   "fieldtype": "Float",
-   "label": "Capacity (kg)"
+   "fieldtype": "Link",
+   "label": "Capacity (kg)",
+   "options": "Vehicle Type"
   },
   {
    "fieldname": "section_summary",
@@ -117,16 +123,143 @@
    "fieldtype": "Table",
    "label": "Orders",
    "options": "Crystal Truck Plan Order"
+  },
+  {
+   "fieldname": "allocations_section",
+   "fieldtype": "Section Break",
+   "label": "Allocations"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "allocations",
+   "fieldtype": "Table",
+   "label": "Allocations",
+   "options": "Crystal Truck Plan Allocation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Crystal Truck Plan",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "0",
+   "fieldname": "allocations_confirmed",
+   "fieldtype": "Check",
+   "label": "Allocations Confirmed"
+  },
+  {
+   "fieldname": "warehouse_status",
+   "fieldtype": "Select",
+   "label": "Warehouse Status",
+   "options": "Pending\nLoaded"
+  },
+  {
+   "fieldname": "section_route_fuel",
+   "fieldtype": "Section Break",
+   "label": "Route & Fuel Estimate"
+  },
+  {
+   "description": "ORS-routed roundtrip distance (factory -> stops -> factory), computed silently at Dispatch.",
+   "fieldname": "approximate_total_distance_km",
+   "fieldtype": "Float",
+   "label": "Approximate Total Distance (Km)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approximate_trip_duration",
+   "fieldtype": "Duration",
+   "label": "Approximate Trip Duration",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_route",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "approximate_fuel_consumption_ltrs",
+   "fieldtype": "Float",
+   "label": "Approximate Fuel Consumption (Ltrs)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approximate_fuel_cost",
+   "fieldtype": "Currency",
+   "label": "Approximate Fuel Cost",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "actual_fuel_fuelled",
+   "fieldtype": "Float",
+   "label": "Actual Fuel Fuelled (In Company Floor)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "route_geojson",
+   "fieldtype": "Long Text",
+   "label": "Route GeoJSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_margin_analysis",
+   "fieldtype": "Section Break",
+   "label": "Margin Analysis"
+  },
+  {
+   "description": "Total Sales Order value including VAT, across all orders in this plan.",
+   "fieldname": "total_order_value",
+   "fieldtype": "Currency",
+   "label": "Total Order Value (Incl. VAT)",
+   "read_only": 1
+  },
+  {
+   "description": "Total theoretical COGS, derived from each item's Default BOM cost.",
+   "fieldname": "total_theoretical_cost",
+   "fieldtype": "Currency",
+   "label": "Total Theoretical Cost (COGS)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_margin",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Revenue (excl. VAT) minus COGS minus estimated fuel cost. Overheads not yet deducted.",
+   "fieldname": "narrowed_gross_profit",
+   "fieldtype": "Currency",
+   "label": "Narrowed Gross Profit",
+   "read_only": 1
+  },
+  {
+   "fieldname": "narrowed_gross_margin_percentage",
+   "fieldtype": "Percent",
+   "label": "Narrowed Gross Margin (%)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "profitability_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Profitability Status",
+   "options": "Profitable\nLoss",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-18 00:00:00.000000",
+ "modified": "2026-08-02 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Crystal Customizations",
  "name": "Crystal Truck Plan",
- "naming_rule": "By \"Naming Series\" field",
+ "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
@@ -144,13 +277,13 @@
   },
   {
    "create": 1,
-   "delete": 0,
    "read": 1,
    "role": "Sales User",
    "submit": 1,
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "plan_date",
  "sort_order": "DESC",
  "states": [
