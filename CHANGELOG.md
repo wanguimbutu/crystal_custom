@@ -1,3 +1,11 @@
+## [1.33.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.33.2...v1.33.3) (2026-08-11)
+
+
+### Bug Fixes
+
+* **item-order-fulfillment:** fix item name search in truck view ([8792be7](https://github.com/wanguimbutu/crystal_custom/commit/8792be7206ba68e701454445df22bc815412a8a7))
+* restore get_closed_trucks as backward-compat alias for delivery and status pages ([09da307](https://github.com/wanguimbutu/crystal_custom/commit/09da307e0aeba6dc24c02113d8b9d8e65df3f82e))
+
 ## [1.33.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.33.1...v1.33.2) (2026-08-11)
 
 
