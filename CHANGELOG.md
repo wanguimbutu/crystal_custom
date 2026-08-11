@@ -1,3 +1,10 @@
+# [1.33.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.32.0...v1.33.0) (2026-08-11)
+
+
+### Features
+
+* **truck-assignment:** include truck number in order search ([1853a47](https://github.com/wanguimbutu/crystal_custom/commit/1853a47f2d99a9f276955764ac507c9e1a9a4f10))
+
 # [1.32.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.31.0...v1.32.0) (2026-08-11)
 
 
