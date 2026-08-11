@@ -4,8 +4,19 @@ import requests
 from frappe.utils import flt
 from frappe import _
 
+# 🚨 NEW: Crystal API base URL, matching the constant already used in
+# nexus_load_optimizer.py's API_URL — kept as a plain string here (not
+# imported cross-app) since this file already makes its own direct HTTP
+# calls to Crystal API elsewhere in the codebase's broader pattern, and a
+# hardcoded constant avoids introducing an import dependency just for a URL.
 CRYSTAL_API_BASE_URL = "https://crystal-api.crystalapps.dev"
 
+# 🚨 Forward-compatible: this file's ONE server-to-server /calculate-route
+# call (dispatch's silent authoritative recompute) can safely carry the
+# shared secret today, even though FastAPI doesn't yet require it there —
+# so no further edit is needed here once /calculate-route is eventually
+# locked down (pending the browser-side proxy work for the JS-originated
+# calls in this same page, which can never safely carry this secret).
 CRYSTAL_API_INTERNAL_SECRET = frappe.conf.get("crystal_api_internal_secret")
 
 @frappe.whitelist()
@@ -508,6 +519,18 @@ def dispatch_truck(truck_number):
     Batch-1 fields — independent of whatever the client last displayed via
     the "Analyse Margins" / "Optimize Route" buttons, and regardless of how
     long ago (or whether) those buttons were clicked.
+
+    🚨 FIX: Immediately after submitting, creates a fresh Draft Crystal
+    Truck Plan for the SAME plate. Without this, the plate has zero active
+    Draft CTPs the instant dispatch completes — and get_truck_assignment_orders'
+    assigned-orders query requires EXISTS(...docstatus=0...) for that plate.
+    Any Sales Order whose custom_truck_number still points at this plate in
+    that gap (e.g. a write that lands moments after dispatch, or a stale
+    client-side truck list that skips add_active_truck) becomes invisible
+    in BOTH the assigned and unassigned queries simultaneously — fully
+    intact in the database, but absent from this page entirely. Recreating
+    the Draft here closes that gap the same way the old KV-based
+    dispatch_and_restart_truck flow always did.
     """
     plan_name = frappe.db.get_value('Crystal Truck Plan', {'truck_number': truck_number, 'docstatus': 0}, 'name')
     if not plan_name:
@@ -536,6 +559,10 @@ def dispatch_truck(truck_number):
     threshold = flt(frappe.db.get_single_value("Crystal Fleet Settings", "narrowed_margin_profitability_threshold")) or 33.0
     plan.profitability_status = "Profitable" if plan.narrowed_gross_margin_percentage >= threshold else "Loss"
 
+    # Preserve driver/capacity before submit — needed below to seed the new Draft
+    driver_name_snapshot = plan.driver_name
+    capacity_kg_snapshot = plan.capacity_kg
+
     # 1. Lock the Report
     plan.warehouse_status = 'Loaded' # Ensure it registers as fully loaded upon final dispatch
     plan.submit()
@@ -546,6 +573,18 @@ def dispatch_truck(truck_number):
             'custom_truck_closed': 1,
             'custom_is_pre_fulfillment': 0
         })
+
+    # 3. 🚨 Recreate a Draft CTP for this same plate — guarded so a rapid
+    # double-call (e.g. accidental double-click) can never create duplicates.
+    if not frappe.db.exists('Crystal Truck Plan', {'truck_number': truck_number, 'docstatus': 0}):
+        frappe.get_doc({
+            'doctype': 'Crystal Truck Plan',
+            'truck_number': truck_number,
+            'driver_name': driver_name_snapshot or '',
+            'capacity_kg': capacity_kg_snapshot,
+            'plan_date': frappe.utils.today(),
+            'warehouse_status': 'Pending'
+        }).insert(ignore_permissions=True)
 
     return True
 
@@ -747,3 +786,5 @@ def get_vehicle_routing_economics(distance_km, vehicle_type, truck_number=None):
         "currency": currency,
         "economics_used": vt_data
     }
+
+

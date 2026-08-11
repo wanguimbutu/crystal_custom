@@ -20,6 +20,10 @@ class TruckAssignmentManager {
 		this.trucks_tab = 'active';
 		this._sps = new Set();
 		this._regions = new Set();
+		// 🚨 NEW: Profitability threshold, fetched once at page load from
+		// Crystal Fleet Settings (Batch 4's get_fleet_settings endpoint) and
+		// cached here — every margin panel render just reads this cached
+		// value, never re-fetched per card or per analysis.
 		this.profitability_threshold = 33;
 		this.setup_page();
 		this.load_trucks_from_orders();
@@ -152,6 +156,8 @@ class TruckAssignmentManager {
 			this.page.wrapper.find('.nexus-route-panel, .nexus-panel-backdrop').removeClass('active');
 		});
 
+		// 🚨 NEW: Margin Analysis panel, created once at page load. Content
+		// is populated on demand by render_margin_panel().
 		this.margin_panel = $(`
 			<div class="nexus-margin-panel">
 				<div class="nexus-panel-header">
@@ -173,6 +179,9 @@ class TruckAssignmentManager {
 		});
 	}
 
+	// 🚨 NEW: Fetches the profitability threshold ONCE at page load and
+	// caches it — every subsequent margin panel render just reads
+	// this.profitability_threshold, no re-fetching per card/analysis.
 	_fetch_fleet_settings() {
 		frappe.call({
 			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_fleet_settings',
@@ -1495,6 +1504,10 @@ ${driver_cols}
 				});
 				coordinates.push([factory_lng, factory_lat]);
 
+				// 🚨 UPDATED: Routed through Frappe's calculate_route_proxy instead
+				// of calling Crystal API directly from the browser — a secret
+				// embedded in client-side JS is visible in dev tools and can never
+				// safely gate this call, so the proxy attaches it server-side.
 				frappe.call({
 					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.calculate_route_proxy',
 					args: { coordinates_json: JSON.stringify(coordinates) },
@@ -1505,6 +1518,14 @@ ${driver_cols}
 							return;
 						}
 
+						// 🚨 NEW: Reorder valid_stops to match the VROOM-computed
+						// visiting sequence (waypoint_order) — stop numbers on the
+						// map now reflect the real route order (distance from/to
+						// the factory along actual roads), not incidental array
+						// order. Falls back to original order if the lengths
+						// don't line up for any reason (e.g. VROOM unavailable
+						// and the backend fell back to sequential order anyway —
+						// harmless either way since sequential IS the fallback).
 						let ordered_stops = valid_stops;
 						if (Array.isArray(data.waypoint_order) && data.waypoint_order.length === valid_stops.length) {
 							ordered_stops = data.waypoint_order.map(idx => valid_stops[idx]).filter(Boolean);
@@ -1520,6 +1541,10 @@ ${driver_cols}
 						$('#nx-dist').text(distance_km.toFixed(1) + ' km');
 						$('#nx-dur').text(duration_hrs.toFixed(1) + ' hrs');
 
+						// 🚨 NEW: Persist this visiting order onto the truck's
+						// Crystal Truck Plan, if a real truck is in play. Safe
+						// no-op server-side if that truck has no active draft
+						// plan yet (e.g. awaiting-orders preview before assignment).
 						if (truck_number) {
 							const sequence = ordered_stops.map(o => o.name);
 							frappe.call({
@@ -1623,6 +1648,9 @@ ${driver_cols}
 			return;
 		}
 
+		// Same valid_stops/unmapped_stops filter used by _execute_route_mapping —
+		// orders with null/zero coordinates are excluded from the distance
+		// computation entirely, never coerced to (0,0).
 		const valid_stops = orders.filter(o =>
 			o.custom_latitude &&
 			o.custom_longitude &&
@@ -1657,7 +1685,9 @@ ${driver_cols}
 		};
 
 		if (valid_stops.length === 0) {
-
+			// No GPS on any order — skip the route call entirely; distance
+			// stays null and get_margin_analysis reports it as unavailable
+			// rather than fabricating a 0 km figure.
 			run_analysis(null);
 			return;
 		}
@@ -2231,3 +2261,4 @@ ${driver_cols}
 		</style>`;
 	}
 }
+
