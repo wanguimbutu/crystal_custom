@@ -274,13 +274,10 @@ class TruckAssignmentManager {
 				const seen   = new Set(truck_rows.map(o => o.name));
 				const merged = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
 
-				// 🚨 UPDATED: No longer excludes Order Confirmed orders that
-				// still lack a truck — matching Order Confirmation's filtering
-				// (docstatus-based only). An Order Confirmed order with no
-				// truck is exactly what a dispatcher still needs to see and
-				// assign; hiding it here was preventing valid orders from
-				// ever appearing in the Awaiting Assignment table.
-				this.orders = merged;
+				// Exclude Order Confirmed orders with no truck (planning is done)
+				this.orders = merged.filter(o =>
+					o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
+				);
 
 				// Seed any newly-seen truck numbers automatically into the master DocType DB
 				let missing = [];
