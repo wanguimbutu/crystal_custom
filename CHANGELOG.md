@@ -1,3 +1,10 @@
+# [1.32.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.31.0...v1.32.0) (2026-08-11)
+
+
+### Features
+
+* **truck-assignment:** show total weight and value of selected orders ([5bfba7b](https://github.com/wanguimbutu/crystal_custom/commit/5bfba7b0ca862db10dd8dcfd9e5c7cc3e22cd340))
+
 # [1.31.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.30.0...v1.31.0) (2026-08-10)
 
 
