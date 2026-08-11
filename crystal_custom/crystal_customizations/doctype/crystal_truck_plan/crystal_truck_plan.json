@@ -166,7 +166,7 @@
    "label": "Route & Fuel Estimate"
   },
   {
-   "description": "ORS-routed roundtrip distance (factory -> stops -> factory), computed silently at Dispatch.",
+   "description": "Routed roundtrip distance (factory -> stops -> factory), computed silently at Dispatch.",
    "fieldname": "approximate_total_distance_km",
    "fieldtype": "Float",
    "label": "Approximate Total Distance (Km)",
