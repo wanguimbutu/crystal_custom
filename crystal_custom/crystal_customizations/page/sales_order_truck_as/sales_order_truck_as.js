@@ -152,8 +152,6 @@ class TruckAssignmentManager {
 			this.page.wrapper.find('.nexus-route-panel, .nexus-panel-backdrop').removeClass('active');
 		});
 
-		// 🚨 NEW: Margin Analysis panel, created once at page load. Content
-		// is populated on demand by render_margin_panel().
 		this.margin_panel = $(`
 			<div class="nexus-margin-panel">
 				<div class="nexus-panel-header">
@@ -267,10 +265,13 @@ class TruckAssignmentManager {
 				const seen   = new Set(truck_rows.map(o => o.name));
 				const merged = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
 
-				// Exclude Order Confirmed orders with no truck (planning is done)
-				this.orders = merged.filter(o =>
-					o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
-				);
+				// 🚨 UPDATED: No longer excludes Order Confirmed orders that
+				// still lack a truck — matching Order Confirmation's filtering
+				// (docstatus-based only). An Order Confirmed order with no
+				// truck is exactly what a dispatcher still needs to see and
+				// assign; hiding it here was preventing valid orders from
+				// ever appearing in the Awaiting Assignment table.
+				this.orders = merged;
 
 				// Seed any newly-seen truck numbers automatically into the master DocType DB
 				let missing = [];
@@ -331,11 +332,10 @@ class TruckAssignmentManager {
 		if (this.search_term) {
 			const q = this.search_term.toLowerCase();
 			orders = orders.filter(o =>
-				(o.name                 || '').toLowerCase().includes(q) ||
-				(o.customer_name        || '').toLowerCase().includes(q) ||
-				(o.customer             || '').toLowerCase().includes(q) ||
-				(o.sales_persons        || '').toLowerCase().includes(q) ||
-				(o.custom_truck_number  || '').toLowerCase().includes(q)
+				(o.name          || '').toLowerCase().includes(q) ||
+				(o.customer_name || '').toLowerCase().includes(q) ||
+				(o.customer      || '').toLowerCase().includes(q) ||
+				(o.sales_persons || '').toLowerCase().includes(q)
 			);
 		}
 		return orders;
@@ -438,9 +438,15 @@ class TruckAssignmentManager {
 		// Count selected orders visible in the full filtered list (all pages)
 		const sel_orders  = all_orders.filter(o => this.selected_orders.has(o.name));
 		const sel_count   = sel_orders.length;
-		const sel_weight  = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
-		const sel_value   = sel_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
 		const all_checked = all_orders.length > 0 && sel_count === all_orders.length;
+
+		// 🚨 NEW: Weight/value totals for just the selected orders — shown
+		// inline next to "X of Y selected" (⚖ tonnage · Sh value), matching
+		// the reference screenshot. Recomputed the same way on every
+		// checkbox toggle in _attach_events, so it stays live without a
+		// full re-render.
+		const sel_weight = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+		const sel_value  = sel_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
 
 		let html = `
 		<datalist id="ta-trucks-list">${truck_opts}</datalist>
@@ -451,13 +457,7 @@ class TruckAssignmentManager {
 				Select all
 			</label>
 			<span class="ta-bulk-sep"></span>
-			<span class="ta-bulk-count">${sel_count} of ${all_orders.length} selected</span>
-			<span class="ta-bulk-stats-wrap">${sel_count ? `
-				<span class="ta-bulk-stat-sep">·</span>
-				<span class="ta-bulk-stat" title="Total weight of selected orders">&#9878; ${sel_weight.toFixed(1)} kg</span>
-				<span class="ta-bulk-stat-sep">·</span>
-				<span class="ta-bulk-stat" title="Total value of selected orders">${format_currency(sel_value, null, 0)}</span>
-			` : ''}</span>
+			<span class="ta-bulk-count">${sel_count} of ${all_orders.length} selected${sel_count ? ` &nbsp;·&nbsp; ⚖ ${sel_weight.toFixed(1)} kg &nbsp;·&nbsp; ${format_currency(sel_value)}` : ''}</span>
 			<div class="ta-bulk-actions" style="align-items: center; gap: 8px;">
 				<label class="ta-bulk-select-label" style="font-weight: normal; font-size: 12px;" title="Combine selected awaiting orders with orders already assigned to this truck">
 					<input type="checkbox" class="ta-include-current-chk" disabled style="width:14px; height:14px; accent-color:#667eea; cursor:pointer;">
@@ -820,21 +820,22 @@ class TruckAssignmentManager {
 			$(this).closest('tr').toggleClass('ta-row-selected', checked);
 
 			// Update count label and button state
-			const unassigned   = self.get_filtered_orders().filter(o => !o.custom_truck_number);
-			const sel_orders   = unassigned.filter(o => self.selected_orders.has(o.name));
-			const sel_count    = sel_orders.length;
-			const all_checked  = sel_count === unassigned.length && unassigned.length > 0;
-			const sel_weight_u = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
-			const sel_value_u  = sel_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+			const unassigned  = self.get_filtered_orders().filter(o => !o.custom_truck_number);
+			const sel_orders  = unassigned.filter(o => self.selected_orders.has(o.name));
+			const sel_count   = sel_orders.length;
+			const all_checked = sel_count === unassigned.length && unassigned.length > 0;
+
+			// 🚨 NEW: Same weight/value stats as the initial render, kept live
+			// here without a full re-render — mirrors _render_awaiting's
+			// sel_weight/sel_value computation.
+			const sel_weight = sel_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
+			const sel_value  = sel_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
 
 			self.container.find('.ta-select-all-chk').prop('checked', all_checked);
-			self.container.find('.ta-bulk-count').text(`${sel_count} of ${unassigned.length} selected`);
-			self.container.find('.ta-bulk-stats-wrap').html(sel_count ? `
-				<span class="ta-bulk-stat-sep">·</span>
-				<span class="ta-bulk-stat" title="Total weight of selected orders">&#9878; ${sel_weight_u.toFixed(1)} kg</span>
-				<span class="ta-bulk-stat-sep">·</span>
-				<span class="ta-bulk-stat" title="Total value of selected orders">${format_currency(sel_value_u, null, 0)}</span>
-			` : '');
+			self.container.find('.ta-bulk-count').text(
+				`${sel_count} of ${unassigned.length} selected` +
+				(sel_count ? ` · ⚖ ${sel_weight.toFixed(1)} kg · ${format_currency(sel_value)}` : '')
+			);
 			self.container.find('.ta-bulk-assign-btn').prop('disabled', sel_count === 0);
 			self.container.find('.ta-bulk-truck-input').prop('disabled', sel_count === 0);
 			self.container.find('.btn-optimize-awaiting').prop('disabled', sel_count === 0);
@@ -1494,10 +1495,6 @@ ${driver_cols}
 				});
 				coordinates.push([factory_lng, factory_lat]);
 
-				// 🚨 UPDATED: Routed through Frappe's calculate_route_proxy instead
-				// of calling Crystal API directly from the browser — a secret
-				// embedded in client-side JS is visible in dev tools and can never
-				// safely gate this call, so the proxy attaches it server-side.
 				frappe.call({
 					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.calculate_route_proxy',
 					args: { coordinates_json: JSON.stringify(coordinates) },
@@ -1531,7 +1528,10 @@ ${driver_cols}
 							});
 						}
 
-						// Now calls get_vehicle_routing_economics
+						// 🚨 UPDATED: Now calls get_vehicle_routing_economics — the
+						// real Vehicle Type-driven fuel engine — instead of the
+						// removed calculate_trip_fuel_cost placeholder (which
+						// hardcoded a flat 120 KES/km regardless of vehicle).
 						if (vehicle_type || truck_number) {
 							frappe.call({
 								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_vehicle_routing_economics',
@@ -1623,9 +1623,6 @@ ${driver_cols}
 			return;
 		}
 
-		// Same valid_stops/unmapped_stops filter used by _execute_route_mapping —
-		// orders with null/zero coordinates are excluded from the distance
-		// computation entirely, never coerced to (0,0).
 		const valid_stops = orders.filter(o =>
 			o.custom_latitude &&
 			o.custom_longitude &&
@@ -1660,9 +1657,7 @@ ${driver_cols}
 		};
 
 		if (valid_stops.length === 0) {
-			// No GPS on any order — skip the route call entirely; distance
-			// stays null and get_margin_analysis reports it as unavailable
-			// rather than fabricating a 0 km figure.
+
 			run_analysis(null);
 			return;
 		}
@@ -1994,8 +1989,6 @@ ${driver_cols}
 		.ta-bulk-select-label input { width:15px; height:15px; accent-color:#667eea; cursor:pointer; }
 		.ta-bulk-sep { flex: 1; }
 		.ta-bulk-count { font-size: 13px; color: #6b7280; white-space: nowrap; }
-		.ta-bulk-stat { font-size: 13px; color: #1e293b; white-space: nowrap; }
-		.ta-bulk-stat-sep { color: #cbd5e1; font-size: 16px; line-height: 1; padding: 0 2px; }
 		.ta-bulk-actions { display: flex; align-items: center; gap: 6px; }
 		.ta-bulk-truck-input { width: 160px !important; height: 30px !important; font-size: 12px !important; }
 		.ta-td-chk { width: 36px; text-align: center; }
