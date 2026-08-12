@@ -321,14 +321,20 @@ class OrderFulfillmentManager {
 			const item_badges = matched_items.map(i =>
 				`<span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;margin-right:3px;">${frappe.utils.escape_html(i.item_name || i.item_code)}</span>`
 			).join('');
+			const truck_cell = is_region
+				? `<span style="color:#94a3b8;font-size:12px;">No truck yet</span>`
+				: `<strong style="color:#667eea;">${frappe.utils.escape_html(tn)}</strong>`;
+			const region_cell = is_region
+				? `<strong style="color:#0d9488;">${frappe.utils.escape_html(o.delivery_region || tn)}</strong>`
+				: frappe.utils.escape_html(o.delivery_region || '');
 			return `<tr>
 				<td>
 					<a href="/app/sales-order/${o.name}" target="_blank" class="tf-order-link">${frappe.utils.escape_html(o.name)}</a>
 					${item_badges ? `<div style="margin-top:3px;">${item_badges}</div>` : ''}
 				</td>
 				<td>${frappe.utils.escape_html(o.customer_name || '')}</td>
-				<td><strong style="color:${is_region ? '#0d9488' : '#667eea'};">${frappe.utils.escape_html(tn)}</strong></td>
-				<td>${frappe.utils.escape_html(o.delivery_region || '')}</td>
+				<td>${truck_cell}</td>
+				<td>${region_cell}</td>
 				<td><span class="tf-status-badge" style="background:${status_color};">${status}</span></td>
 			</tr>`;
 		}).join('');
@@ -342,7 +348,7 @@ class OrderFulfillmentManager {
 			<thead><tr>
 				<th>Sales Order</th>
 				<th>Customer</th>
-				<th>Truck / Region</th>
+				<th>Truck</th>
 				<th>Delivery Region</th>
 				<th>Status</th>
 			</tr></thead>
