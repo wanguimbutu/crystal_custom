@@ -1,3 +1,10 @@
+# [1.34.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.33.3...v1.34.0) (2026-08-12)
+
+
+### Features
+
+* **item-order-fulfillment:** separate Truck and Delivery Region columns in search results ([f988087](https://github.com/wanguimbutu/crystal_custom/commit/f9880877440745463382f6c69b64696a53a29ed2))
+
 ## [1.33.3](https://github.com/wanguimbutu/crystal_custom/compare/v1.33.2...v1.33.3) (2026-08-11)
 
 
