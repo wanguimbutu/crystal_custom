@@ -382,6 +382,10 @@ close_margin_panel() {
 				const seen   = new Set(truck_rows.map(o => o.name));
 				const merged = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
 
+				// Orphaned orders (from a closed truck) still carry their old truck number.
+				// Clear it so they appear in the awaiting list rather than creating a ghost truck panel.
+				merged.forEach(o => { if (o.orphaned_from_truck) o.custom_truck_number = ''; });
+
 				this.orders = merged;
 
 				// Seed any newly-seen truck numbers, restoring saved metadata
@@ -667,9 +671,6 @@ close_margin_panel() {
 				const is_overdue    = o.delivery_date && o.delivery_date < today
 					&& !parseFloat(o.per_delivered || 0)
 					&& !parseFloat(o.per_billed    || 0);
-				const days_late     = is_overdue
-					? Math.ceil((new Date(today) - new Date(o.delivery_date)) / 86400000)
-					: 0;
 				html += `
 				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${is_overdue ? ' ta-row-overdue' : ''}${is_orphan && !is_overdue ? ' ta-row-orphan' : ''}${is_submitted && !is_overdue && !is_orphan ? ' ta-row-submitted' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
 					<td class="ta-td-chk">
@@ -677,12 +678,10 @@ close_margin_panel() {
 					</td>
 					<td>
 						<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
-						${is_overdue ? `<span class="ta-overdue-badge" title="Delivery date: ${o.delivery_date}">${days_late}d late</span>` : ''}
 						${is_orphan && !is_overdue ? `<span class="ta-orphan-badge" title="Was on truck ${frappe.utils.escape_html(o.orphaned_from_truck)} — needs reassignment">Reassign</span>` : ''}
 						${is_submitted && !is_overdue && !is_orphan ? `<span class="ta-submitted-badge" title="Submitted order — needs truck assignment">Needs Truck</span>` : ''}
 						${not_picked ? '<span class="ta-warn-badge" title="Call not picked">!</span>' : ''}
 						${is_orphan ? `<div style="font-size:10px;color:#b45309;margin-top:1px;">Prev truck: ${frappe.utils.escape_html(o.orphaned_from_truck)}</div>` : ''}
-						${is_overdue && o.delivery_date ? `<div style="font-size:10px;color:#ef4444;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
 						${is_submitted && o.delivery_date && !is_overdue && !is_orphan ? `<div style="font-size:10px;color:#7c3aed;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
 					</td>
 					<td title="${frappe.utils.escape_html(o.customer)}">
