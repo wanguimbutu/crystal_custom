@@ -91,10 +91,16 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: submitted orders always show (truck may have been dismantled);
-    # date filter only applies to draft orders so old confirmed orders are never hidden.
+    # Unassigned orders: submitted orders always show (truck may have been dismantled).
+    # Also surfaces "limbo" orders — custom_truck_closed=1 but not yet delivered —
+    # which fall through both the assigned and unassigned filters otherwise.
+    # Date filter only applies to draft orders so old confirmed orders are never hidden.
     unassigned = frappe.db.sql(f"""
-        SELECT DISTINCT {select_cols}, so.status AS so_status
+        SELECT DISTINCT
+            {select_cols},
+            so.status AS so_status,
+            CASE WHEN IFNULL(so.custom_truck_closed, 0) = 1
+                 THEN so.custom_truck_number ELSE '' END AS orphaned_from_truck
         FROM `tabSales Order` so {sp_join}
         LEFT JOIN `tabCustomer` c ON so.customer = c.name
         WHERE so.docstatus IN (0, 1)
@@ -102,7 +108,11 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
           AND so.status NOT IN ('Completed', 'Closed')
           {sp_region}
           AND (so.docstatus = 1 OR (1=1 {date_where}))
-          AND (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
+          AND (
+              (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
+              OR (IFNULL(so.custom_truck_closed, 0) = 1
+                  AND IFNULL(so.per_delivered, 0) < 100)
+          )
         ORDER BY so.docstatus DESC, so.transaction_date DESC
         LIMIT 1000
     """, params, as_dict=1)

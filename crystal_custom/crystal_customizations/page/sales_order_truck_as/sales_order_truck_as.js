@@ -650,12 +650,13 @@ close_margin_panel() {
 				</td>
 			</tr>`;
 
-			// Sort: overdue first, then submitted-needs-truck, then normal
+			// Sort: overdue → orphan (needs reassign) → submitted-needs-truck → normal
 			const _today = frappe.datetime.get_today();
 			grp.sort((a, b) => {
-				const _overdue = o => o.delivery_date && o.delivery_date < _today && !parseFloat(o.per_delivered) && !parseFloat(o.per_billed);
+				const _overdue   = o => o.delivery_date && o.delivery_date < _today && !parseFloat(o.per_delivered) && !parseFloat(o.per_billed);
+				const _orphan    = o => !!(o.orphaned_from_truck);
 				const _submitted = o => parseInt(o.docstatus) === 1;
-				const rank = o => _overdue(o) ? 0 : _submitted(o) ? 1 : 2;
+				const rank = o => _overdue(o) ? 0 : _orphan(o) ? 1 : _submitted(o) ? 2 : 3;
 				return rank(a) - rank(b);
 			});
 
@@ -664,6 +665,7 @@ close_margin_panel() {
 				const checked       = this.selected_orders.has(o.name);
 				const is_pf         = o.custom_is_pre_fulfillment == 1;
 				const is_submitted  = parseInt(o.docstatus) === 1;
+				const is_orphan     = !!(o.orphaned_from_truck);   // had a truck, truck closed, not delivered
 				const today         = frappe.datetime.get_today();
 				const is_overdue    = o.delivery_date && o.delivery_date < today
 					&& !parseFloat(o.per_delivered || 0)
@@ -672,17 +674,19 @@ close_margin_panel() {
 					? Math.ceil((new Date(today) - new Date(o.delivery_date)) / 86400000)
 					: 0;
 				html += `
-				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${is_overdue ? ' ta-row-overdue' : ''}${is_submitted && !is_overdue ? ' ta-row-submitted' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
+				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${is_overdue ? ' ta-row-overdue' : ''}${is_orphan && !is_overdue ? ' ta-row-orphan' : ''}${is_submitted && !is_overdue && !is_orphan ? ' ta-row-submitted' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
 					<td class="ta-td-chk">
 						<input type="checkbox" class="ta-order-chk" data-order="${o.name}" ${checked ? 'checked' : ''}>
 					</td>
 					<td>
 						<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
 						${is_overdue ? `<span class="ta-overdue-badge" title="Delivery date: ${o.delivery_date}">${days_late}d late</span>` : ''}
-						${is_submitted && !is_overdue ? `<span class="ta-submitted-badge" title="Submitted order — needs truck assignment">Needs Truck</span>` : ''}
+						${is_orphan && !is_overdue ? `<span class="ta-orphan-badge" title="Was on truck ${frappe.utils.escape_html(o.orphaned_from_truck)} — needs reassignment">Reassign</span>` : ''}
+						${is_submitted && !is_overdue && !is_orphan ? `<span class="ta-submitted-badge" title="Submitted order — needs truck assignment">Needs Truck</span>` : ''}
 						${not_picked ? '<span class="ta-warn-badge" title="Call not picked">!</span>' : ''}
+						${is_orphan ? `<div style="font-size:10px;color:#b45309;margin-top:1px;">Prev truck: ${frappe.utils.escape_html(o.orphaned_from_truck)}</div>` : ''}
 						${is_overdue && o.delivery_date ? `<div style="font-size:10px;color:#ef4444;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
-						${is_submitted && o.delivery_date && !is_overdue ? `<div style="font-size:10px;color:#7c3aed;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
+						${is_submitted && o.delivery_date && !is_overdue && !is_orphan ? `<div style="font-size:10px;color:#7c3aed;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
 					</td>
 					<td title="${frappe.utils.escape_html(o.customer)}">
 						<div style="display:flex; justify-content:space-between; align-items:center;">
@@ -2357,6 +2361,9 @@ ${driver_cols}
 		.ta-row-submitted { border-left: 3px solid #7c3aed !important; }
 		.ta-row-submitted td { background: #faf5ff !important; }
 		.ta-row-submitted:hover td { background: #ede9fe !important; }
+		.ta-row-orphan { border-left: 3px solid #d97706 !important; }
+		.ta-row-orphan td { background: #fffbeb !important; }
+		.ta-row-orphan:hover td { background: #fef3c7 !important; }
 		.ta-row-pf td { background: #f0fdfa !important; }
 		.ta-row-pf:hover td { background: #ccfbf1 !important; }
 		.ta-amt { text-align: right; font-family: monospace; }
@@ -2385,6 +2392,17 @@ ${driver_cols}
 		.ta-submitted-badge {
 			display: inline-block;
 			background: #7c3aed;
+			color: #fff;
+			border-radius: 3px;
+			padding: 0 5px;
+			font-size: 11px;
+			font-weight: 700;
+			margin-left: 4px;
+			vertical-align: middle;
+		}
+		.ta-orphan-badge {
+			display: inline-block;
+			background: #d97706;
 			color: #fff;
 			border-radius: 3px;
 			padding: 0 5px;
