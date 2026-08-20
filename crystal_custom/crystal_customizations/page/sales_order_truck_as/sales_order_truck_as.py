@@ -91,18 +91,19 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         LIMIT 500
     """, params, as_dict=1)
 
-    # Unassigned orders: apply status + date filter so only open, actionable work appears
+    # Unassigned orders: submitted orders always show (truck may have been dismantled);
+    # date filter only applies to draft orders so old confirmed orders are never hidden.
     unassigned = frappe.db.sql(f"""
-        SELECT DISTINCT {select_cols}
+        SELECT DISTINCT {select_cols}, so.status AS so_status
         FROM `tabSales Order` so {sp_join}
         LEFT JOIN `tabCustomer` c ON so.customer = c.name
         WHERE so.docstatus IN (0, 1)
           AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
           AND so.status NOT IN ('Completed', 'Closed')
           {sp_region}
-          {date_where}
+          AND (so.docstatus = 1 OR (1=1 {date_where}))
           AND (so.custom_truck_number IS NULL OR so.custom_truck_number = '')
-        ORDER BY so.transaction_date DESC
+        ORDER BY so.docstatus DESC, so.transaction_date DESC
         LIMIT 1000
     """, params, as_dict=1)
 

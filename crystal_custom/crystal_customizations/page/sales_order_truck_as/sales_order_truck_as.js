@@ -650,37 +650,39 @@ close_margin_panel() {
 				</td>
 			</tr>`;
 
-			// Sort overdue orders to the top of each group
+			// Sort: overdue first, then submitted-needs-truck, then normal
+			const _today = frappe.datetime.get_today();
 			grp.sort((a, b) => {
-				const today = frappe.datetime.get_today();
-				const a_overdue = a.delivery_date && a.delivery_date < today && !parseFloat(a.per_delivered) && !parseFloat(a.per_billed);
-				const b_overdue = b.delivery_date && b.delivery_date < today && !parseFloat(b.per_delivered) && !parseFloat(b.per_billed);
-				if (a_overdue && !b_overdue) return -1;
-				if (!a_overdue && b_overdue) return 1;
-				return 0;
+				const _overdue = o => o.delivery_date && o.delivery_date < _today && !parseFloat(o.per_delivered) && !parseFloat(o.per_billed);
+				const _submitted = o => parseInt(o.docstatus) === 1;
+				const rank = o => _overdue(o) ? 0 : _submitted(o) ? 1 : 2;
+				return rank(a) - rank(b);
 			});
 
 			grp.forEach(o => {
-				const not_picked = o.custom_call_not_picked === 1;
-				const checked    = this.selected_orders.has(o.name);
-				const is_pf      = o.custom_is_pre_fulfillment == 1;
-				const today      = frappe.datetime.get_today();
-				const is_overdue = o.delivery_date && o.delivery_date < today
+				const not_picked    = o.custom_call_not_picked === 1;
+				const checked       = this.selected_orders.has(o.name);
+				const is_pf         = o.custom_is_pre_fulfillment == 1;
+				const is_submitted  = parseInt(o.docstatus) === 1;
+				const today         = frappe.datetime.get_today();
+				const is_overdue    = o.delivery_date && o.delivery_date < today
 					&& !parseFloat(o.per_delivered || 0)
 					&& !parseFloat(o.per_billed    || 0);
-				const days_late  = is_overdue
+				const days_late     = is_overdue
 					? Math.ceil((new Date(today) - new Date(o.delivery_date)) / 86400000)
 					: 0;
 				html += `
-				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${is_overdue ? ' ta-row-overdue' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
+				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${is_overdue ? ' ta-row-overdue' : ''}${is_submitted && !is_overdue ? ' ta-row-submitted' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
 					<td class="ta-td-chk">
 						<input type="checkbox" class="ta-order-chk" data-order="${o.name}" ${checked ? 'checked' : ''}>
 					</td>
 					<td>
 						<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
 						${is_overdue ? `<span class="ta-overdue-badge" title="Delivery date: ${o.delivery_date}">${days_late}d late</span>` : ''}
+						${is_submitted && !is_overdue ? `<span class="ta-submitted-badge" title="Submitted order — needs truck assignment">Needs Truck</span>` : ''}
 						${not_picked ? '<span class="ta-warn-badge" title="Call not picked">!</span>' : ''}
 						${is_overdue && o.delivery_date ? `<div style="font-size:10px;color:#ef4444;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
+						${is_submitted && o.delivery_date && !is_overdue ? `<div style="font-size:10px;color:#7c3aed;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
 					</td>
 					<td title="${frappe.utils.escape_html(o.customer)}">
 						<div style="display:flex; justify-content:space-between; align-items:center;">
@@ -2352,6 +2354,9 @@ ${driver_cols}
 		.ta-row-overdue { border-left: 3px solid #ef4444 !important; }
 		.ta-row-overdue td { background: #fff5f5 !important; }
 		.ta-row-overdue:hover td { background: #fee2e2 !important; }
+		.ta-row-submitted { border-left: 3px solid #7c3aed !important; }
+		.ta-row-submitted td { background: #faf5ff !important; }
+		.ta-row-submitted:hover td { background: #ede9fe !important; }
 		.ta-row-pf td { background: #f0fdfa !important; }
 		.ta-row-pf:hover td { background: #ccfbf1 !important; }
 		.ta-amt { text-align: right; font-family: monospace; }
@@ -2369,6 +2374,17 @@ ${driver_cols}
 		.ta-overdue-badge {
 			display: inline-block;
 			background: #ef4444;
+			color: #fff;
+			border-radius: 3px;
+			padding: 0 5px;
+			font-size: 11px;
+			font-weight: 700;
+			margin-left: 4px;
+			vertical-align: middle;
+		}
+		.ta-submitted-badge {
+			display: inline-block;
+			background: #7c3aed;
 			color: #fff;
 			border-radius: 3px;
 			padding: 0 5px;
