@@ -1,3 +1,10 @@
+## [1.35.2](https://github.com/wanguimbutu/crystal_custom/compare/v1.35.1...v1.35.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **truck-assignment:** surface orphaned orders from closed/dismantled trucks ([bb6b996](https://github.com/wanguimbutu/crystal_custom/commit/bb6b9969e8bd6b672cd9040577484dcad6d0b565))
+
 ## [1.35.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.35.0...v1.35.1) (2026-08-20)
 
 
