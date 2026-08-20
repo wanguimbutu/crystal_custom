@@ -794,13 +794,17 @@ close_margin_panel() {
 	}
 
 	_render_trucks(all_orders) {
-		if (!this.available_trucks.length) return '';
+		// Only show trucks that currently have orders — stale/empty trucks are hidden.
+		const active_trucks = this.available_trucks.filter(t =>
+			all_orders.some(o => o.custom_truck_number === t.truck_number)
+		);
+		if (!active_trucks.length) return '';
 
 		// Truck bulk action bar
 		const sel_t = this.selected_trucks.size;
 		let html = '';
 		if (sel_t) {
-			const sel_truck_objs = this.available_trucks.filter(t => this.selected_trucks.has(t.truck_number));
+			const sel_truck_objs = active_trucks.filter(t => this.selected_trucks.has(t.truck_number));
 			const sel_t_orders   = all_orders.filter(o => o.custom_truck_number && this.selected_trucks.has(o.custom_truck_number));
 			const sel_t_weight   = sel_truck_objs.reduce((s, t) => {
 				return s + all_orders.filter(o => o.custom_truck_number === t.truck_number).reduce((ws, o) => ws + (o.total_net_weight || 0), 0);
@@ -823,7 +827,7 @@ close_margin_panel() {
 
 		html += '<div class="ta-trucks-grid">';
 
-		this.available_trucks.forEach(truck => {
+		active_trucks.forEach(truck => {
 			const truck_orders = all_orders.filter(o => o.custom_truck_number === truck.truck_number);
 			const total_weight = truck_orders.reduce((s, o) => s + (o.total_net_weight || 0), 0);
 			const total_value  = truck_orders.reduce((s, o) => s + (o.grand_total || 0), 0);
