@@ -382,10 +382,7 @@ close_margin_panel() {
 				const seen   = new Set(truck_rows.map(o => o.name));
 				const merged = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
 
-				// Exclude Order Confirmed orders with no truck (planning is done)
-				this.orders = merged.filter(o =>
-					o.workflow_state !== 'Order Confirmed' || !!o.custom_truck_number
-				);
+				this.orders = merged;
 
 				// Seed any newly-seen truck numbers, restoring saved metadata
 				let seeded_new_trip_id = false;
