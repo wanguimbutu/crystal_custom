@@ -1,3 +1,10 @@
+## [1.35.1](https://github.com/wanguimbutu/crystal_custom/compare/v1.35.0...v1.35.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **truck-assignment:** show submitted orders needing truck regardless of date filter ([7825ca4](https://github.com/wanguimbutu/crystal_custom/commit/7825ca4690658e7409c39ccc5e1258c1bb742212))
+
 # [1.35.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.34.0...v1.35.0) (2026-08-20)
 
 
