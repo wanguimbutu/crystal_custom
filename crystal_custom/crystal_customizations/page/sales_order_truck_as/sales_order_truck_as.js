@@ -672,7 +672,7 @@ close_margin_panel() {
 					&& !parseFloat(o.per_delivered || 0)
 					&& !parseFloat(o.per_billed    || 0);
 				html += `
-				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${is_overdue ? ' ta-row-overdue' : ''}${is_orphan && !is_overdue ? ' ta-row-orphan' : ''}${is_submitted && !is_overdue && !is_orphan ? ' ta-row-submitted' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
+				<tr class="ta-row${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
 					<td class="ta-td-chk">
 						<input type="checkbox" class="ta-order-chk" data-order="${o.name}" ${checked ? 'checked' : ''}>
 					</td>
@@ -2350,16 +2350,6 @@ ${driver_cols}
 		.ta-group-meta { margin-left: 10px; color: #94a3b8; font-weight: normal; }
 		.ta-row td { padding: 10px !important; vertical-align: middle !important; font-size: 13px; }
 		.ta-row:hover { background: #f8fafc !important; }
-		.ta-row-warn { border-left: 3px solid #f59e0b !important; }
-		.ta-row-overdue { border-left: 3px solid #ef4444 !important; }
-		.ta-row-overdue td { background: #fff5f5 !important; }
-		.ta-row-overdue:hover td { background: #fee2e2 !important; }
-		.ta-row-submitted { border-left: 3px solid #7c3aed !important; }
-		.ta-row-submitted td { background: #faf5ff !important; }
-		.ta-row-submitted:hover td { background: #ede9fe !important; }
-		.ta-row-orphan { border-left: 3px solid #d97706 !important; }
-		.ta-row-orphan td { background: #fffbeb !important; }
-		.ta-row-orphan:hover td { background: #fef3c7 !important; }
 		.ta-row-pf td { background: #f0fdfa !important; }
 		.ta-row-pf:hover td { background: #ccfbf1 !important; }
 		.ta-amt { text-align: right; font-family: monospace; }
