@@ -1,3 +1,10 @@
+# [1.35.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.34.0...v1.35.0) (2026-08-20)
+
+
+### Features
+
+* **truck-assignment:** highlight overdue orders with no delivery note or invoice ([51853ec](https://github.com/wanguimbutu/crystal_custom/commit/51853ecc9901b5894b8da7dcc7956c871ce33fe6))
+
 # [1.34.0](https://github.com/wanguimbutu/crystal_custom/compare/v1.33.3...v1.34.0) (2026-08-12)
 
 
