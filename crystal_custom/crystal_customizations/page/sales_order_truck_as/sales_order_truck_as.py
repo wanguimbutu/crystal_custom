@@ -118,6 +118,36 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
     return {'assigned': [dict(r) for r in assigned], 'unassigned': [dict(r) for r in unassigned]}
 
 @frappe.whitelist()
+def debug_order_visibility(order_name):
+    """Temporary debug: return raw field values + which query conditions fail for an order."""
+    row = frappe.db.sql("""
+        SELECT name, docstatus, status, workflow_state,
+               custom_truck_number, custom_truck_closed,
+               IFNULL(per_delivered, 0) AS per_delivered,
+               IFNULL(per_billed, 0)    AS per_billed,
+               transaction_date, delivery_date,
+               custom_delivery_region
+        FROM `tabSales Order`
+        WHERE name = %(name)s
+    """, {'name': order_name}, as_dict=1)
+    if not row:
+        return {'error': 'order not found'}
+    o = row[0]
+    tn = (o.custom_truck_number or '').strip()
+    tc = int(o.custom_truck_closed or 0)
+    pd = float(o.per_delivered or 0)
+    return {
+        'raw': dict(o),
+        'in_assigned_candidate': bool(tn and tc != 1),
+        'in_unassigned_candidate': bool(
+            (not tn) or (tc == 1 and pd < 100)
+        ),
+        'status_excluded': o.status in ('Completed', 'Closed'),
+        'docstatus_excluded': o.docstatus not in (0, 1),
+        'wf_excluded': (o.docstatus == 0 and (o.workflow_state or '') == 'Cancelled'),
+    }
+
+@frappe.whitelist()
 def calculate_route_proxy(coordinates_json):
     coordinates = frappe.parse_json(coordinates_json) if isinstance(coordinates_json, str) else coordinates_json
     try:
