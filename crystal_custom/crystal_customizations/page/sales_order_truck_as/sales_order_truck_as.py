@@ -24,12 +24,10 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         if has_pf else '0 AS custom_is_pre_fulfillment'
     )
 
-    WF = ('Proceed To Order', 'Pending Finance Approval', 'Pending Customer Order Reconfirmation', 'Order Confirmed')
-
     # Build optional SP join / where clause
     sp_join  = ''
     sp_where = ''
-    params   = {'wf': WF}
+    params   = {}
     if sps:
         sp_join  = 'INNER JOIN `tabSales Team` st ON st.parent = so.name AND st.parenttype = "Sales Order"'
         sp_ph    = ', '.join([f'%(sp{i})s' for i in range(len(sps))])
@@ -82,7 +80,7 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         FROM `tabSales Order` so {sp_join}
         LEFT JOIN `tabCustomer` c ON so.customer = c.name
         WHERE so.docstatus IN (0, 1)
-          AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
+          AND (so.docstatus = 1 OR IFNULL(so.workflow_state, '') != 'Cancelled')
           {sp_region}
           AND so.custom_truck_number IS NOT NULL
           AND so.custom_truck_number != ''
@@ -104,7 +102,7 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         FROM `tabSales Order` so {sp_join}
         LEFT JOIN `tabCustomer` c ON so.customer = c.name
         WHERE so.docstatus IN (0, 1)
-          AND (so.docstatus = 1 OR so.workflow_state IN %(wf)s)
+          AND (so.docstatus = 1 OR IFNULL(so.workflow_state, '') != 'Cancelled')
           AND so.status NOT IN ('Completed', 'Closed')
           {sp_region}
           AND (so.docstatus = 1 OR (1=1 {date_where}))
