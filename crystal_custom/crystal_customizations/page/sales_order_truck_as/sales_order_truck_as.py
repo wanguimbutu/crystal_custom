@@ -39,6 +39,9 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
 
     select_cols = f"""
     so.name, so.customer, so.customer_name, so.transaction_date,
+    so.delivery_date,
+    IFNULL(so.per_delivered, 0) AS per_delivered,
+    IFNULL(so.per_billed,    0) AS per_billed,
     so.grand_total, so.custom_delivery_region, so.owner,
     so.custom_truck_number, so.total_net_weight,
     IFNULL(so.custom_call_not_picked, 0) AS custom_call_not_picked,

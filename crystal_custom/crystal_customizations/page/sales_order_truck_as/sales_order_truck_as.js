@@ -650,18 +650,37 @@ close_margin_panel() {
 				</td>
 			</tr>`;
 
+			// Sort overdue orders to the top of each group
+			grp.sort((a, b) => {
+				const today = frappe.datetime.get_today();
+				const a_overdue = a.delivery_date && a.delivery_date < today && !parseFloat(a.per_delivered) && !parseFloat(a.per_billed);
+				const b_overdue = b.delivery_date && b.delivery_date < today && !parseFloat(b.per_delivered) && !parseFloat(b.per_billed);
+				if (a_overdue && !b_overdue) return -1;
+				if (!a_overdue && b_overdue) return 1;
+				return 0;
+			});
+
 			grp.forEach(o => {
 				const not_picked = o.custom_call_not_picked === 1;
 				const checked    = this.selected_orders.has(o.name);
 				const is_pf      = o.custom_is_pre_fulfillment == 1;
+				const today      = frappe.datetime.get_today();
+				const is_overdue = o.delivery_date && o.delivery_date < today
+					&& !parseFloat(o.per_delivered || 0)
+					&& !parseFloat(o.per_billed    || 0);
+				const days_late  = is_overdue
+					? Math.ceil((new Date(today) - new Date(o.delivery_date)) / 86400000)
+					: 0;
 				html += `
-				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
+				<tr class="ta-row${not_picked ? ' ta-row-warn' : ''}${is_overdue ? ' ta-row-overdue' : ''}${checked ? ' ta-row-selected' : ''}${is_pf ? ' ta-row-pf' : ''}" data-order="${o.name}">
 					<td class="ta-td-chk">
 						<input type="checkbox" class="ta-order-chk" data-order="${o.name}" ${checked ? 'checked' : ''}>
 					</td>
 					<td>
 						<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
+						${is_overdue ? `<span class="ta-overdue-badge" title="Delivery date: ${o.delivery_date}">${days_late}d late</span>` : ''}
 						${not_picked ? '<span class="ta-warn-badge" title="Call not picked">!</span>' : ''}
+						${is_overdue && o.delivery_date ? `<div style="font-size:10px;color:#ef4444;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
 					</td>
 					<td title="${frappe.utils.escape_html(o.customer)}">
 						<div style="display:flex; justify-content:space-between; align-items:center;">
@@ -2330,12 +2349,26 @@ ${driver_cols}
 		.ta-row td { padding: 10px !important; vertical-align: middle !important; font-size: 13px; }
 		.ta-row:hover { background: #f8fafc !important; }
 		.ta-row-warn { border-left: 3px solid #f59e0b !important; }
+		.ta-row-overdue { border-left: 3px solid #ef4444 !important; }
+		.ta-row-overdue td { background: #fff5f5 !important; }
+		.ta-row-overdue:hover td { background: #fee2e2 !important; }
 		.ta-row-pf td { background: #f0fdfa !important; }
 		.ta-row-pf:hover td { background: #ccfbf1 !important; }
 		.ta-amt { text-align: right; font-family: monospace; }
 		.ta-warn-badge {
 			display: inline-block;
 			background: #f59e0b;
+			color: #fff;
+			border-radius: 3px;
+			padding: 0 5px;
+			font-size: 11px;
+			font-weight: 700;
+			margin-left: 4px;
+			vertical-align: middle;
+		}
+		.ta-overdue-badge {
+			display: inline-block;
+			background: #ef4444;
 			color: #fff;
 			border-radius: 3px;
 			padding: 0 5px;
