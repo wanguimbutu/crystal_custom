@@ -104,6 +104,8 @@ def get_truck_assignment_orders(from_date=None, to_date=None, sales_persons_json
         WHERE so.docstatus IN (0, 1)
           AND (so.docstatus = 1 OR IFNULL(so.workflow_state, '') != 'Cancelled')
           AND so.status NOT IN ('Completed', 'Closed')
+          AND IFNULL(so.per_delivered, 0) = 0
+          AND IFNULL(so.per_billed, 0) = 0
           {sp_region}
           AND (1=1 {date_where})
           AND (
