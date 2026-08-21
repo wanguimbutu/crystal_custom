@@ -669,8 +669,6 @@ close_margin_panel() {
 					</td>
 					<td>
 						<a href="/app/sales-order/${o.name}" target="_blank">${o.name}</a>
-						${is_orphan && !is_overdue ? `<span class="ta-orphan-badge" title="Was on truck ${frappe.utils.escape_html(o.orphaned_from_truck)} — needs reassignment">Reassign</span>` : ''}
-						${is_submitted && !is_overdue && !is_orphan ? `<span class="ta-submitted-badge" title="Submitted order — needs truck assignment">Needs Truck</span>` : ''}
 						${not_picked ? '<span class="ta-warn-badge" title="Call not picked">!</span>' : ''}
 						${is_orphan ? `<div style="font-size:10px;color:#b45309;margin-top:1px;">Prev truck: ${frappe.utils.escape_html(o.orphaned_from_truck)}</div>` : ''}
 						${is_submitted && o.delivery_date && !is_overdue && !is_orphan ? `<div style="font-size:10px;color:#7c3aed;margin-top:1px;">Due: ${frappe.datetime.str_to_user(o.delivery_date)}</div>` : ''}
