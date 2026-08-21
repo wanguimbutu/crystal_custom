@@ -12,8 +12,6 @@ class TruckAssignmentManager {
 		this.page = page;
 		this.orders = [];
 		this.available_trucks = [];
-		this.current_page = 1;
-		this.page_size = 50;
 		this.search_term = '';
 		this.selected_orders = new Set();
 		this.selected_trucks = new Set();
@@ -54,7 +52,7 @@ class TruckAssignmentManager {
 				this._regions.add(v);
 				setTimeout(() => this.page.fields_dict.delivery_region.set_value(''), 50);
 				this._render_region_pills();
-				this.current_page = 1; this.load_data();
+				this.load_data();
 			},
 		});
 		this._region_pills_wrap = $('<div class="region-pills-wrap"></div>').appendTo(this.page.page_form);
@@ -77,7 +75,7 @@ class TruckAssignmentManager {
 			placeholder: 'Customer or order no…',
 			change: () => {
 				this.search_term = this.page.fields_dict.search_query.get_value() || '';
-				this.current_page = 1;
+				
 				this.render_view();
 			},
 		});
@@ -408,7 +406,7 @@ close_margin_panel() {
 				// Fetch customer locations then render
 				const customers = [...new Set(this.orders.map(o => o.customer).filter(Boolean))];
 				if (!customers.length) {
-					this._fetch_vehicle_capacities(() => { this.current_page = 1; this.render_view(); });
+					this._fetch_vehicle_capacities(() => { this.render_view(); });
 					return;
 				}
 				frappe.call({
@@ -423,12 +421,12 @@ close_margin_panel() {
 						const loc_map = {};
 						(rc.message || []).forEach(c => { loc_map[c.name] = c.custom_location || ''; });
 						this.orders.forEach(o => { o.custom_location = loc_map[o.customer] || ''; });
-						this._fetch_vehicle_capacities(() => { this.current_page = 1; this.render_view(); });
+						this._fetch_vehicle_capacities(() => { this.render_view(); });
 					},
-					error: () => { this._fetch_vehicle_capacities(() => { this.current_page = 1; this.render_view(); }); },
+					error: () => { this._fetch_vehicle_capacities(() => { this.render_view(); }); },
 				});
 			},
-			error: () => { this.current_page = 1; this.render_view(); },
+			error: () => { this.render_view(); },
 		});
 	}
 
@@ -555,16 +553,9 @@ close_margin_panel() {
 			return '<div class="ta-empty">All orders have been assigned to trucks.</div>';
 		}
 
-		const total_pages = Math.ceil(all_orders.length / this.page_size) || 1;
-		if (this.current_page > total_pages) this.current_page = total_pages;
-		const page_orders = all_orders.slice(
-			(this.current_page - 1) * this.page_size,
-			this.current_page * this.page_size
-		);
-
 		// Group by delivery region, sorted A-Z, unspecified last
 		const groups = {};
-		page_orders.forEach(o => {
+		all_orders.forEach(o => {
 			const key = o.custom_delivery_region || '__none__';
 			if (!groups[key]) groups[key] = [];
 			groups[key].push(o);
@@ -719,21 +710,8 @@ close_margin_panel() {
 		});
 
 		html += `</tbody></table>
-		${this._pagination_html(all_orders.length)}
 		</div>`;
 		return html;
-	}
-
-	_pagination_html(total) {
-		if (total <= this.page_size) return '';
-		const total_pages = Math.ceil(total / this.page_size);
-		const start = (this.current_page - 1) * this.page_size + 1;
-		const end   = Math.min(this.current_page * this.page_size, total);
-		return `<div class="ta-pg-bar">
-			<button class="btn btn-xs btn-default ta-pg-prev" ${this.current_page <= 1 ? 'disabled' : ''}>&lsaquo; Prev</button>
-			<span class="ta-pg-info">Showing ${start}–${end} of ${total} &nbsp;·&nbsp; Page ${this.current_page} of ${total_pages}</span>
-			<button class="btn btn-xs btn-default ta-pg-next" ${this.current_page >= total_pages ? 'disabled' : ''}>Next &rsaquo;</button>
-		</div>`;
 	}
 
 	_state_badge(state) {
@@ -1091,15 +1069,6 @@ close_margin_panel() {
 			if (e.key === 'Enter') $(this).trigger('change');
 		});
 
-		// Pagination
-		this.container.find('.ta-pg-prev').on('click', () => {
-			if (this.current_page > 1) { this.current_page--; this.render_view(); }
-		});
-		this.container.find('.ta-pg-next').on('click', () => {
-			const unassigned = this.get_filtered_orders().filter(o => !o.custom_truck_number);
-			const tp = Math.ceil(unassigned.length / this.page_size);
-			if (this.current_page < tp) { this.current_page++; this.render_view(); }
-		});
 
 		this.container.find('.btn-unassign').off('click').on('click', function () {
 			self._set_truck($(this).data('order'), '');
@@ -2174,7 +2143,7 @@ ${driver_cols}
 		this._region_pills_wrap.find('.rg-rm').on('click', function () {
 			self._regions.delete($(this).data('rg'));
 			self._render_region_pills();
-			self.current_page = 1; self.render_view();
+			 self.render_view();
 		});
 	}
 
@@ -2593,18 +2562,6 @@ ${driver_cols}
 		.ta-closed-toggle:hover { background: #f1f5f9; color: #475569; }
 		.ta-closed-orders-list { border-top: 1px solid #f1f5f9; }
 
-		/* Pagination */
-		.ta-pg-bar {
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			gap: 14px;
-			padding: 12px 16px;
-			border-top: 1px solid #e2e8f0;
-			background: #f8fafc;
-		}
-		.ta-pg-info { font-size: 13px; color: #64748b; }
-		.ta-pg-bar .btn { min-width: 70px; }
 
 		/* GPS badges */
 		.ta-gps-badge {
