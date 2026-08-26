@@ -359,7 +359,7 @@ class OrderFulfillmentManager {
 	_render_trucks_subtabs(all_trucks) {
 		if (!all_trucks.length) {
 			return `<div class="alert alert-info" style="margin-top:20px;">
-				<strong>No active trucks with assigned orders</strong> — assign orders to trucks in the Truck Assignment page first.
+				<strong>No active trucks with assigned orders</strong> — assign orders to trucks in the <a href="/app/sales-order-truck-as-v2">Truck Assignment</a> page first.
 			</div>`;
 		}
 

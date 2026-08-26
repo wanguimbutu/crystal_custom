@@ -250,7 +250,7 @@ class SalesOrderStatusPage {
 			'Proceed To Order':                      { label: 'Order Manager',    url: '/app/sales-order-manager' },
 			'Pending Finance Approval':              { label: 'Finance Approval', url: '/app/finance-approval-man' },
 			'Pending Customer Order Reconfirmation': { label: 'Order Confirmation', url: '/app/customer-order-confi' },
-			'Order Confirmed':                       { label: 'Truck Assignment', url: '/app/sales-order-truck-as' },
+			'Order Confirmed':                       { label: 'Truck Assignment', url: '/app/sales-order-truck-as-v2' },
 		};
 		return map[workflow_state] || null;
 	}

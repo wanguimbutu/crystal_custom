@@ -1,0 +1,123 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "autoname": "field:truck_number",
+ "creation": "2026-08-26 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "truck_number",
+  "driver_name",
+  "vehicle_type",
+  "col_break_1",
+  "status",
+  "trip_id",
+  "active_plan",
+  "dismantled_on"
+ ],
+ "fields": [
+  {
+   "bold": 1,
+   "fieldname": "truck_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Truck Number",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "driver_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Driver Name"
+  },
+  {
+   "fieldname": "vehicle_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Vehicle Type",
+   "options": "Vehicle Type"
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nDismantled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "trip_id",
+   "fieldtype": "Data",
+   "label": "Current Trip ID",
+   "read_only": 1
+  },
+  {
+   "description": "The Draft Crystal Truck Plan currently accumulating this truck's next trip.",
+   "fieldname": "active_plan",
+   "fieldtype": "Link",
+   "label": "Active Trip Plan",
+   "options": "Crystal Truck Plan",
+   "read_only": 1
+  },
+  {
+   "fieldname": "dismantled_on",
+   "fieldtype": "Datetime",
+   "label": "Dismantled On",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crystal Customizations",
+ "name": "Crystal Truck",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [
+  {
+   "color": "Green",
+   "title": "Active"
+  },
+  {
+   "color": "Gray",
+   "title": "Dismantled"
+  }
+ ],
+ "title_field": "truck_number",
+ "track_changes": 1
+}
