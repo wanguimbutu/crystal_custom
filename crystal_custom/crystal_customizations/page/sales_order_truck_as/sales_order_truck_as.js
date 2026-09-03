@@ -499,13 +499,18 @@ close_margin_panel() {
 	}
 
 	_save_truck_meta() {
-		const data = this.available_trucks.map(t => ({
-			truck_number: t.truck_number,
-			driver_name:  t.driver_name  || '',
-			capacity_kg:  t.capacity_kg  != null ? t.capacity_kg : 5000,
-			trip_id:      t.trip_id      || '',
-			plan_name:    t.plan_name    || '',
-		}));
+		// Only persist trucks with current orders — prevents the metadata blob from
+		// growing unboundedly as old trips accumulate across sessions.
+		const active_nums = new Set(this.orders.map(o => o.custom_truck_number).filter(Boolean));
+		const data = this.available_trucks
+			.filter(t => active_nums.has(t.truck_number))
+			.map(t => ({
+				truck_number: t.truck_number,
+				driver_name:  t.driver_name  || '',
+				capacity_kg:  t.capacity_kg  != null ? t.capacity_kg : 5000,
+				trip_id:      t.trip_id      || '',
+				plan_name:    t.plan_name    || '',
+			}));
 		// Update in-memory saved_meta so subsequent seeds in load_data() use fresh values
 		this.saved_meta = {};
 		data.forEach(t => { this.saved_meta[t.truck_number] = t; });

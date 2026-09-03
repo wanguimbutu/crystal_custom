@@ -1,8 +1,39 @@
 import frappe
 import json
+import os
 import requests
 from frappe.utils import flt
 from frappe import _
+
+
+# ---------------------------------------------------------------------------
+# Private-file helpers for truck metadata
+# tabDefaultValue.defvalue is TEXT (~64 KB) and overflows when many trucks
+# accumulate across sessions. A private file has no practical size limit.
+# ---------------------------------------------------------------------------
+
+def _truck_meta_path():
+    return frappe.get_site_path('private', 'files', 'crystal_truck_meta.json')
+
+
+def _read_truck_meta():
+    path = _truck_meta_path()
+    if os.path.exists(path):
+        with open(path) as f:
+            return f.read()
+    # One-time migration from the old frappe.defaults key
+    legacy = frappe.db.get_default('crystal_truck_meta')
+    if legacy:
+        _write_truck_meta(legacy)
+        return legacy
+    return '[]'
+
+
+def _write_truck_meta(data_json):
+    path = _truck_meta_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write(data_json)
 
 CRYSTAL_API_BASE_URL = "https://crystal-api.crystalapps.dev"
 CRYSTAL_API_INTERNAL_SECRET = frappe.conf.get("crystal_api_internal_secret")
@@ -371,14 +402,13 @@ def close_truck_orders(order_names_json):
 @frappe.whitelist()
 def save_truck_meta(trucks_json):
     """Persist truck metadata (driver name, capacity) so it survives page reloads."""
-    frappe.db.set_default('crystal_truck_meta', trucks_json)
-    frappe.db.commit()
+    _write_truck_meta(trucks_json)
     return True
 
 @frappe.whitelist()
 def get_truck_meta():
     """Return previously saved truck metadata as a JSON string."""
-    return frappe.db.get_default('crystal_truck_meta') or '[]'
+    return _read_truck_meta()
 
 @frappe.whitelist()
 def save_closed_trucks(closed_trucks_json):
@@ -657,7 +687,7 @@ def check_and_auto_close_trucks():
         return []
 
     existing_closed = json.loads(frappe.db.get_default('crystal_closed_trucks') or '[]')
-    existing_meta   = json.loads(frappe.db.get_default('crystal_truck_meta')    or '[]')
+    existing_meta   = json.loads(_read_truck_meta())
 
     import random, string
     def _gen_trip_id():
@@ -749,7 +779,7 @@ def check_and_auto_close_trucks():
 
     # Cap KV cache at 50 entries — older records live permanently in Crystal Truck Plans
     frappe.db.set_default('crystal_closed_trucks', json.dumps(existing_closed[:50]))
-    frappe.db.set_default('crystal_truck_meta',    json.dumps(existing_meta))
+    _write_truck_meta(json.dumps(existing_meta))
     frappe.db.commit()
     return auto_closed
 
