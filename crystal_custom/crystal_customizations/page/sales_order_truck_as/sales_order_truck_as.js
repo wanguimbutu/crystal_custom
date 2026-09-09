@@ -21,10 +21,13 @@ class TruckAssignmentManager {
 		this._sps = new Set();
 		this._regions = new Set();
 		this.profitability_threshold = 33;
+		this._refresh_timer = null;
+		this._last_sync_time = null;
 		this.setup_page();
 		this.load_trucks_from_orders();
 		this._fetch_fleet_settings();
 		this.vehicle_capacity_map = {};
+		this._start_auto_refresh();
 	}
 
 	// ── Toolbar ───────────────────────────────────────────────────────────────
@@ -257,8 +260,44 @@ this.margin_panel.find('.btn-close-margin-panel, .nexus-margin-backdrop').on('cl
             }
         }
     });
-	
+
 }
+
+	_start_auto_refresh() {
+		if (this._refresh_timer) clearInterval(this._refresh_timer);
+		this._refresh_timer = setInterval(() => {
+			const has_focus      = this.container && this.container.find('input:focus, textarea:focus').length > 0;
+			const has_selections = this.selected_orders.size > 0 || this.selected_trucks.size > 0;
+			if (!has_focus && !has_selections) {
+				this._silent_refresh();
+			}
+		}, 45000);
+	}
+
+	_silent_refresh() {
+		const from = this.page.fields_dict.from_date.get_value();
+		const to   = this.page.fields_dict.to_date.get_value();
+		frappe.call({
+			method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_assignment_orders',
+			args: {
+				from_date:          from || null,
+				to_date:            to   || null,
+				sales_persons_json: this._sps.size    ? JSON.stringify([...this._sps])     : null,
+				regions_json:       this._regions.size ? JSON.stringify([...this._regions]) : null,
+			},
+			callback: (r) => {
+				const result       = r.message || { assigned: [], unassigned: [] };
+				const truck_rows   = result.assigned   || [];
+				const unassigned_rows = result.unassigned || [];
+				const seen   = new Set(truck_rows.map(o => o.name));
+				const merged = [...truck_rows, ...unassigned_rows.filter(o => !seen.has(o.name))];
+				merged.forEach(o => { if (o.orphaned_from_truck) o.custom_truck_number = ''; });
+				this.orders = merged;
+				this._last_sync_time = new Date();
+				this.render_view();
+			},
+		});
+	}
 
 open_margin_panel() {
     this.page.wrapper.find('.nexus-margin-panel').addClass('active');
@@ -403,6 +442,8 @@ close_margin_panel() {
 				});
 				if (seeded_new_trip_id) this._save_truck_meta();
 
+				this._last_sync_time = new Date();
+
 				// Fetch customer locations then render
 				const customers = [...new Set(this.orders.map(o => o.customer).filter(Boolean))];
 				if (!customers.length) {
@@ -455,6 +496,13 @@ close_margin_panel() {
 		const total_val  = orders.reduce((s, o) => s + (o.grand_total || 0), 0);
 		const trucks_used = new Set(assigned.map(o => o.custom_truck_number)).size;
 
+		const sync_label = this._last_sync_time
+			? (() => {
+				const secs = Math.round((Date.now() - this._last_sync_time) / 1000);
+				return secs < 5 ? 'just now' : secs < 60 ? `${secs}s ago` : `${Math.round(secs/60)}m ago`;
+			})()
+			: '';
+
 		let html = `
 		<div class="ta-kpi-row">
 			${this._kpi('Total Orders',   orders.length,                '#667eea')}
@@ -462,6 +510,10 @@ close_margin_panel() {
 			${this._kpi('Assigned',       assigned.length,              '#10b981')}
 			${this._kpi('Total Value',    format_currency(total_val),   '#f59e0b')}
 			${this._kpi('Trucks Active',  trucks_used,                  '#8b5cf6')}
+		</div>
+		<div class="ta-live-bar">
+			<span class="ta-live-dot"></span> Live &nbsp;·&nbsp; synced ${sync_label}
+			<span style="color:#94a3b8;font-size:11px;margin-left:6px;">(auto-refreshes every 45s)</span>
 		</div>
 
 		${(this.available_trucks.length || this.closed_trucks.length) ? `
@@ -1116,21 +1168,29 @@ close_margin_panel() {
 				__('Dispatch {0} truck(s)? Their orders will be recorded in Trip Plans and the trucks will be ready for the next load.', [trucks.length]),
 				() => {
 					self.selected_trucks.clear();
-					// Dispatch sequentially so each confirm+manifest happens in order
-					const dispatch_next = (idx) => {
-						if (idx >= trucks.length) { self.load_data(); return; }
-						const tn = trucks[idx];
+
+					// Dispatch trucks one at a time, calling load_data() only once at the very end.
+					let idx = 0;
+					const dispatch_next = () => {
+						if (idx >= trucks.length) {
+							// All trucks done — refresh history then reload once
+							frappe.call({
+								method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_history',
+								callback: (hr) => { self.closed_trucks = hr.message || []; self.load_data(); },
+								error:    () => self.load_data(),
+							});
+							return;
+						}
+						const tn = trucks[idx++];
 						const truck_orders = self.orders.filter(o => o.custom_truck_number === tn);
 						if (truck_orders.length) {
 							self.download_manifest(tn);
-							self._close_truck_batch(tn, truck_orders);
-							// _close_truck_batch calls load_data; chain next after a brief wait
-							setTimeout(() => dispatch_next(idx + 1), 800);
+							self._close_truck_batch(tn, truck_orders, dispatch_next);
 						} else {
-							dispatch_next(idx + 1);
+							dispatch_next();
 						}
 					};
-					dispatch_next(0);
+					dispatch_next();
 				}
 			);
 		});
@@ -1544,7 +1604,7 @@ close_margin_panel() {
 		});
 	}
 
-	_close_truck_batch(truck_number, truck_orders) {
+	_close_truck_batch(truck_number, truck_orders, on_done) {
 		const truck_info  = this.available_trucks.find(t => t.truck_number === truck_number) || {};
 		const new_trip_id = this._gen_trip_id();
 
@@ -1588,19 +1648,20 @@ close_margin_panel() {
 
 			frappe.show_alert({ message: __('Trip dispatched for {0} — ready for next load', [truck_number]), indicator: 'green' });
 
-			// Trip history comes authoritatively from the submitted Crystal Truck
-			// Plan — but this.closed_trucks is only ever populated once, at initial
-			// page load via load_trucks_from_orders(). load_data() alone never
-			// touches it, so without this refetch a freshly dispatched trip stays
-			// invisible in the Trip History tab until a full page reload.
-			frappe.call({
-				method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_history',
-				callback: (hr) => {
-					this.closed_trucks = hr.message || [];
-					this.load_data();
-				},
-				error: () => this.load_data(),
-			});
+			if (on_done) {
+				// Caller manages the final reload (e.g., bulk dispatch chains multiple trucks)
+				on_done();
+			} else {
+				// Single dispatch: refresh trip history then reload
+				frappe.call({
+					method: 'crystal_custom.crystal_customizations.page.sales_order_truck_as.sales_order_truck_as.get_truck_history',
+					callback: (hr) => {
+						this.closed_trucks = hr.message || [];
+						this.load_data();
+					},
+					error: () => this.load_data(),
+				});
+			}
 		};
 
 		// 1. Batch-set custom_truck_closed=1 on all Sales Orders
@@ -2175,12 +2236,35 @@ ${driver_cols}
 			white-space: nowrap;
 		}
 
+		/* Live sync bar */
+		.ta-live-bar {
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			font-size: 11px;
+			color: #64748b;
+			margin-bottom: 12px;
+			margin-top: -10px;
+		}
+		.ta-live-dot {
+			width: 7px;
+			height: 7px;
+			border-radius: 50%;
+			background: #10b981;
+			display: inline-block;
+			animation: ta-pulse 2s ease-in-out infinite;
+		}
+		@keyframes ta-pulse {
+			0%, 100% { opacity: 1; }
+			50%       { opacity: 0.35; }
+		}
+
 		/* KPI row */
 		.ta-kpi-row {
 			display: grid;
 			grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 			gap: 16px;
-			margin-bottom: 24px;
+			margin-bottom: 8px;
 		}
 		.ta-kpi {
 			background: #fff;
